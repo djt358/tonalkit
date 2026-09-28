@@ -913,6 +913,7 @@ name = "tonekit-pack"
 version = "0.1.0"
 dependencies = [
  "approx",
+ "proptest",
  "serde",
  "serde_json",
  "thiserror 2.0.21",
