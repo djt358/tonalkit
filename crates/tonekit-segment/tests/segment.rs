@@ -2,7 +2,9 @@ use approx::assert_abs_diff_eq;
 use proptest::prelude::*;
 use tonekit_core::{EnergyTrack, F0Frame, F0Track, FrameRange, Nucleus};
 use tonekit_f0::{energy, F0Provider, Pyin};
-use tonekit_segment::{boundaries, nuclei, speech_region, speech_threshold, SegmentParams};
+use tonekit_segment::{
+    boundaries, boundaries_with, nuclei, speech_region, speech_threshold, SegmentParams,
+};
 use tonekit_testkit::{synth, Synth, SynthSpec, SynthSyllable};
 
 // --- Synthetic-speech helpers ------------------------------------------------------------------
@@ -405,19 +407,53 @@ fn close_peaks_merge_even_across_a_deep_dip() {
     assert_eq!(ns[0].frame, 20, "keeps the higher peak");
 }
 
+/// An f0 track with a pitch (`hz` Some) on exactly the frames where `pitched` is true, and
+/// `voiced_p` the same everywhere.
+fn pitch_where(len: usize, pitched: impl Fn(usize) -> bool, voiced_p: f32) -> F0Track {
+    F0Track {
+        provider: "hand".into(),
+        frames: (0..len)
+            .map(|i| F0Frame {
+                hz: pitched(i).then_some(150.0),
+                voiced_p,
+            })
+            .collect(),
+    }
+}
+
 #[test]
-fn nucleus_must_be_voiced_at_the_peak() {
+fn nucleus_needs_a_pitch_within_two_frames_of_the_peak() {
+    // R27: periodicity is `hz.is_some()` on any frame within +-2 of the peak, whatever `voiced_p`
+    // says. The peaks are at 20 and 40.
     let p = SegmentParams::default();
     let e = two_peaks(-20.0, -22.0, -50.0);
     let region = speech_region(&e, &p).unwrap();
-    let mut vp = vec![1.0; 100];
-    vp[40] = 0.49; // the second peak is unvoiced (voiced_p < 0.5) ...
-    vp[30] = 0.0; // ... and voicing elsewhere does not matter.
-    let ns = nuclei(&e, &voicing(&vp), &region, &p);
-    assert_eq!(ns.iter().map(|n| n.frame).collect::<Vec<_>>(), vec![20]);
-    // voiced_p exactly 0.5 counts as voiced.
-    vp[40] = 0.5;
-    assert_eq!(nuclei(&e, &voicing(&vp), &region, &p).len(), 2);
+    let frames = |f0: &F0Track| -> Vec<u32> {
+        nuclei(&e, f0, &region, &p)
+            .iter()
+            .map(|n| n.frame)
+            .collect()
+    };
+
+    // A pitch at 42 (two frames past the second peak) and around the first: both count, even
+    // though voiced_p is 0 everywhere.
+    let f0 = pitch_where(100, |i| (15..=22).contains(&i) || i == 42, 0.0);
+    assert_eq!(frames(&f0), vec![20, 40]);
+    // A pitch at 43 (three frames away) does not.
+    let f0 = pitch_where(100, |i| (15..=22).contains(&i) || i == 43, 0.0);
+    assert_eq!(frames(&f0), vec![20]);
+    // Pitch on the low side only (frame 38) counts the same way.
+    let f0 = pitch_where(100, |i| (15..=22).contains(&i) || i == 38, 0.0);
+    assert_eq!(frames(&f0), vec![20, 40]);
+    // voiced_p = 1 with no pitch anywhere is not periodicity.
+    assert!(frames(&pitch_where(100, |_| false, 1.0)).is_empty());
+    // A pitch elsewhere in the syllable, far from the peak, does not matter.
+    let f0 = pitch_where(
+        100,
+        |i| (15..=22).contains(&i) || (30..=36).contains(&i),
+        1.0,
+    );
+    assert_eq!(frames(&f0), vec![20]);
 }
 
 #[test]
@@ -518,28 +554,34 @@ fn dipping_contours_give_one_nucleus_and_the_edges_per_syllable_with_exact_voici
 }
 
 #[test]
-fn nuclei_stay_inside_syllables_under_pyin_on_dipping_contours() {
-    // Real pYIN: `voiced_p` sags below 0.5 through a fast dip or fall even where `hz` is right
-    // (the Task 3 caveat), so an energy peak there is "unvoiced" and its syllable may get no
-    // nucleus. What must hold regardless: nuclei never fall in gaps, never double up in a
-    // syllable, and the steady high syllable is found.
+fn dipping_utterance_under_real_pyin_has_three_nuclei_and_every_syllable_edge() {
+    // The Task 9 utterance with the f0 track production feeds this crate. pYIN's `voiced_p` sags
+    // below 0.5 through the fast fall of [5, 1] although `hz` is right; nuclei (R27) look at `hz`
+    // near the peak, and pause edges come from the energy, so all three syllables are found and
+    // every syllable start and end has a candidate.
     let r = run(&dipping_utterance());
-    let frames = &r.synth.syllable_frames;
-    let owners: Vec<usize> = r
+    let frames = r.synth.syllable_frames.clone();
+    let owners: Vec<Option<usize>> = r
         .nuclei
         .iter()
-        .map(|n| {
-            frames
-                .iter()
-                .position(|&(a, b)| (a..b).contains(&n.frame))
-                .unwrap_or_else(|| panic!("nucleus at {} is in a gap: {frames:?}", n.frame))
-        })
+        .map(|n| frames.iter().position(|&(a, b)| (a..b).contains(&n.frame)))
         .collect();
-    assert!(owners.windows(2).all(|w| w[0] < w[1]), "{owners:?}");
-    assert!(
-        owners.contains(&1),
-        "no nucleus in the steady syllable: {owners:?}"
+    assert_eq!(
+        owners,
+        vec![Some(0), Some(1), Some(2)],
+        "nuclei {:?} for syllables {frames:?}",
+        r.nuclei
     );
+    for &(a, b) in &frames {
+        for edge in [a, b] {
+            assert!(
+                r.boundaries.iter().any(|&x| x.abs_diff(edge) <= 2),
+                "no boundary near syllable edge {edge}: {:?}",
+                r.boundaries
+            );
+        }
+    }
+    assert!(r.boundaries.len() <= 4 * r.nuclei.len() + 2);
 }
 
 // --- Boundaries --------------------------------------------------------------------------------
@@ -549,9 +591,10 @@ fn boundaries_are_edges_and_the_minimum_between_nuclei() {
     let e = two_peaks(-20.0, -22.0, -50.0);
     let region = range(12, 60);
     let ns = [nuc(20), nuc(40)];
-    // No voicing changes, no span over 35 frames: only the edges and the valley (frame 30).
+    // No voicing changes, no span over 35 frames: the edges, the valley (frame 30) and, since R27,
+    // frame 47, the last loud frame of the falling flank (threshold p10 + 10 = -50 dB).
     let b = boundaries(&e, &all_voiced(100), &region, &ns);
-    assert_eq!(b, vec![12, 30, 60]);
+    assert_eq!(b, vec![12, 30, 47, 60]);
 }
 
 #[test]
@@ -571,17 +614,20 @@ fn minimum_between_nuclei_is_the_middle_of_a_flat_floor() {
         ],
     );
     let b = boundaries(&e, &all_voiced(100), &range(10, 70), &[nuc(20), nuc(60)]);
-    assert_eq!(b.len(), 3, "{b:?}");
-    assert!(b[1].abs_diff(40) <= 2, "{b:?}");
+    // The floor's middle (40), plus (R27) the last loud frame before the silence and the first
+    // after it (29 and 52).
+    assert_eq!(b.len(), 5, "{b:?}");
+    assert!(b[2].abs_diff(40) <= 2, "{b:?}");
+    assert!(b[1].abs_diff(30) <= 2 && b[3].abs_diff(51) <= 2, "{b:?}");
 }
 
 #[test]
 fn voicing_crossings_are_boundaries() {
     let e = two_peaks(-20.0, -22.0, -50.0);
     let mut vp = vec![0.0; 100];
-    vp[20..45].fill(0.9); // voiced 20..45: onset at frame 20, offset at frame 45
+    vp[20..40].fill(0.9); // voiced 20..40: onset at frame 20, offset at frame 40
     let b = boundaries(&e, &voicing(&vp), &range(12, 60), &[nuc(20), nuc(40)]);
-    assert_eq!(b, vec![12, 20, 30, 45, 60]);
+    assert_eq!(b, vec![12, 20, 30, 40, 47, 60]); // 47: pause edge (R27)
 }
 
 #[test]
@@ -591,7 +637,7 @@ fn voicing_crossings_outside_the_region_are_ignored() {
     vp[5..8].fill(0.9);
     vp[70..80].fill(0.9);
     let b = boundaries(&e, &voicing(&vp), &range(12, 60), &[nuc(20), nuc(40)]);
-    assert_eq!(b, vec![12, 30, 60]);
+    assert_eq!(b, vec![12, 30, 47, 60]); // 47: pause edge (R27), not a voicing edge
 }
 
 #[test]
@@ -645,7 +691,8 @@ fn long_spans_get_interior_minima() {
         ],
     );
     let b = boundaries(&short, &all_voiced(100), &range(5, 35), &[nuc(10)]);
-    assert_eq!(b, vec![5, 35]);
+    // Nothing at the dip near 17; 31 is the last loud frame before the energy leaves speech (R27).
+    assert_eq!(b, vec![5, 31, 35]);
 }
 
 #[test]
@@ -752,6 +799,79 @@ fn interior_minima_are_last_in_priority() {
     assert!(!b.contains(&60), "{b:?}");
 }
 
+/// Two 20-frame loud stretches (10..30 and 60..80) with silence between them.
+fn loud_pause_loud() -> EnergyTrack {
+    curve(
+        100,
+        &[
+            (0, -60.0),
+            (9, -60.0),
+            (12, -20.0),
+            (28, -20.0),
+            (31, -60.0),
+            (59, -60.0),
+            (62, -20.0),
+            (78, -20.0),
+            (81, -60.0),
+            (99, -60.0),
+        ],
+    )
+}
+
+#[test]
+fn pause_edges_are_boundaries_whatever_the_voicing() {
+    // R27: where the smoothed dB leaves and re-enters speech inside the region. No pitch at all.
+    let e = loud_pause_loud();
+    let b = boundaries(
+        &e,
+        &voicing(&[0.0; 100]),
+        &range(10, 80),
+        &[nuc(20), nuc(70)],
+    );
+    let near = |at: u32| b.iter().any(|&x| x.abs_diff(at) <= 2);
+    assert!(near(30) && near(60), "{b:?}");
+    assert_eq!(b.first(), Some(&10));
+    assert_eq!(b.last(), Some(&80));
+}
+
+#[test]
+fn pause_edges_outrank_voicing_edges_under_the_cap() {
+    // One nucleus allows 6 boundaries: 2 region edges, then the pause edges, then voicing edges.
+    // Voicing flickers on 12..28 with plenty of big crossings that must not push them out.
+    let e = loud_pause_loud();
+    let vp: Vec<f32> = (0..100)
+        .map(|i| {
+            if (12..28).contains(&i) && i % 3 == 0 {
+                0.9
+            } else {
+                0.1
+            }
+        })
+        .collect();
+    let b = boundaries(&e, &voicing(&vp), &range(10, 80), &[nuc(20)]);
+    assert!(b.len() <= 6, "{b:?}");
+    let near = |at: u32| b.iter().any(|&x| x.abs_diff(at) <= 2);
+    assert!(near(30) && near(60), "{b:?}");
+}
+
+#[test]
+fn boundaries_with_uses_the_callers_speech_margin() {
+    // With a margin of 50 dB nothing in this track is speech, so there are no pause edges;
+    // `boundaries` itself uses the default 10 dB.
+    let e = loud_pause_loud();
+    let f0 = all_voiced(100);
+    let ns = [nuc(20), nuc(70)];
+    let strict = SegmentParams {
+        speech_margin_db: 50.0,
+        ..Default::default()
+    };
+    let b = boundaries_with(&e, &f0, &range(10, 80), &ns, &strict);
+    assert_eq!(b.len(), 3, "{b:?}"); // edges and the floor between the nuclei
+    let b = boundaries_with(&e, &f0, &range(10, 80), &ns, &SegmentParams::default());
+    assert_eq!(b, boundaries(&e, &f0, &range(10, 80), &ns));
+    assert!(b.len() > 3, "{b:?}");
+}
+
 #[test]
 fn degenerate_regions_still_report_their_edges() {
     let e = EnergyTrack {
@@ -795,7 +915,8 @@ proptest! {
         let ns = nuclei(&e, &f0, &region, &p);
         for n in &ns {
             prop_assert!(n.frame >= region.start && n.frame < region.end);
-            prop_assert!(vp[n.frame as usize] >= 0.5);
+            let f = n.frame as usize;
+            prop_assert!((f.saturating_sub(2)..=(f + 2).min(len - 1)).any(|i| vp[i] >= 0.5));
             prop_assert!(n.strength_db >= margin - 1e-3);
         }
         for w in ns.windows(2) {

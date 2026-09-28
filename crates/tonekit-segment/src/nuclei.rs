@@ -4,14 +4,17 @@ use crate::region::floor_db;
 use crate::smooth::{frame, local_extrema, smoothed_db, Extremum};
 use crate::SegmentParams;
 
-/// `voiced_p` at or above this is voiced.
-const VOICED_P: f32 = 0.5;
+/// A peak is voiced if pYIN reports a pitch on any frame within this many frames of it.
+const VOICING_RADIUS: usize = 2;
 
 /// Syllable nuclei inside `region`: energy peaks that are voiced.
 ///
 /// A candidate is a local maximum of the 5-frame moving average of the frame dB, at or above the
-/// speech threshold (p10 dB plus `p.speech_margin_db`), with `voiced_p >= 0.5` at the peak frame
-/// itself (voicing elsewhere in the syllable is not required: pYIN can sag mid-contour).
+/// speech threshold (p10 dB plus `p.speech_margin_db`), with periodicity at the peak: some frame
+/// within 2 frames of it has `hz.is_some()` (ruling R27). `voiced_p` is deliberately not used
+/// here: pYIN's `voiced_p` sags below 0.5 through fast dips and falls while its pitch estimate
+/// (`hz`) stays right, and the flat energy inside a syllable makes the exact peak frame arbitrary.
+/// Voicing elsewhere in the syllable is not required.
 ///
 /// Candidates are then merged left to right. A candidate joins the nucleus before it when the
 /// smoothed minimum between them is above `min(peak_a, peak_b) - p.dip_db`, or when they are
@@ -39,7 +42,8 @@ pub fn nuclei(
         region.end as usize,
         Extremum::Max,
     ) {
-        let voiced = f0.frames.get(peak).is_some_and(|f| f.voiced_p >= VOICED_P);
+        let voiced = (peak.saturating_sub(VOICING_RADIUS)..=peak + VOICING_RADIUS)
+            .any(|i| f0.frames.get(i).is_some_and(|f| f.hz.is_some()));
         if s[peak] >= threshold && voiced {
             push_merging(&mut kept, peak, &s, p);
         }

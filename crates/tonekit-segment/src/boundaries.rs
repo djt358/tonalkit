@@ -1,6 +1,8 @@
 use tonekit_core::{EnergyTrack, F0Track, FrameRange, Nucleus};
 
+use crate::region::floor_db;
 use crate::smooth::{frame, local_extrema, smoothed_db, Extremum};
+use crate::SegmentParams;
 
 /// Boundaries at most this many frames apart count as one.
 const DEDUP_FRAMES: usize = 2;
@@ -9,6 +11,16 @@ const DEDUP_FRAMES: usize = 2;
 const LONG_SPAN_FRAMES: usize = 35;
 /// `voiced_p` at or above this is voiced.
 const VOICED_P: f32 = 0.5;
+
+/// [`boundaries_with`] under the default [`SegmentParams`].
+pub fn boundaries(
+    e: &EnergyTrack,
+    f0: &F0Track,
+    region: &FrameRange,
+    nuclei: &[Nucleus],
+) -> Vec<u32> {
+    boundaries_with(e, f0, region, nuclei, &SegmentParams::default())
+}
 
 /// Candidate syllable boundaries for the decoder to search over: sorted frame positions, unique,
 /// always including `region.start` and `region.end`, all inside the region.
@@ -19,19 +31,25 @@ const VOICED_P: f32 = 0.5;
 /// 1. the region edges;
 /// 2. the frame of minimum smoothed dB between each pair of adjacent `nuclei` (the middle of a
 ///    flat minimum);
-/// 3. the frames where `voiced_p` crosses 0.5 (the first frame of the new state), the biggest
+/// 3. the edges of interior pauses (ruling R27): wherever the frame dB crosses the speech
+///    threshold (p10 dB plus `p.speech_margin_db`) inside the region, the loud frame beside the
+///    crossing, i.e. the first frame of a loud run entering it and the last frame leaving it.
+///    That is the frame whose window straddles the syllable edge. These do not depend on
+///    voicing. The steepest crossing first;
+/// 4. the frames where `voiced_p` crosses 0.5 (the first frame of the new state), the biggest
 ///    change in `voiced_p` first;
-/// 4. interior local minima of the smoothed dB inside any span longer than 35 frames between
+/// 5. interior local minima of the smoothed dB inside any span longer than 35 frames between
 ///    consecutive boundaries found so far, deepest (most prominent) first.
 ///
 /// A boundary within 2 frames of a higher-priority one is dropped, and the list is capped at
 /// `4 * nuclei.len() + 2` by keeping the highest priorities first, so the edges and inter-nucleus
 /// minima always survive.
-pub fn boundaries(
+pub fn boundaries_with(
     e: &EnergyTrack,
     f0: &F0Track,
     region: &FrameRange,
     nuclei: &[Nucleus],
+    p: &SegmentParams,
 ) -> Vec<u32> {
     let s = smoothed_db(&e.db);
     let (start, end) = (region.start as usize, region.end as usize);
@@ -59,7 +77,27 @@ pub fn boundaries(
         }
     }
 
-    // 3. Voicing crossings, biggest jump first (earliest first among equals).
+    // 3. Pause edges: the first and last frame of each run of frames above the speech threshold,
+    // steepest first. Frame dB is used as it stands (as for the region itself): the 5-frame
+    // average smears an edge 2-3 frames into the silence, and in a short pause it would put the
+    // leaving and entering crossings a frame apart.
+    if let Some(threshold) = floor_db(e).map(|floor| floor + p.speech_margin_db) {
+        let db = |i: usize| e.db.get(i).copied().filter(|d| d.is_finite());
+        let loud = |i: usize| db(i).is_some_and(|d| d > threshold);
+        let mut edges: Vec<(usize, f32)> = (start.saturating_add(1)..end.min(e.db.len()))
+            .filter(|&i| loud(i - 1) != loud(i))
+            .map(|i| {
+                let jump = (db(i).unwrap_or(0.0) - db(i - 1).unwrap_or(0.0)).abs();
+                (if loud(i) { i } else { i - 1 }, jump)
+            })
+            .collect();
+        edges.sort_by(|a, b| b.1.total_cmp(&a.1).then(a.0.cmp(&b.0)));
+        for (at, _) in edges {
+            try_add(&mut kept, at, cap);
+        }
+    }
+
+    // 4. Voicing crossings, biggest jump first (earliest first among equals).
     let voiced_p = |i: usize| f0.frames.get(i).map_or(0.0, |f| f.voiced_p);
     let mut crossings: Vec<(usize, f32)> = (start.saturating_add(1)..end.min(f0.frames.len()))
         .filter(|&i| (voiced_p(i - 1) >= VOICED_P) != (voiced_p(i) >= VOICED_P))
@@ -71,7 +109,7 @@ pub fn boundaries(
         try_add(&mut kept, at, cap);
     }
 
-    // 4. Interior minima of long spans, most prominent first.
+    // 5. Interior minima of long spans, most prominent first.
     kept.sort_unstable();
     let mut minima: Vec<(usize, f32)> = kept
         .windows(2)
