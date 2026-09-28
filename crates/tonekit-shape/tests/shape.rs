@@ -1,0 +1,753 @@
+mod common;
+
+use approx::assert_abs_diff_eq;
+use common::*;
+use tonekit_core::{
+    AccentId, F0Frame, F0Track, FrameRange, MeasureIssue, Register, TbuSpan, ToneId, ToneShape,
+    CONTOUR_POINTS,
+};
+use tonekit_shape::*;
+use tonekit_testkit::register_for;
+
+// ---------------------------------------------------------------------------------------------
+// The brief's tests.
+// ---------------------------------------------------------------------------------------------
+
+#[test]
+fn level_high_maps_to_five() {
+    let s = shape_of(vec![5., 5.], 100., 200., 300.);
+    assert!(s.contour.iter().all(|c| (c - 5.0).abs() < 0.15));
+}
+
+#[test]
+fn dipping_has_interior_turning_point() {
+    let s = shape_of(vec![2., 1., 4.], 100., 200., 350.);
+    let tp = s.turning_point.unwrap();
+    assert!((tp - 0.5).abs() < 0.12 && s.curvature > 0.0);
+}
+
+#[test]
+fn falling_has_negative_slope() {
+    assert!(shape_of(vec![5., 1.], 100., 200., 300.).slope < 0.0);
+}
+
+#[test]
+fn extreme_registers_normalize() {
+    // Review Focus 1
+    let lo = shape_of(vec![3., 5.], 75., 140., 300.);
+    let hi = shape_of(vec![3., 5.], 180., 320., 300.);
+    for k in 0..10 {
+        assert!((lo.contour[k] - hi.contour[k]).abs() < 0.15);
+    }
+}
+
+#[test]
+fn short_syllable_partial() {
+    // Review Focus 5
+    let e = extract_of(vec![5., 1.], 70.);
+    assert!(e.issues.contains(&MeasureIssue::TooShort));
+}
+
+#[test]
+fn unvoiced_span_is_err() {
+    let track = F0Track {
+        frames: vec![
+            F0Frame {
+                hz: None,
+                voiced_p: 0.0
+            };
+            60
+        ],
+        provider: "truth".to_string(),
+    };
+    let span = TbuSpan {
+        start_frame: 10,
+        end_frame: 40,
+    };
+    let err = extract(&track, &span, &register_for(100., 200.)).unwrap_err();
+    assert_eq!(err, MeasureIssue::Unvoiced);
+}
+
+#[test]
+fn cold_register_widens_and_merge_weights() {
+    let r = cold_register(&[10.0, 12.0, 20.0], 3);
+    assert!(r.floor_st < 10.0 && r.ceil_st > 20.0 && is_cold(&r));
+    let m = merge_register(
+        &Register {
+            floor_st: 10.,
+            median_st: 15.,
+            ceil_st: 20.,
+            n_syllables: 30,
+        },
+        &[12., 17., 22.],
+        10,
+    );
+    approx::assert_abs_diff_eq!(m.n_syllables as f32, 40.0);
+    assert!(m.ceil_st > 20.0 && m.ceil_st < 22.0);
+}
+
+// ---------------------------------------------------------------------------------------------
+// style fitting
+// ---------------------------------------------------------------------------------------------
+
+fn shape_with(contour: Vec<f32>, range: f32) -> ToneShape {
+    ToneShape {
+        span: TbuSpan {
+            start_frame: 0,
+            end_frame: 30,
+        },
+        contour,
+        voiced_weights: vec![1.0; CONTOUR_POINTS],
+        onset: 0.0,
+        offset: 0.0,
+        mean: 0.0,
+        slope: 0.0,
+        curvature: 0.0,
+        turning_point: None,
+        range,
+        duration_ms: 300.0,
+        voiced_fraction: 1.0,
+        f0_confidence: 1.0,
+        phonation: None,
+    }
+}
+
+fn tone(id: &str) -> ToneId {
+    ToneId(id.to_string())
+}
+
+#[test]
+fn style_fit_averages_per_tone() {
+    let a: Vec<f32> = (0..CONTOUR_POINTS).map(|k| 2.0 + 0.2 * k as f32).collect();
+    let b: Vec<f32> = (0..CONTOUR_POINTS).map(|k| 3.0 + 0.4 * k as f32).collect();
+    let fits = vec![
+        (tone("2"), shape_with(a.clone(), 1.8)),
+        (tone("2"), shape_with(b.clone(), 3.6)),
+    ];
+    let p = fit_style(AccentId("cmn-standard".into()), &fits);
+    assert_eq!(p.accent, AccentId("cmn-standard".into()));
+    assert_eq!(p.tones.len(), 1);
+    assert_eq!(p.tones[0].tone, tone("2"));
+    assert_eq!(p.tones[0].n, 2);
+    for k in 0..CONTOUR_POINTS {
+        assert_abs_diff_eq!(p.tones[0].contour[k], 0.5 * (a[k] + b[k]), epsilon = 1e-6);
+    }
+    assert_abs_diff_eq!(p.mean_range, 2.7, epsilon = 1e-6);
+}
+
+#[test]
+fn style_fit_keeps_first_seen_tone_order_and_counts() {
+    let flat = |v: f32| vec![v; CONTOUR_POINTS];
+    let fits = vec![
+        (tone("3"), shape_with(flat(2.0), 1.0)),
+        (tone("1"), shape_with(flat(5.0), 0.0)),
+        (tone("3"), shape_with(flat(4.0), 2.0)),
+        (tone("3"), shape_with(flat(3.0), 3.0)),
+    ];
+    let p = fit_style(AccentId("cmn-TW".into()), &fits);
+    let ids: Vec<&str> = p.tones.iter().map(|t| t.tone.0.as_str()).collect();
+    assert_eq!(ids, ["3", "1"]);
+    assert_eq!((p.tones[0].n, p.tones[1].n), (3, 1));
+    assert_abs_diff_eq!(p.tones[0].contour[0], 3.0, epsilon = 1e-6);
+    assert_abs_diff_eq!(p.tones[1].contour[9], 5.0, epsilon = 1e-6);
+    // mean_range is over all fits, not per tone: (1 + 0 + 2 + 3) / 4.
+    assert_abs_diff_eq!(p.mean_range, 1.5, epsilon = 1e-6);
+}
+
+#[test]
+fn style_fit_of_nothing_is_empty() {
+    let p = fit_style(AccentId("cmn-standard".into()), &[]);
+    assert!(p.tones.is_empty());
+    assert_eq!(p.mean_range, 0.0);
+}
+
+// ---------------------------------------------------------------------------------------------
+// Conversions and voiced frames
+// ---------------------------------------------------------------------------------------------
+
+#[test]
+fn semitones_are_re_55_hz() {
+    assert_abs_diff_eq!(hz_to_st(55.0), 0.0, epsilon = 1e-6);
+    assert_abs_diff_eq!(hz_to_st(110.0), 12.0, epsilon = 1e-5);
+    assert_abs_diff_eq!(hz_to_st(220.0), 24.0, epsilon = 1e-5);
+    assert_abs_diff_eq!(hz_to_st(27.5), -12.0, epsilon = 1e-5);
+}
+
+#[test]
+fn chao_is_linear_and_unclamped() {
+    let r = Register {
+        floor_st: 10.0,
+        median_st: 14.0,
+        ceil_st: 18.0,
+        n_syllables: 100,
+    };
+    assert_abs_diff_eq!(st_to_chao(10.0, &r), 1.0, epsilon = 1e-6);
+    assert_abs_diff_eq!(st_to_chao(14.0, &r), 3.0, epsilon = 1e-6);
+    assert_abs_diff_eq!(st_to_chao(18.0, &r), 5.0, epsilon = 1e-6);
+    assert_abs_diff_eq!(st_to_chao(20.0, &r), 6.0, epsilon = 1e-6);
+    assert_abs_diff_eq!(st_to_chao(6.0, &r), -1.0, epsilon = 1e-6);
+}
+
+fn frame(hz: Option<f32>, voiced_p: f32) -> F0Frame {
+    F0Frame { hz, voiced_p }
+}
+
+fn track(frames: Vec<F0Frame>) -> F0Track {
+    F0Track {
+        frames,
+        provider: "test".to_string(),
+    }
+}
+
+#[test]
+fn voiced_semitones_needs_hz_and_probability() {
+    let t = track(vec![
+        frame(Some(110.0), 1.0),  // voiced
+        frame(None, 1.0),         // no f0
+        frame(Some(220.0), 0.49), // f0 but not voiced enough
+        frame(Some(220.0), 0.5),  // exactly at the threshold: voiced
+        frame(Some(55.0), 0.9),   // voiced
+    ]);
+    let st = voiced_semitones(&t, None);
+    assert_eq!(st.len(), 3);
+    assert_abs_diff_eq!(st[0], 12.0, epsilon = 1e-5);
+    assert_abs_diff_eq!(st[1], 24.0, epsilon = 1e-5);
+    assert_abs_diff_eq!(st[2], 0.0, epsilon = 1e-5);
+}
+
+#[test]
+fn voiced_semitones_region_is_half_open_and_clamped() {
+    let t = track(
+        (0..10)
+            .map(|i| frame(Some(55.0 * (1 + i) as f32), 1.0))
+            .collect(),
+    );
+    let r = |start, end| Some(FrameRange { start, end });
+    assert_eq!(voiced_semitones(&t, r(2, 5).as_ref()).len(), 3);
+    assert_abs_diff_eq!(
+        voiced_semitones(&t, r(1, 2).as_ref())[0],
+        12.0,
+        epsilon = 1e-5
+    );
+    assert_eq!(voiced_semitones(&t, r(8, 99).as_ref()).len(), 2);
+    assert!(voiced_semitones(&t, r(50, 60).as_ref()).is_empty());
+    assert!(voiced_semitones(&t, r(5, 5).as_ref()).is_empty());
+    assert!(voiced_semitones(&t, r(6, 3).as_ref()).is_empty());
+    assert_eq!(voiced_semitones(&t, None).len(), 10);
+}
+
+// ---------------------------------------------------------------------------------------------
+// Register
+// ---------------------------------------------------------------------------------------------
+
+#[test]
+fn cold_register_uses_interpolated_percentiles_plus_margin() {
+    // 101 evenly spaced values 0..=100: p5 = 5, p50 = 50, p95 = 95 exactly.
+    let st: Vec<f32> = (0..=100).map(|i| i as f32).collect();
+    let r = cold_register(&st, 7);
+    assert_abs_diff_eq!(r.floor_st, 3.0, epsilon = 1e-4);
+    assert_abs_diff_eq!(r.median_st, 50.0, epsilon = 1e-4);
+    assert_abs_diff_eq!(r.ceil_st, 97.0, epsilon = 1e-4);
+    assert_eq!(r.n_syllables, 7);
+    // The brief's three-point case: p5 = 10.2, p95 = 19.2 by linear interpolation.
+    let r = cold_register(&[20.0, 10.0, 12.0], 3);
+    assert_abs_diff_eq!(r.floor_st, 8.2, epsilon = 1e-4);
+    assert_abs_diff_eq!(r.median_st, 12.0, epsilon = 1e-4);
+    assert_abs_diff_eq!(r.ceil_st, 21.2, epsilon = 1e-4);
+}
+
+#[test]
+fn cold_register_of_nothing_is_the_speaker_agnostic_default() {
+    let r = cold_register(&[], 12);
+    assert_abs_diff_eq!(r.floor_st, hz_to_st(90.0), epsilon = 1e-5);
+    assert_abs_diff_eq!(r.median_st, hz_to_st(150.0), epsilon = 1e-5);
+    assert_abs_diff_eq!(r.ceil_st, hz_to_st(250.0), epsilon = 1e-5);
+    assert_eq!(r.n_syllables, 0);
+    assert!(is_cold(&r));
+}
+
+#[test]
+fn registers_keep_at_least_four_semitones() {
+    // A monotone speaker: p5 = p50 = p95, so ±2 st is exactly the minimum.
+    let r = cold_register(&[14.0; 20], 20);
+    assert!(r.ceil_st - r.floor_st >= 4.0);
+    assert_abs_diff_eq!(0.5 * (r.floor_st + r.ceil_st), 14.0, epsilon = 1e-4);
+    // Merging a narrow utterance into a narrow register cannot shrink it below 4 st either.
+    let narrow = Register {
+        floor_st: 13.0,
+        median_st: 14.0,
+        ceil_st: 17.0,
+        n_syllables: 5,
+    };
+    let m = merge_register(&narrow, &[15.0; 8], 8);
+    assert!(m.ceil_st - m.floor_st >= 4.0);
+    // A given register narrower than 4 st is widened symmetrically about its midpoint.
+    let tiny = Register {
+        floor_st: 14.0,
+        median_st: 14.5,
+        ceil_st: 15.0,
+        n_syllables: 100,
+    };
+    let m = merge_register(&tiny, &[14.5; 4], 4);
+    assert!(m.ceil_st - m.floor_st >= 4.0);
+    assert_abs_diff_eq!(0.5 * (m.floor_st + m.ceil_st), 14.5, epsilon = 1e-3);
+}
+
+#[test]
+fn merge_weight_is_capped_at_one_half() {
+    let base = Register {
+        floor_st: 10.0,
+        median_st: 15.0,
+        ceil_st: 20.0,
+        n_syllables: 2,
+    };
+    // u/(n+u) = 8/10 → capped at 0.5. New utterance: p5 = 20, p50 = 25, p95 = 30 (constant).
+    let m = merge_register(&base, &[20.0, 25.0, 30.0], 8);
+    let (p5, p50, p95) = (20.5, 25.0, 29.5);
+    assert_abs_diff_eq!(m.floor_st, 10.0 + 0.5 * (p5 - 10.0), epsilon = 1e-4);
+    assert_abs_diff_eq!(m.median_st, 15.0 + 0.5 * (p50 - 15.0), epsilon = 1e-4);
+    assert_abs_diff_eq!(m.ceil_st, 20.0 + 0.5 * (p95 - 20.0), epsilon = 1e-4);
+    assert_eq!(m.n_syllables, 10);
+}
+
+#[test]
+fn merge_of_nothing_only_counts_syllables() {
+    let base = Register {
+        floor_st: 10.0,
+        median_st: 15.0,
+        ceil_st: 20.0,
+        n_syllables: 12,
+    };
+    let m = merge_register(&base, &[], 6);
+    assert_eq!(
+        m,
+        Register {
+            n_syllables: 18,
+            ..base.clone()
+        }
+    );
+    // A fresh register merging nothing stays where it is.
+    let zero = Register {
+        n_syllables: 0,
+        ..base
+    };
+    assert_eq!(merge_register(&zero, &[], 0), zero);
+}
+
+#[test]
+fn merge_into_an_empty_register_takes_half_the_new_values() {
+    // n + u = 0 → w = 0.5 by decision.
+    let zero = Register {
+        floor_st: 0.0,
+        median_st: 10.0,
+        ceil_st: 20.0,
+        n_syllables: 0,
+    };
+    let m = merge_register(&zero, &[30.0; 5], 0);
+    assert_abs_diff_eq!(m.median_st, 20.0, epsilon = 1e-4);
+    assert_eq!(m.n_syllables, 0);
+}
+
+#[test]
+fn coldness_flips_at_thirty_syllables() {
+    let r = |n| Register {
+        floor_st: 0.0,
+        median_st: 5.0,
+        ceil_st: 10.0,
+        n_syllables: n,
+    };
+    assert!(is_cold(&r(0)));
+    assert!(is_cold(&r(29)));
+    assert!(!is_cold(&r(30)));
+    assert!(!is_cold(&r(400)));
+}
+
+// ---------------------------------------------------------------------------------------------
+// Extraction
+// ---------------------------------------------------------------------------------------------
+
+#[test]
+fn scalar_features_of_a_synthetic_syllable() {
+    let e = extract_of(vec![5., 1.], 300.);
+    let s = &e.shape;
+    assert!(e.issues.is_empty());
+    assert_eq!(s.contour.len(), CONTOUR_POINTS);
+    assert_eq!(s.voiced_weights.len(), CONTOUR_POINTS);
+    assert_eq!(s.phonation, None);
+    assert_eq!(
+        s.span,
+        TbuSpan {
+            start_frame: 20,
+            end_frame: 50
+        }
+    );
+    assert_eq!(s.duration_ms, 300.0);
+    assert_abs_diff_eq!(s.voiced_fraction, 1.0);
+    assert_abs_diff_eq!(s.f0_confidence, 1.0);
+    // Onset and offset are the contour ends; range and mean are those of the contour.
+    assert_eq!(s.onset, s.contour[0]);
+    assert_eq!(s.offset, s.contour[CONTOUR_POINTS - 1]);
+    let (min, max) = s
+        .contour
+        .iter()
+        .fold((f32::MAX, f32::MIN), |(lo, hi), &c| (lo.min(c), hi.max(c)));
+    assert_abs_diff_eq!(s.range, max - min, epsilon = 1e-6);
+    let mean = s.contour.iter().sum::<f32>() / CONTOUR_POINTS as f32;
+    assert_abs_diff_eq!(s.mean, mean, epsilon = 1e-5);
+    // A 5→1 fall across 300 ms is about −4/0.3 Chao per second, a bit shallower because the
+    // voiced part ends one frame before the truth does.
+    assert!(s.slope < -12.0 && s.slope > -15.0, "slope {}", s.slope);
+    assert!(s.range > 3.5);
+    assert!(s.voiced_weights.iter().all(|&w| w == 1.0));
+}
+
+#[test]
+fn slope_is_per_second_and_signed() {
+    let up = shape_of(vec![1., 5.], 100., 200., 400.);
+    let down = shape_of(vec![5., 1.], 100., 200., 400.);
+    assert!(up.slope > 9.0 && up.slope < 11.0, "slope {}", up.slope);
+    assert_abs_diff_eq!(up.slope, -down.slope, epsilon = 0.05);
+    assert_abs_diff_eq!(
+        shape_of(vec![3., 3.], 100., 200., 300.).slope,
+        0.0,
+        epsilon = 0.05
+    );
+}
+
+#[test]
+fn level_tone_has_no_turning_point_and_no_curvature() {
+    let s = shape_of(vec![3., 3.], 100., 200., 300.);
+    assert_eq!(s.turning_point, None);
+    assert_abs_diff_eq!(s.curvature, 0.0, epsilon = 0.05);
+    assert_abs_diff_eq!(s.range, 0.0, epsilon = 0.05);
+}
+
+#[test]
+fn monotone_contours_have_no_turning_point() {
+    for chao in [
+        vec![1., 5.],
+        vec![5., 1.],
+        vec![2., 3., 5.],
+        vec![5., 3., 1.],
+    ] {
+        let s = shape_of(chao.clone(), 100., 200., 320.);
+        assert_eq!(s.turning_point, None, "{chao:?}");
+    }
+}
+
+#[test]
+fn peak_is_a_turning_point_and_curves_downwards() {
+    let s = shape_of(vec![2., 5., 2.], 100., 200., 400.);
+    let tp = s.turning_point.expect("interior maximum");
+    assert!((tp - 0.5).abs() < 0.1, "tp {tp}");
+    assert!(s.curvature < 0.0);
+}
+
+#[test]
+fn turning_point_needs_half_a_chao_beyond_both_endpoints() {
+    // Dip of 0.3 Chao below the lower endpoint: not reported.
+    let shallow = shape_of(vec![3., 2.7, 3.], 100., 200., 400.);
+    assert_eq!(shallow.turning_point, None);
+    // 1.0 below both endpoints: reported.
+    assert!(shape_of(vec![3., 2., 3.], 100., 200., 400.)
+        .turning_point
+        .is_some());
+    // A dip that is deep relative to one endpoint but only 0.3 below the other is not reported.
+    assert_eq!(
+        shape_of(vec![3., 2.7, 4.5], 100., 200., 400.).turning_point,
+        None
+    );
+}
+
+#[test]
+fn turning_point_must_be_interior() {
+    // A dip to Chao 1 at u = 0.04 (knot 1 of 26), then a steady climb to 5: the minimum is real
+    // but inside the excluded first 10 % of the voiced part.
+    let mut early = vec![3.0_f32];
+    early.extend((0..25).map(|i| 1.0 + 4.0 * i as f32 / 24.0));
+    assert_eq!(
+        shape_of(early.clone(), 100., 200., 400.).turning_point,
+        None
+    );
+    // The mirror image: a fall to 1 and a jump back at the very end.
+    let late: Vec<f32> = early.into_iter().rev().collect();
+    assert_eq!(shape_of(late, 100., 200., 400.).turning_point, None);
+}
+
+#[test]
+fn turning_point_takes_the_larger_excursion_when_both_qualify() {
+    // W-ish: a shallow dip (to 2 from 3) at ~0.25 and a tall peak (to 5) at ~0.75.
+    let s = shape_of(vec![3., 2., 3., 5., 3.], 100., 200., 500.);
+    let tp = s.turning_point.expect("a turning point");
+    assert!((tp - 0.75).abs() < 0.1, "peak wins: tp {tp}");
+    // Swap which is larger: a deep dip (to 1) and a small bump (to 4).
+    let s = shape_of(vec![3., 1., 3., 4., 3.], 100., 200., 500.);
+    let tp = s.turning_point.expect("a turning point");
+    assert!((tp - 0.25).abs() < 0.1, "dip wins: tp {tp}");
+}
+
+#[test]
+fn a_creaky_middle_is_interpolated_and_lowers_the_voiced_weights() {
+    // A 40-frame voiced part (frames 10..50) whose middle 10 frames are unvoiced, on a straight
+    // 2→4 line.
+    let (floor, ceil) = (100.0_f32, 200.0_f32);
+    let reg = register_for(floor, ceil);
+    let chao_of = |j: usize| 2.0 + 2.0 * j as f32 / 39.0;
+    let frames: Vec<F0Frame> = (0..60)
+        .map(|i| {
+            if !(10..50).contains(&i) || (25..35).contains(&i) {
+                return F0Frame {
+                    hz: None,
+                    voiced_p: 0.0,
+                };
+            }
+            F0Frame {
+                hz: Some(tonekit_testkit::chao_to_hz(chao_of(i - 10), floor, ceil)),
+                voiced_p: 1.0,
+            }
+        })
+        .collect();
+    let t = F0Track {
+        frames,
+        provider: "truth".into(),
+    };
+    let span = TbuSpan {
+        start_frame: 5,
+        end_frame: 55,
+    };
+    let e = extract(&t, &span, &reg).unwrap();
+    let s = e.shape;
+    // The contour still runs straight through the hole...
+    for (k, c) in s.contour.iter().enumerate() {
+        let want = 2.0 + 2.0 * k as f32 / 9.0;
+        assert!((c - want).abs() < 0.12, "point {k}: {c} vs {want}");
+    }
+    // ...but the points in the hole say so.
+    assert!(s.voiced_weights[0] == 1.0 && s.voiced_weights[9] == 1.0);
+    assert!(s.voiced_weights[4] < 0.5 || s.voiced_weights[5] < 0.5);
+    assert!(s.voiced_weights.iter().all(|w| (0.0..=1.0).contains(w)));
+    assert!(s.voiced_weights.contains(&0.0));
+    // 30 voiced frames of a 50-frame span.
+    assert_abs_diff_eq!(s.voiced_fraction, 0.6, epsilon = 1e-6);
+    assert_eq!(s.duration_ms, 500.0);
+    // The voiced part (frames 10..50, holes included) is 400 ms: long enough, no issue.
+    assert!(e.issues.is_empty());
+}
+
+#[test]
+fn edge_unvoiced_frames_are_not_part_of_the_voiced_part() {
+    // Voicing only in frames 20..30 of a span 0..50: the contour covers exactly that.
+    let (floor, ceil) = (100.0_f32, 200.0_f32);
+    let frames: Vec<F0Frame> = (0..60)
+        .map(|i| {
+            if (20..30).contains(&i) {
+                F0Frame {
+                    hz: Some(tonekit_testkit::chao_to_hz(
+                        1.0 + (i - 20) as f32 * 4.0 / 9.0,
+                        floor,
+                        ceil,
+                    )),
+                    voiced_p: 0.9,
+                }
+            } else {
+                F0Frame {
+                    hz: None,
+                    voiced_p: 0.0,
+                }
+            }
+        })
+        .collect();
+    let t = F0Track {
+        frames,
+        provider: "x".into(),
+    };
+    let e = extract(
+        &t,
+        &TbuSpan {
+            start_frame: 0,
+            end_frame: 50,
+        },
+        &register_for(floor, ceil),
+    )
+    .unwrap();
+    assert_abs_diff_eq!(e.shape.contour[0], 1.0, epsilon = 0.05);
+    assert_abs_diff_eq!(e.shape.contour[9], 5.0, epsilon = 0.05);
+    assert_abs_diff_eq!(e.shape.voiced_fraction, 0.2, epsilon = 1e-6);
+    assert_abs_diff_eq!(e.shape.f0_confidence, 0.9, epsilon = 1e-6);
+    assert!(e.shape.voiced_weights.iter().all(|&w| w == 1.0));
+}
+
+#[test]
+fn too_short_is_exactly_below_eighty_milliseconds_of_voiced_part() {
+    let run = |n: u32| {
+        let frames: Vec<F0Frame> = (0..40)
+            .map(|i| {
+                if (10..10 + n).contains(&i) {
+                    F0Frame {
+                        hz: Some(150.0),
+                        voiced_p: 1.0,
+                    }
+                } else {
+                    F0Frame {
+                        hz: None,
+                        voiced_p: 0.0,
+                    }
+                }
+            })
+            .collect();
+        let t = F0Track {
+            frames,
+            provider: "x".into(),
+        };
+        extract(
+            &t,
+            &TbuSpan {
+                start_frame: 0,
+                end_frame: 40,
+            },
+            &register_for(100., 200.),
+        )
+        .unwrap()
+    };
+    assert_eq!(run(7).issues, vec![MeasureIssue::TooShort]);
+    assert!(run(8).issues.is_empty());
+    // The shape is still returned when too short (onset/offset terms are still usable).
+    assert_eq!(run(3).shape.contour.len(), CONTOUR_POINTS);
+    assert_eq!(run(3).issues, vec![MeasureIssue::TooShort]);
+}
+
+#[test]
+fn a_gap_inside_the_voiced_part_counts_towards_its_duration() {
+    // Two 4-frame islands 6 frames apart: the voiced part is 14 frames = 140 ms.
+    let frames: Vec<F0Frame> = (0..40)
+        .map(|i| {
+            if (10..14).contains(&i) || (20..24).contains(&i) {
+                F0Frame {
+                    hz: Some(150.0),
+                    voiced_p: 1.0,
+                }
+            } else {
+                F0Frame {
+                    hz: None,
+                    voiced_p: 0.0,
+                }
+            }
+        })
+        .collect();
+    let t = F0Track {
+        frames,
+        provider: "x".into(),
+    };
+    let e = extract(
+        &t,
+        &TbuSpan {
+            start_frame: 0,
+            end_frame: 40,
+        },
+        &register_for(100., 200.),
+    )
+    .unwrap();
+    assert!(e.issues.is_empty());
+    assert_abs_diff_eq!(e.shape.voiced_fraction, 8.0 / 40.0, epsilon = 1e-6);
+}
+
+#[test]
+fn fewer_than_three_voiced_frames_is_unvoiced() {
+    let mk = |voiced: &[usize]| {
+        let frames: Vec<F0Frame> = (0..30)
+            .map(|i| {
+                if voiced.contains(&i) {
+                    F0Frame {
+                        hz: Some(150.0),
+                        voiced_p: 1.0,
+                    }
+                } else {
+                    F0Frame {
+                        hz: None,
+                        voiced_p: 0.0,
+                    }
+                }
+            })
+            .collect();
+        let t = F0Track {
+            frames,
+            provider: "x".into(),
+        };
+        extract(
+            &t,
+            &TbuSpan {
+                start_frame: 0,
+                end_frame: 30,
+            },
+            &register_for(100., 200.),
+        )
+    };
+    assert_eq!(mk(&[]).unwrap_err(), MeasureIssue::Unvoiced);
+    assert_eq!(mk(&[5]).unwrap_err(), MeasureIssue::Unvoiced);
+    assert_eq!(mk(&[5, 20]).unwrap_err(), MeasureIssue::Unvoiced);
+    assert!(mk(&[5, 12, 20]).is_ok());
+}
+
+#[test]
+fn low_voicing_probability_frames_are_not_voiced() {
+    // f0 is present but voiced_p < 0.5 everywhere: unvoiced.
+    let frames: Vec<F0Frame> = (0..30)
+        .map(|_| F0Frame {
+            hz: Some(150.0),
+            voiced_p: 0.3,
+        })
+        .collect();
+    let t = F0Track {
+        frames,
+        provider: "x".into(),
+    };
+    let err = extract(
+        &t,
+        &TbuSpan {
+            start_frame: 0,
+            end_frame: 30,
+        },
+        &register_for(100., 200.),
+    )
+    .unwrap_err();
+    assert_eq!(err, MeasureIssue::Unvoiced);
+}
+
+#[test]
+fn degenerate_spans_are_unvoiced_not_panics() {
+    let c = case(vec![3., 3.], 100., 200., 300.);
+    let e = |start_frame, end_frame| {
+        extract(
+            &c.f0,
+            &TbuSpan {
+                start_frame,
+                end_frame,
+            },
+            &c.register,
+        )
+    };
+    assert_eq!(e(30, 30).unwrap_err(), MeasureIssue::Unvoiced);
+    assert_eq!(e(40, 30).unwrap_err(), MeasureIssue::Unvoiced);
+    assert_eq!(e(10_000, 10_010).unwrap_err(), MeasureIssue::Unvoiced);
+    // A span running past the end of the track is clamped to it.
+    assert!(e(20, 10_000).is_ok());
+}
+
+#[test]
+fn non_positive_or_non_finite_hz_never_yields_nan() {
+    let mut c = case(vec![3., 4.], 100., 200., 300.);
+    c.f0.frames[30].hz = Some(0.0);
+    c.f0.frames[31].hz = Some(f32::NAN);
+    c.f0.frames[32].hz = Some(-5.0);
+    let s = extract_case(&c).shape;
+    assert!(s.contour.iter().all(|x| x.is_finite()));
+    assert!(s.slope.is_finite() && s.curvature.is_finite() && s.mean.is_finite());
+    assert!(s.voiced_fraction < 1.0);
+}
+
+#[test]
+fn extraction_is_deterministic() {
+    let a = extract_of(vec![2., 1., 4.], 350.);
+    let b = extract_of(vec![2., 1., 4.], 350.);
+    assert_eq!(a, b);
+}
