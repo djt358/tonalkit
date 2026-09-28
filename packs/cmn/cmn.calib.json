@@ -1,0 +1,17 @@
+{
+  "temperature": 1.0,
+  "fusion": {
+    "beta0": 0.0,
+    "beta_acoustic": 1.0,
+    "beta_transcript": 0.5,
+    "beta_neural": 0.0,
+    "veto_cap": 0.05
+  },
+  "decode": {
+    "filler_per_frame": 0.03,
+    "unvoiced_syllable_llr": -3.0,
+    "null_bias": -2.0,
+    "dur_sigma": 0.4,
+    "default_rate_s": 0.22
+  }
+}
