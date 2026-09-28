@@ -22,8 +22,10 @@ fn as_u32(n: usize) -> u32 {
 /// - `intended_rank` is the 1-based position in `r.candidates`, which is sorted by llr descending.
 /// - `margin_llr` is the intended llr minus the larger of the best other candidate's llr and
 ///   `r.null_llr`; with no other candidates it is the intended llr minus `r.null_llr`.
-/// - `overall` is the minimum `p_correct` over syllables that were measured (`Full` or `Partial`),
-///   or `None` when no syllable was.
+/// - `overall` is the minimum `p_correct` over the syllables that count: those that were measured
+///   (`Full` or `Partial`) and those that carry a confusion hit (`heard_as` is `Some`), even if
+///   unmeasured, because a hit is a specific miss and the veto has already capped its `p_correct`.
+///   It is `None` only when no syllable is measured and none has a hit ("tone not checked").
 pub fn assemble(
     r: &DecodeResult,
     intended: &CandidateId,
@@ -65,7 +67,7 @@ pub fn assemble(
 
     let overall = syllables
         .iter()
-        .filter(|s| !matches!(s.measured, Measured::NotMeasured { .. }))
+        .filter(|s| !matches!(s.measured, Measured::NotMeasured { .. }) || s.heard_as.is_some())
         .map(|s| s.p_correct)
         .reduce(f32::min);
 

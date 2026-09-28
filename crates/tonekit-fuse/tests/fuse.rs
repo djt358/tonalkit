@@ -699,3 +699,78 @@ fn candidate_with_no_syllables_has_no_overall() {
     assert!(out.syllables.is_empty());
     assert_eq!(out.overall, None);
 }
+
+// ---------------------------------------------------------------------------------------------
+// `overall` and confusion-vetoed syllables that were not measured (controller ruling R19).
+// ---------------------------------------------------------------------------------------------
+
+#[test]
+fn overall_counts_a_confusion_vetoed_unmeasured_syllable_whisper_case() {
+    // Intended "shui3" whispered: the only syllable is NotMeasured, but the transcript is a
+    // confusion hit on 睡. That is a specific miss, not "tone not checked".
+    let r = decoded(vec![cand("shui3", 1.0, vec![fit(0.0, unmeasured())])], 0.0);
+    let external = vec![vec![confusion("4", "睡")]];
+    let out = run(&r, "shui3", &external).unwrap();
+    assert_eq!(out.syllables[0].measured, unmeasured());
+    assert_abs_diff_eq!(out.syllables[0].p_correct, 0.05, epsilon = 1e-7);
+    assert_eq!(out.syllables[0].heard_as.as_deref(), Some("睡"));
+    assert_eq!(out.overall, Some(out.syllables[0].p_correct));
+    assert_abs_diff_eq!(out.overall.unwrap(), 0.05, epsilon = 1e-7);
+}
+
+#[test]
+fn overall_counts_a_confusion_vetoed_unmeasured_syllable_mixed_case() {
+    // One confident measured syllable (0.9) and one unvoiced syllable with a confusion hit: the
+    // utterance must not pass on the strength of the first.
+    let r = decoded(
+        vec![cand(
+            "a",
+            1.0,
+            vec![fit(logit(0.9), Measured::Full), fit(-3.0, unmeasured())],
+        )],
+        0.0,
+    );
+    let external = vec![vec![], vec![confusion("2", "谁")]];
+    let out = run(&r, "a", &external).unwrap();
+    assert_abs_diff_eq!(out.syllables[0].p_correct, 0.9, epsilon = 1e-5);
+    assert_abs_diff_eq!(out.syllables[1].p_correct, 0.05, epsilon = 1e-7);
+    assert_abs_diff_eq!(out.overall.unwrap(), 0.05, epsilon = 1e-7);
+}
+
+#[test]
+fn overall_stays_none_for_unmeasured_syllables_without_a_confusion_hit() {
+    // Transcript evidence without a confusion hit (matched or not) does not make a syllable count:
+    // nothing was measured and nothing specific was heard, so the tone was not checked.
+    let r = decoded(
+        vec![cand(
+            "a",
+            1.0,
+            vec![fit(1.0, unmeasured()), fit(-2.0, unmeasured())],
+        )],
+        0.0,
+    );
+    let external = vec![vec![transcript(true)], vec![transcript(false)]];
+    let out = run(&r, "a", &external).unwrap();
+    assert!(out.syllables.iter().all(|s| s.heard_as.is_none()));
+    assert_eq!(out.overall, None);
+}
+
+#[test]
+fn overall_min_spans_measured_and_vetoed_unmeasured_syllables() {
+    // A hit on an unmeasured syllable joins the minimum without displacing a lower measured one.
+    let r = decoded(
+        vec![cand(
+            "a",
+            1.0,
+            vec![
+                fit(logit(0.01), Measured::Full),
+                fit(0.0, unmeasured()),
+                fit(logit(0.9), Measured::Full),
+            ],
+        )],
+        0.0,
+    );
+    let external = vec![vec![], vec![confusion("1", "书")], vec![]];
+    let out = run(&r, "a", &external).unwrap();
+    assert_abs_diff_eq!(out.overall.unwrap(), 0.01, epsilon = 1e-5);
+}
