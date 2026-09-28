@@ -98,6 +98,60 @@ fn clipping_and_snr() {
     assert!(snr_db(&energy(&noisy.pcm)) < snr_db(&energy(&synth(&spec(vec![5.0, 5.0], None)).pcm)));
 }
 
+// --- Timing: frame i must describe the signal around sample i * HOP ---------------------------
+
+/// Mean absolute pitch error in semitones over `a+3..b-3` of the first syllable, plus how many
+/// of those frames pYIN left unvoiced.
+fn mean_abs_st_error(s: &Synth, t: &tonekit_core::F0Track) -> (f32, usize) {
+    let (a, b) = s.syllable_frames[0];
+    let (mut sum, mut n, mut unvoiced_frames) = (0.0f32, 0usize, 0usize);
+    for i in (a + 3) as usize..(b - 3) as usize {
+        let tru = s.f0_truth[i].unwrap();
+        match t.frames[i].hz {
+            Some(est) => {
+                sum += 12.0 * (est / tru).log2().abs();
+                n += 1;
+            }
+            None => unvoiced_frames += 1,
+        }
+    }
+    (sum / n.max(1) as f32, unvoiced_frames)
+}
+
+#[test]
+fn steep_glides_are_not_lagged() {
+    // pYIN's YIN template is the first half of each 1024-sample frame, so left alone it describes
+    // the signal ~200 samples (12.5 ms) early in time, i.e. the track lags by 1.3 frames. On a
+    // 12 st glide over 400 ms that is a ~0.4 st error; with the lag compensated it is under 0.1.
+    for chao in [vec![1.0, 5.0], vec![5.0, 1.0]] {
+        let s = synth(&spec(chao.clone(), None));
+        let t = Pyin::default().track(&s.pcm);
+        let (err, unvoiced_frames) = mean_abs_st_error(&s, &t);
+        assert_eq!(
+            unvoiced_frames, 0,
+            "{chao:?}: unvoiced frames inside the syllable"
+        );
+        assert!(err < 0.1, "{chao:?}: mean |error| {err} st");
+    }
+}
+
+#[test]
+fn voicing_onset_lands_within_three_frames_of_truth() {
+    let s = synth(&spec(vec![3.0, 5.0], None));
+    let t = Pyin::default().track(&s.pcm);
+    let first_truth = s.f0_truth.iter().position(Option::is_some).unwrap();
+    let first_est = t
+        .frames
+        .iter()
+        .position(|f| f.hz.is_some() && f.voiced_p >= 0.5)
+        .expect("pYIN finds voicing");
+    // The testkit's 20 ms raised-cosine onset ramp is near-silent, which explains up to ~2 frames.
+    assert!(
+        (first_truth..=first_truth + 3).contains(&first_est),
+        "truth starts at frame {first_truth}, pYIN at {first_est}"
+    );
+}
+
 // --- Provider ----------------------------------------------------------------------------------
 
 #[test]

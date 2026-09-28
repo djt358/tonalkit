@@ -2,7 +2,9 @@
 //!
 //! Every later stage reads the same two frame-level tracks: an [`F0Track`](tonekit_core::F0Track)
 //! and an [`EnergyTrack`](tonekit_core::EnergyTrack). Both have exactly `pcm.len() / HOP + 1`
-//! frames; frame `i` is centred on sample `i * HOP` (10 ms per frame at 16 kHz).
+//! frames (10 ms per frame at 16 kHz); frame `i` describes the signal around sample `i * HOP`.
+//! The energy window is exactly centred there. [`Pyin`] matches it to within about +-0.3 frame
+//! over 80 to 300 Hz, after compensating the half-frame lag that the `pyin` crate has (see its docs).
 //!
 //! * [`F0Provider`] is the extension point; [`Pyin`] is the built-in provider. An external track
 //!   is brought to the right length with [`fit_length`].
