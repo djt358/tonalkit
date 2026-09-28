@@ -1,0 +1,7 @@
+/target
+/.superpowers/
+__pycache__/
+.venv/
+*.pyc
+/harness/.cache/
+/build/
