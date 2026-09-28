@@ -1,0 +1,6 @@
+artifact = "fixtures/l2.calib.json"
+note = "lists a verify source with no signoff"
+
+[[source]]
+id = "ompal"
+use = "L2 operating points"

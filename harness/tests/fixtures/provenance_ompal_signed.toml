@@ -1,0 +1,12 @@
+artifact = "fixtures/l2.calib.json"
+note = "lists a verify source that has a recorded signoff"
+
+[[source]]
+id = "ompal"
+use = "L2 operating points"
+
+[[signoff]]
+id = "ompal"
+by = "DJ"
+date = "2026-09-28"
+note = "terms confirmed with the corpus authors (fixture value)"
