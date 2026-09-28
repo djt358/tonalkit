@@ -179,7 +179,8 @@ impl LanguagePack {
     ///   posterior reaches the pack's `heard_threshold`.
     /// - `distance` and `component`: the best-matching target component; the distance is √d²
     ///   and uncalibrated.
-    /// - `deltas`: differences to that component, none under `LowSnr`.
+    /// - `deltas`: differences to that component: none under `LowSnr`, and only onset/offset
+    ///   ones under `TooShort` (ruling R26).
     /// - `measured`: `Full` with no issues, else `Partial` carrying them.
     ///
     /// A shape with non-finite numbers is uninformative: `llr_target` 0, every `loglik` at
@@ -265,7 +266,7 @@ impl LanguagePack {
             judgement.distance = Some(d2.sqrt().min(f64::from(f32::MAX)) as f32);
             judgement.component = Some(best.label.clone());
             if !issues.contains(&MeasureIssue::LowSnr) {
-                judgement.deltas = deltas::compute(x, best, s.widen);
+                judgement.deltas = deltas::compute(x, best, s.widen, !s.contour_term);
             }
         }
         Ok(judgement)

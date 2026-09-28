@@ -205,6 +205,16 @@ fn t3_creak_gap_not_penalized() {
             .abs()
             < 0.5
     );
+    // Added (R26 follow-up): the excused points also leave the distance to the best component
+    // (the full dip) at zero. With T3 creak counted as evidence it would be about 0.7.
+    let creaky = cmn()
+        .judge(&std_g(), &x, &target("3"), &ctx(Some("1"), true), &[])
+        .unwrap();
+    assert_eq!(
+        creaky.component.as_deref(),
+        Some("cmn-standard/t3-final-dip#0")
+    );
+    assert!(creaky.distance.unwrap() < 1e-3, "{:?}", creaky.distance);
 }
 
 #[test]
@@ -225,6 +235,16 @@ fn too_short_uses_endpoints_only() {
         .unwrap();
     assert!(j.llr_target > 0.0);
     assert!(matches!(j.measured, Measured::Partial { .. }));
+    // Added (R26 follow-up): the endpoints are exactly T4's, so with the interior ignored the
+    // distance is zero and the issue is carried through; with the mangled middle counted it
+    // would be several Chao.
+    assert!(j.distance.unwrap() < 1e-3, "{:?}", j.distance);
+    assert_eq!(
+        j.measured,
+        Measured::Partial {
+            issues: vec![MeasureIssue::TooShort]
+        }
+    );
 }
 
 #[test]
@@ -878,6 +898,92 @@ fn deltas_are_suppressed_under_low_snr_only() {
     for issue in [MeasureIssue::Clipped, MeasureIssue::ColdStartRegister] {
         assert!(deltas_of(vec![4.1, 5.], "1", &c, &[issue]).is_empty());
     }
+}
+
+#[test]
+fn too_short_gives_only_onset_and_offset_deltas() {
+    // Ruling R26 (spec §12): a TooShort syllable is compared on onset/offset only, so it earns no
+    // Turn* or Range deltas even when its turning point and range differ from the component's.
+    //
+    // Phrase-final T3, best component the full dip [2,1,4]. x has the dip's onset and offset but
+    // turns late (u = 6/9 against 4/9: z = 1.11) and is wider (3.87 against 2.89: z = 1.40).
+    let c = ctx(Some("1"), true);
+    let knots = vec![2., 2., 2., -0.3, 1., 4.];
+    let kinds = |x: &ToneShape, issues: &[MeasureIssue]| -> Vec<DeltaKind> {
+        cmn()
+            .judge(&std_g(), x, &target("3"), &c, issues)
+            .unwrap()
+            .deltas
+            .iter()
+            .map(|d| d.kind)
+            .collect()
+    };
+    let x = shape(knots);
+    assert!(x.turning_point.is_some());
+    // Without the issue both contour-derived deltas speak (range first: larger |z|)...
+    assert_eq!(
+        kinds(&x, &[]),
+        [DeltaKind::NarrowerRange, DeltaKind::TurnEarlier]
+    );
+    // ...with it, neither does; nothing else differs, so nothing at all is said.
+    assert_eq!(kinds(&x, &[MeasureIssue::TooShort]), []);
+    assert_eq!(
+        kinds(&x, &[MeasureIssue::TooShort, MeasureIssue::Unvoiced]),
+        []
+    );
+
+    // An onset mismatch still yields Start*, and only that, though the turning-point and range
+    // differences are still there (they would be in the top two without TooShort).
+    let set_onset = |v: f32| {
+        let mut y = x.clone();
+        y.onset = v;
+        y.contour[0] = v;
+        y
+    };
+    let low = set_onset(3.2); // 1.2 above the dip's 2: z = 1.5
+    assert_eq!(
+        kinds(&low, &[]),
+        [DeltaKind::StartLower, DeltaKind::NarrowerRange]
+    );
+    let short = [MeasureIssue::TooShort];
+    assert_eq!(kinds(&low, &short), [DeltaKind::StartLower]);
+    let j = cmn()
+        .judge(&std_g(), &low, &target("3"), &c, &short)
+        .unwrap();
+    approx::assert_abs_diff_eq!(j.deltas[0].amount, 1.2, epsilon = 1e-4);
+    assert_eq!(kinds(&set_onset(0.4), &short), [DeltaKind::StartHigher]);
+
+    // Offset likewise: EndHigher / EndLower survive.
+    let mut y = x.clone();
+    y.offset = 2.5; // 1.5 below the dip's 4, but still nearer it than the half-dip's 1
+    assert_eq!(kinds(&y, &short), [DeltaKind::EndHigher]);
+    y.offset = 6.0;
+    assert_eq!(kinds(&y, &short), [DeltaKind::EndLower]);
+
+    // Both endpoints off at once: the two deltas are the endpoint ones, largest |z| first.
+    let mut z = set_onset(3.2);
+    z.offset = 6.0; // z_off = 2/0.8 = 2.5 against z_on = 1.5
+    assert_eq!(
+        kinds(&z, &short),
+        [DeltaKind::EndLower, DeltaKind::StartLower]
+    );
+
+    // Other issues alongside TooShort behave as before: Clipped widens the σ (onset 2.0 off:
+    // z = 2/1.2 = 1.67) but keeps the restriction; LowSnr still suppresses everything.
+    let far = set_onset(4.0);
+    assert_eq!(
+        kinds(&far, &[MeasureIssue::TooShort, MeasureIssue::Clipped]),
+        [DeltaKind::StartLower]
+    );
+    assert!(kinds(&far, &[MeasureIssue::TooShort, MeasureIssue::LowSnr]).is_empty());
+
+    // The brief's mismatch case: T1 [5,5] against [3,4] has onset, offset and range deltas
+    // normally; under TooShort the onset and offset ones remain.
+    let d = deltas_of(vec![3., 4.], "1", &ctx(Some("1"), false), &short);
+    assert_eq!(
+        d.iter().map(|d| d.0).collect::<Vec<_>>(),
+        [DeltaKind::StartHigher, DeltaKind::EndHigher]
+    );
 }
 
 #[test]

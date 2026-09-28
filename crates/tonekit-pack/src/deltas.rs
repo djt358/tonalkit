@@ -4,7 +4,9 @@
 //! Four candidate differences are measured in units of the component's tolerance (`z`): onset,
 //! offset, turning-point time and range. Those beyond one σ are kept, the two largest by `|z|`.
 //! The σ are widened exactly as they are for scoring, so a measurement issue that loosens the
-//! likelihood loosens the advice too.
+//! likelihood loosens the advice too. For a syllable too short to trust its interior (`TooShort`,
+//! ruling R26, spec §12) only the onset and offset are compared: turning-point time and range are
+//! read off the contour and are not offered.
 
 use tonekit_core::{DeltaKind, ShapeDelta, ToneShape};
 
@@ -24,9 +26,15 @@ const PLATEAU_EPS: f64 = 1e-9;
 
 /// The advice for shape `x` against its best-matching component `c`, most significant first.
 ///
-/// `widen` is the tolerance widening for the analysis's issues (`crate::widen_for`). A candidate
-/// whose z-score or amount is not finite (a NaN range, an infinite duration) is skipped.
-pub(crate) fn compute(x: &ToneShape, c: &Component, widen: f64) -> Vec<ShapeDelta> {
+/// `widen` is the tolerance widening for the analysis's issues (`crate::widen_for`). With
+/// `endpoints_only` (the shape is `TooShort`) only `Start*` and `End*` deltas are considered. A
+/// candidate whose z-score or amount is not finite (a NaN range, an infinite duration) is skipped.
+pub(crate) fn compute(
+    x: &ToneShape,
+    c: &Component,
+    widen: f64,
+    endpoints_only: bool,
+) -> Vec<ShapeDelta> {
     let sigma = |v: f32| f64::from(v) * widen;
 
     // (|z|, kind, amount); at most four candidates, kept on the stack.
@@ -62,37 +70,39 @@ pub(crate) fn compute(x: &ToneShape, c: &Component, widen: f64) -> Vec<ShapeDelt
         d_off.abs(),
     );
 
-    // Turning-point time, only when both have one: later than expected means "turn earlier".
-    if let (Some(xu), Some(cu)) = (x.turning_point, turning_point(&c.contour)) {
-        let du = f64::from(xu) - cu;
+    if !endpoints_only {
+        // Turning-point time, only when both have one: later than expected means "turn earlier".
+        if let (Some(xu), Some(cu)) = (x.turning_point, turning_point(&c.contour)) {
+            let du = f64::from(xu) - cu;
+            offer(
+                du / sigma(c.sigma.turning_point),
+                if du > 0.0 {
+                    DeltaKind::TurnEarlier
+                } else {
+                    DeltaKind::TurnLater
+                },
+                du.abs() * f64::from(x.duration_ms),
+            );
+        }
+
+        // Range: a narrower syllable than expected should be "wider".
+        let (lo, hi) = c
+            .contour
+            .iter()
+            .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), &v| {
+                (lo.min(f64::from(v)), hi.max(f64::from(v)))
+            });
+        let d_range = f64::from(x.range) - (hi - lo);
         offer(
-            du / sigma(c.sigma.turning_point),
-            if du > 0.0 {
-                DeltaKind::TurnEarlier
+            d_range / sigma(c.sigma.contour),
+            if d_range < 0.0 {
+                DeltaKind::WiderRange
             } else {
-                DeltaKind::TurnLater
+                DeltaKind::NarrowerRange
             },
-            du.abs() * f64::from(x.duration_ms),
+            d_range.abs(),
         );
     }
-
-    // Range: a narrower syllable than expected should be "wider".
-    let (lo, hi) = c
-        .contour
-        .iter()
-        .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), &v| {
-            (lo.min(f64::from(v)), hi.max(f64::from(v)))
-        });
-    let d_range = f64::from(x.range) - (hi - lo);
-    offer(
-        d_range / sigma(c.sigma.contour),
-        if d_range < 0.0 {
-            DeltaKind::WiderRange
-        } else {
-            DeltaKind::NarrowerRange
-        },
-        d_range.abs(),
-    );
 
     // Stable, so equal |z| keep the order onset, offset, turn, range.
     found[..n].sort_by(|a, b| b.0.total_cmp(&a.0));
