@@ -18,3 +18,8 @@ insta = { version = "1", features = ["json"] }
 # Dependencies are compiled once and reused across test runs; optimise them even in dev builds.
 [profile.dev.package."*"]
 opt-level = 3
+
+# tonekit-f0 instantiates pyin's generic PYINExecutor itself, so that code is compiled here rather
+# than in the (already optimised) pyin crate; without this, pYIN is ~10x slower in dev builds.
+[profile.dev.package.tonekit-f0]
+opt-level = 3
