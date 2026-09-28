@@ -1,23 +1,28 @@
 //! Language packs for tonekit (spec §6): the TOML schema, loading and validation, and the
 //! resolution of context-dependent expected tone shapes (accent mixtures and inheritance, lexical
-//! variants, imprint style blending).
+//! variants, imprint style blending), and the scoring built on them (spec §7.1).
 //!
 //! A pack is data. `LanguagePack::from_toml` validates it completely, including that every
 //! context (accent × tone × previous tone × phrase-final) resolves to an expectation, so
-//! `expect_tone` and `expect` cannot hit a missing realisation on a loaded pack. Likelihoods
-//! built on these expectations arrive in a later task.
+//! `expect_tone` and `expect` cannot hit a missing realisation on a loaded pack. On top of those
+//! expectations, `tone_loglik` gives a calibrated per-tone likelihood and `judge` the LLR of an
+//! intended target against a background of all tones, plus `heard`, `distance` and feedback
+//! deltas.
 
 #![forbid(unsafe_code)]
 
 mod calib;
+mod deltas;
 mod error;
 mod expect;
 mod load;
 mod schema;
+mod score;
 
 pub use calib::{Calibration, DecodeParams};
 pub use error::PackError;
 pub use expect::{Component, Expectation, TargetContext, Tolerance};
+pub use score::widen_for;
 
 use tonekit_core::{AccentId, Lect, ToneId};
 
