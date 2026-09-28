@@ -75,8 +75,8 @@ default, and bake off SwiftF0 converted to CoreML on DJ's café-noise corpus in 
 - **Forced aligners.** The Montreal Forced Aligner Mandarin v3.0.0 acoustic model is **CC BY 4.0**
   and was trained on Common Voice zh, AISHELL-3, THCHS-30, AI-DataTang and GlobalPhone
   ([MFA Mandarin](https://mfa-models.readthedocs.io/en/latest/acoustic/Mandarin/Mandarin%20MFA%20acoustic%20model%20v3_0_0.html)).
-  *Update (spec v2):* because it was trained on AISHELL/THCHS data (see §3.2) and on AI-DataTang
-  (license unconfirmed), it's downgraded to `verify` and isn't needed in P0. Meta **MMS models,
+  *Update (spec v2.2):* AISHELL/THCHS are now plain Apache-2.0 (see §3.2), but it was also trained
+  on AI-DataTang (license unconfirmed), so it stays `verify`. It isn't needed in P0. Meta **MMS models,
   including torchaudio's MMS_FA and wrappers like `torchfa`, are CC-BY-NC 4.0**, so they are
   excluded ([MMS README](https://github.com/facebookresearch/fairseq/blob/main/examples/mms/README.md),
   [torchfa](https://github.com/pengzhendong/torchfa)).
@@ -100,9 +100,9 @@ default, and bake off SwiftF0 converted to CoreML on DJ's café-noise corpus in 
 
 - **Native, permissive:** AISHELL-1 (Apache-2.0), **AISHELL-3 (Apache-2.0, 85 h, 218 speakers,
   character and pinyin transcripts)**, THCHS-30 (Apache-2.0), Common Voice zh-CN (CC0).
-  OpenSLR also says "free for academic use" next to Apache-2.0 on the AISHELL and THCHS pages.
-  *Decision (spec v2 §11.2):* both are excluded from shipped calibration until the rights holders
-  confirm in writing. Common Voice (CC0) is the primary native source.
+  OpenSLR also said "free for academic use" next to Apache-2.0 on the AISHELL and THCHS pages.
+  *Update (spec v2.2):* DJ confirmed that caveat has been rescinded and both are plain Apache-2.0.
+  AISHELL-3 is the primary native calibration source.
 - **Native, but excluded from shipped weights:** MagicData read speech (**CC BY-NC-ND**), KeSpeech
   (**non-commercial custom**), WenetSpeech (CC BY 4.0 labels, but audio scraped from
   YouTube and podcasts behind a password-gated license), Tone Perfect (**"In Copyright –

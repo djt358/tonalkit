@@ -1,8 +1,9 @@
 # Tone assessment (`tonekit`): design spec
 
 **Status:** v2.1. DJ approved v1 with changes, then approved v2 with three clarifications
-(2026-09-28): iOS-native first with no wasm target, AISHELL outreach deferred, imprint = the
-user's own voice. P0 plan approved for subagent-driven execution.
+(2026-09-28): iOS-native first with no wasm target, and imprint = the user's own voice. P0 plan
+approved for subagent-driven execution. v2.2: DJ confirmed AISHELL-1/3 and THCHS-30 are now plain
+Apache-2.0 (the academic-use caveat was rescinded), so they're back in.
 **Date:** 2026-09-28
 **Superpowers path:** Architectural (new subsystem with a new cross-project interface)
 **Research:** `docs/research/2026-09-28-tone-assessment-prior-art.md`, `docs/research/tone-assessment-license-register.csv`
@@ -14,7 +15,7 @@ user's own voice. P0 plan approved for subagent-driven execution.
 | DJ change | Where it landed |
 |---|---|
 | Rust is fine; iOS-first, on-device without issue (v2.1: wasm dropped as a target) | §4.3: native `staticlib` on iOS via UniFFI; P0 verifies it on the iOS Simulator; device latency is a P1 gate |
-| "Free for academic use" ≠ Bendy, and OSS doesn't launder it | §11.2: AISHELL and THCHS are **denied** for shipped calibration until the rights holders confirm in writing. Calibration moves to Common Voice (CC0) and owned data |
+| "Free for academic use" ≠ Bendy, and OSS doesn't launder it | §11.2: the principle stands for any academic-only source. **v2.2:** AISHELL-1/3 and THCHS-30 dropped the caveat and are plain Apache-2.0, so they're allowed. AISHELL-3 is the primary native calibration source |
 | Name stays `tonekit`; public after P0; Tencent offline | §16, recorded |
 | T1. Role in an ensemble; consumers that self-correct misleading transcripts | §8: a likelihood lattice plus candidate rescoring, with separate priors. Plug-in points named |
 | T2. Test TTS models in a GAN framework | §9: adversarial *search* over controlled resynthesis instead of a literal GAN; tonekit also works as a TTS tone critic |
@@ -628,22 +629,27 @@ should review the register before launch.
 2. **Was it ever academic use?** No. Use is judged by who uses it and why. DJ building tonekit to
    power Bendy is commercial use from day one, and open-sourcing the result doesn't change that.
 
-AISHELL-1/3 and THCHS-30 state Apache-2.0, which *would* permit commercial use, next to "free for
-academic use". The ambiguity is resolved conservatively:
+These two points still govern any source whose terms say "academic" or "research" use.
 
-- **Denied** for shipped calibration until the rights holders (AISHELL; Tsinghua CSLT) confirm in
-  writing that Apache-2.0 governs. **Outreach is deferred (DJ, v2.1):** we only ask if the
-  Common Voice-calibrated version works and there's evidence these corpora would materially
-  help.
-- **MFA Mandarin** (CC BY 4.0, but trained on AISHELL-3, THCHS-30 and AI-DataTang) is downgraded
-  to `verify`. P0 doesn't need it.
-- **Replacement calibration path:**
-  - Common Voice zh-CN and zh-TW (CC0), with targets from pypinyin + g2pW + tone-sandhi rules
-    (authoring tools, MIT/Apache).
-  - Spans from tonekit's own single-candidate decoder, re-estimated over 2–3 EM-style passes.
-  - Robust statistics (median/MAD), and DJ audits a 200-syllable sample.
+**v2.2 update (DJ, 2026-09-28):** the "free for academic use" caveat on AISHELL-1/3 and THCHS-30
+has been rescinded. Both corpora are now plain Apache-2.0, which permits commercial use, so
+they're `allow` in the register. When the harness downloads them, it archives the license text
+with the download date next to the data, so the provenance claim can be shown later.
+
+- **Calibration path:**
+  - **AISHELL-3** (Apache-2.0, 85 h, 218 speakers) is the primary native source. It ships
+    toned-pinyin transcripts, so tone targets come from the corpus instead of being generated,
+    which removes the main source of label noise. Neutral-tone and sandhi realisations still get
+    a DJ audit of a 200-syllable sample, because transcripts can record citation tones.
+  - AISHELL-1 and THCHS-30 (Apache-2.0) serve as extra native speakers and held-out evaluation.
+  - Common Voice zh-CN (CC0) is a held-out cross-corpus check. Common Voice zh-TW (CC0) fits the
+    `cmn-TW` accent, with targets from pypinyin + g2pW + tone-sandhi rules.
+  - Spans come from tonekit's own single-candidate decoder, re-estimated over 2–3 EM-style
+    passes, with robust statistics (median/MAD).
   - Owned and consented recordings set the L2 operating points. OMPAL and LATIC stay `verify`
     until their terms are confirmed.
+- **MFA Mandarin** (CC BY 4.0) stays `verify`: it was also trained on AI-DataTang, whose license
+  is still unconfirmed. P0 doesn't need it.
 - **CI:** `tkh provenance` fails any weights or calibration manifest listing a `deny` source, or
   a `verify` source without a recorded sign-off.
 
@@ -727,7 +733,7 @@ learner's own audio, on-device, is inside that boundary.
   - Robustness on count-mismatch clips.
   - f0 bakeoff: gross pitch error and voicing error on WORLD-resynthesised clips with exact
     ground truth.
-  - From P1: ECE of lattice posteriors, and native tone-ID on Common Voice zh-CN as a
+  - From P1: ECE of lattice posteriors, and native tone-ID on AISHELL-3 held-out speakers as a
     regression floor.
 - **Synthetic and adversarial:** §9. Diagnostics only, never gates.
 
@@ -752,7 +758,8 @@ plans.
 
 **P1: Bendy Phase 2 voice.**
 - `BendyProsody` adapter; register persistence and onboarding.
-- Common Voice calibration (EM passes); fitted fusion and λ.
+- AISHELL-3 calibration (EM passes), with a Common Voice zh-CN cross-corpus check; fitted fusion
+  and λ.
 - Apple n-best rescoring with faithful/intent transcripts; `to_prompt_json`.
 - CMA-ES adversary; `tkh critic` for reference audio; DJ-audited diagnostic copy; Tone Lab view.
 - **Gate:**
@@ -801,13 +808,13 @@ plans.
 | # | Decision | Status |
 |---|---|---|
 | 1 | Rust core; native iOS via UniFFI | **Decided** (DJ) |
-| 2 | AISHELL/THCHS denied for shipped calibration pending written clarification; Common Voice + owned data instead | **Decided** (DJ's analysis, §11.2) |
+| 2 | Academic- or research-only sources never feed shipped calibration (passthrough; commercial use from day one) | **Decided** (DJ's analysis, §11.2) |
 | 3 | Name `tonekit` until it works | **Decided** |
 | 4 | Public repo after the P0 gate | **Decided** |
 | 5 | Tencent SOE offline on DJ-owned recordings only | **Decided** |
 | 6 | Imprint = the user's own voice, with explicit user permission; no third-party voice replication; out of scope for tonekit | **Decided** (DJ, v2.1) |
 | 7 | No wasm target; iOS on-device native is the only runtime target | **Decided** (DJ, v2.1) |
-| 8 | AISHELL/THCHS outreach only if the CV-calibrated version works and evidence shows they'd help | **Decided** (DJ, v2.1) |
+| 8 | AISHELL-1/3 and THCHS-30 are plain Apache-2.0 (caveat rescinded) and allowed; AISHELL-3 is the primary native calibration source | **Decided** (DJ, v2.2) |
 
 ---
 
