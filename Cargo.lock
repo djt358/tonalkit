@@ -205,6 +205,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "tonekit-fuse"
+version = "0.1.0"
+dependencies = [
+ "approx",
+ "tonekit-core",
+]
+
+[[package]]
 name = "tonekit-pack"
 version = "0.1.0"
 dependencies = [
