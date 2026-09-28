@@ -41,8 +41,6 @@ exceptions = [
 
 [bans]
 multiple-versions = "warn"
-wildcards = "deny"
-allow-wildcard-paths = true
 # tonekit is on-device and offline: no network or TLS stacks, direct or transitive.
 deny = [
     { crate = "reqwest" },
