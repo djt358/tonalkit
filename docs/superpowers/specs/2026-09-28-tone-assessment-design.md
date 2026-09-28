@@ -261,7 +261,7 @@ pub struct AccentFit { pub accent: AccentId, pub llr: f32 }
 pub struct UtteranceAssessment { pub schema: String, pub intended: CandidateId, pub intended_rank: u32,
     pub margin_llr: f32,   // intended llr − max(best other candidate llr, null_llr)
     pub syllables: Vec<SyllableAssessment>,
-    pub overall: Option<f32>,          // None when no syllable was measured ("tone not checked")
+    pub overall: Option<f32>,          // None when no syllable has tone evidence ("tone not checked")
     pub accent_fit: Vec<AccentFit>, pub register_update: Register }
 
 // analysis.rs
@@ -504,8 +504,9 @@ contributing evidence gets `p_correct = sigmoid(β0)` and an empty `basis`.
 - A confusion hit caps `p_correct` at `veto_cap` (0.05).
 - Missing evidence drops its term.
 - P0 seeds: β0 = 0, β_ac = 1, β_tr = 0.5. Fitted per lect in P1.
-- `overall` = the minimum `p_correct` over measured syllables, since one wrong tone fails a cast.
-  It's `None` if no syllable was measured.
+- `overall` = the minimum `p_correct` over syllables that were measured **or** carry a confusion
+  hit, since one wrong tone fails a cast. A whispered confusion hit is a miss, not "not checked".
+  It's `None` only if no syllable has either kind of tone evidence.
 
 ---
 
