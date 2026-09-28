@@ -1,0 +1,13 @@
+[package]
+name = "tonekit-fuse"
+version = "0.1.0"
+description = "Evidence fusion: combines per-syllable acoustic judgements with transcript and neural evidence into calibrated probabilities and assembles the utterance assessment."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+tonekit-core = { path = "../tonekit-core" }
+
+[dev-dependencies]
+approx = { workspace = true }
