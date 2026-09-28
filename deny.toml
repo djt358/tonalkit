@@ -5,6 +5,8 @@ all-features = true
 
 [advisories]
 version = 2
+# paste is unmaintained, not vulnerable; it is a proc-macro reached only through pyin's dependencies.
+ignore = [{ id = "RUSTSEC-2024-0436", reason = "paste is unmaintained (not vulnerable); transitive proc-macro via pyin -> statrs -> nalgebra -> simba; revisit when pyin's dependencies move" }]
 
 [licenses]
 version = 2

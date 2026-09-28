@@ -1,0 +1,15 @@
+[package]
+name = "tonekit-f0"
+version = "0.1.0"
+description = "f0 and energy tracks for tonekit: a pYIN provider, octave repair and signal-quality checks."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+tonekit-core = { path = "../tonekit-core" }
+pyin = { version = "1.2", default-features = false }
+
+[dev-dependencies]
+tonekit-testkit = { path = "../tonekit-testkit" }
+approx = { workspace = true }
