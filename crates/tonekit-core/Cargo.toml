@@ -1,0 +1,14 @@
+[package]
+name = "tonekit-core"
+version = "0.1.0"
+description = "Plain-data types shared by every tonekit crate: ids, signal, targets, shape, lattice, evidence and analysis."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }

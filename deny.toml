@@ -1,0 +1,61 @@
+# cargo-deny policy. See spec §11.1 and plan Global Constraints.
+
+[graph]
+all-features = true
+
+[advisories]
+version = 2
+
+[licenses]
+version = 2
+# Anything not listed here is denied, which is how GPL, LGPL, AGPL and SSPL stay out.
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "Unicode-3.0",
+]
+# The allow list and the exception are policy, not an inventory: do not warn while the current
+# dependency tree happens not to use them.
+unused-allowed-license = "allow"
+unused-license-exception = "allow"
+# MPL-2.0 is file-level copyleft: accepted only for the UniFFI toolchain (Task 12). cargo-deny
+# matches exception crate names exactly (no globs), so every `uniffi*` crate is listed by name.
+# A `uniffi*` crate missing from this list fails the licenses check, which is the safe direction.
+exceptions = [
+    { allow = ["MPL-2.0"], crate = "uniffi" },
+    { allow = ["MPL-2.0"], crate = "uniffi_bindgen" },
+    { allow = ["MPL-2.0"], crate = "uniffi_build" },
+    { allow = ["MPL-2.0"], crate = "uniffi_checksum_derive" },
+    { allow = ["MPL-2.0"], crate = "uniffi_core" },
+    { allow = ["MPL-2.0"], crate = "uniffi_internal_macros" },
+    { allow = ["MPL-2.0"], crate = "uniffi_macros" },
+    { allow = ["MPL-2.0"], crate = "uniffi_meta" },
+    { allow = ["MPL-2.0"], crate = "uniffi_pipeline" },
+    { allow = ["MPL-2.0"], crate = "uniffi_testing" },
+    { allow = ["MPL-2.0"], crate = "uniffi_udl" },
+]
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+allow-wildcard-paths = true
+# tonekit is on-device and offline: no network or TLS stacks, direct or transitive.
+deny = [
+    { crate = "reqwest" },
+    { crate = "hyper" },
+    { crate = "ureq" },
+    { crate = "rustls" },
+    { crate = "native-tls" },
+    { crate = "openssl" },
+    { crate = "curl" },
+]
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

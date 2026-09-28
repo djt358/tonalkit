@@ -1,0 +1,44 @@
+id,kind,name,license,commercial_ok,shipped_code,shipped_weights_training,role,verified_via,source_url,notes
+pyin,code,pyin (crate; repo Sytronik/pyin-rs),MIT,yes,allow,n/a,runtime f0 default,fetched repo + docs.rs,https://docs.rs/pyin/latest/pyin/,v1.2.0; no default features (ndarray + rustfft only) so wasm-friendly
+swift-f0,model,SwiftF0,MIT,yes,allow,n/a,runtime f0 candidate (P0 bakeoff),fetched repo,https://github.com/lars76/swift-f0,ONNX; convert to CoreML; 16 kHz / hop 256
+onnxruntime,code,ONNX Runtime (Python),MIT,yes,n/a,n/a,harness bakeoff only,known (verify at pin),https://github.com/microsoft/onnxruntime,
+pitch-benchmark,code,pitch-benchmark,MIT,yes,n/a,n/a,harness reference,fetched repo,https://github.com/lars76/pitch-benchmark,f0 tracker comparison methodology
+crepe,model,CREPE / torchcrepe,MIT,yes,allow,n/a,harness comparison only,known (verify at pin),https://github.com/marl/crepe,slow; weak under noise per benchmark
+penn,model,PENN,MIT,yes,allow,n/a,harness comparison only,known (verify at pin),https://github.com/interactiveaudiolab/penn,best on PTDB-Noisy in benchmark
+pesto,model,PESTO,LGPL-3.0,conditional,deny,n/a,excluded,fetched repo,https://github.com/SonyCSLParis/pesto-full,LGPL static-link burden on iOS
+praat,code,Praat,GPL-3.0,no (for linking),deny,n/a,researcher eyeball tool only,known,https://www.fon.hum.uva.nl/praat/,never linked or bundled
+parselmouth,code,Parselmouth,GPL-3.0,no (for linking),deny,n/a,excluded,known,https://github.com/YannickJadoul/Parselmouth,
+sgc3,code,SpeakGoodChinese 3,GPL-3.0-or-later,no (for linking),deny,n/a,UX reference only,fetched repo,https://github.com/robvanson/sgc3,
+uniffi,code,UniFFI,MPL-2.0,yes,allow,n/a,Swift bindings (named cargo-deny exception),fetched repo,https://github.com/mozilla/uniffi-rs,file-level copyleft; used unmodified
+pyo3,code,PyO3 / maturin,MIT OR Apache-2.0,yes,allow,n/a,Python bindings (harness),known (verify at pin),https://github.com/PyO3/pyo3,
+world,code,WORLD vocoder,modified BSD,yes,n/a,n/a,harness resynthesis (synthetic tests only),search,https://github.com/mmorise/World,
+pyworld,code,pyworld,MIT,yes,n/a,n/a,harness resynthesis (synthetic tests only),fetched repo,https://github.com/JeremyCCHsu/Python-Wrapper-for-World-Vocoder,
+apple-system-tts,service,Apple system voices (AVSpeechSynthesizer zh-CN/zh-TW/zh-HK),Apple SDK terms,test fixtures only,n/a,deny,synthetic test fixtures and TTS-critic targets,known,https://developer.apple.com/documentation/avfaudio/avspeechsynthesizer,never used to fit shipped calibration
+sherpa-onnx,code,sherpa-onnx,Apache-2.0,yes,allow,n/a,optional on-device CTC runtime (P3),fetched repo,https://github.com/k2-fsa/sherpa-onnx,iOS Swift examples
+sensevoice,model,SenseVoice / FunASR models,FunASR model license (custom),yes with attribution,allow,n/a,not planned,fetched issue,https://github.com/QwenAudio/SenseVoice/issues/334,maintainers: §3 is a disclaimer not a restriction
+mms,model,Meta MMS (incl. torchaudio MMS_FA),CC-BY-NC-4.0,no,deny,deny,excluded,search (LeCun announcement + README),https://github.com/facebookresearch/fairseq/blob/main/examples/mms/README.md,also excludes wrappers like torchfa
+torchfa,code,torchfa,MIT (wraps MMS weights),no (weights NC),deny,deny,excluded,fetched repo,https://github.com/pengzhendong/torchfa,code MIT but depends on NC weights
+mfa-mandarin,model,MFA Mandarin acoustic v3.0.0,CC-BY-4.0 (as declared),verify,n/a,verify,not needed in P0,fetched docs,https://mfa-models.readthedocs.io/en/latest/acoustic/Mandarin/Mandarin%20MFA%20acoustic%20model%20v3_0_0.html,trained on AISHELL-3 + THCHS-30 + AI-DataTang (license unconfirmed); same passthrough question as AISHELL
+pypinyin,code,pypinyin,MIT,yes,n/a,n/a,authoring (text->toned pinyin; tone_sandhi contrib),search + known,https://github.com/mozillazg/python-pinyin,
+g2pw,code,g2pW / pypinyin-g2pW,Apache-2.0,yes,n/a,n/a,authoring (polyphones),known (verify at pin),https://github.com/mozillazg/pypinyin-g2pW,
+pythainlp,code,PyThaiNLP,Apache-2.0,yes,n/a,n/a,authoring for tha pack (tone_detector),fetched docs + known,https://pythainlp.org/dev-docs/api/util.html,
+tdmelodic,code,tdmelodic,BSD-3-Clause,yes,n/a,n/a,authoring for jpn pack,fetched repo,https://github.com/PKSHATechnology-Research/tdmelodic,
+aishell-1,dataset,AISHELL-1,Apache-2.0 + 'free for academic use',verify,n/a,deny,excluded pending written clarification,fetched OpenSLR,https://www.openslr.org/33/,DJ decision 2026-09-28: academic-use language treated as restrictive until rights holder confirms Apache-2.0 governs commercial use
+aishell-3,dataset,AISHELL-3,Apache-2.0 (AISHELL family 'academic use' language),verify,n/a,deny,excluded pending written clarification,fetched OpenSLR,https://www.openslr.org/93/,85 h / 218 speakers; would be the best native calibration source if cleared
+thchs-30,dataset,THCHS-30,Apache-2.0 + 'free to academic users',verify,n/a,deny,excluded pending written clarification,fetched OpenSLR,https://www.openslr.org/18/,same treatment as AISHELL
+aidatatang-200zh,dataset,aidatatang_200zh,unconfirmed (OpenSLR page gone),verify,n/a,deny,excluded,search only,https://github.com/lihao0214/aidatatang_200zh,listed because MFA Mandarin trained on it
+common-voice,dataset,Common Voice (zh-CN / zh-TW / zh-HK / yue / th / vi / yo),CC0-1.0 + terms (no speaker re-identification),yes,n/a,allow,primary native calibration (zh-CN) + accent/generality gates (zh-TW / yue),known,https://commonvoice.mozilla.org/,honor no-reidentification term; targets auto-generated then DJ-sampled
+wenetspeech,dataset,WenetSpeech,CC-BY-4.0 (labels); audio scraped from YouTube/podcasts; password-gated license,unclear,n/a,deny,excluded,fetched OpenSLR + repo,https://www.openslr.org/121/,source-audio copyright unclear
+magicdata-read,dataset,MAGICDATA Mandarin Read Speech,CC-BY-NC-ND-4.0,no,n/a,deny,excluded,fetched OpenSLR,https://www.openslr.org/68/,
+kespeech,dataset,KeSpeech,custom non-commercial,no,n/a,deny,excluded,fetched paper,https://openreview.net/pdf?id=b3Zoeq2sCLq,
+mdcc,dataset,MDCC (Cantonese),signed license; research purposes only,no,n/a,deny,excluded,fetched repo,https://github.com/HLTCHKUST/cantonese-asr,
+tone-perfect,dataset,Tone Perfect (MSU),In Copyright - Educational Use Permitted; non-commercial access,no,n/a,deny,excluded,fetched article,https://ideah.pubpub.org/pub/hh90jpsu,9840 files / 6 speakers
+latic,dataset,LATIC (L2 Mandarin),'fully open-source ... for any purpose use' (no named license),verify,n/a,verify,L2 eval,fetched IEEE DataPort,https://ieee-dataport.org/open-access/latic-non-native-pre-labelled-mandarin-chinese-validation-corpus-automatic-speech,4 h / 4 speakers; no per-syllable tone labels confirmed
+ompal,dataset,OMPAL (L2 Mandarin French L1),'available for commercial and non-commercial use',verify,n/a,verify,L2 eval,fetched ISCA abstract,https://www.isca-archive.org/interspeech_2025/hsieh25b_interspeech.html,1768 utterances; word/sentence scores
+vivos,dataset,VIVOS (Vietnamese),CC-BY-NC-SA-4.0 (verify),no,n/a,deny,excluded,known (verify),https://ailab.hcmus.edu.vn/vivos,
+dj-corpus,dataset,DJ tone corpus (owned recordings),owned by project,yes,n/a,allow,P0/P1 gate corpus,n/a,n/a,record under a written self-release so derived calibration can ship
+consented-l2,dataset,Consented L2 speaker recordings (P1),per signed release,yes if release covers training + release,n/a,allow,P1 gate + operating points,n/a,n/a,release must cover training and publishing derived calibration
+synthetic-world,dataset,WORLD-resynthesised variants of owned/CC0 clips,inherits source clip,inherits,n/a,deny,tests and diagnostics only,n/a,n/a,never fits shipped calibration (spec §9)
+user-donations,dataset,Opt-in learner audio donations,per-consent,only with explicit training+release consent,n/a,verify,future,n/a,n/a,separate consent from app ToS
+azure-pa,service,Azure pronunciation assessment,commercial ToS,yes,n/a,n/a,offline audit (word/syllable accuracy only for zh-CN),fetched docs,https://learn.microsoft.com/en-us/azure/ai-services/speech-service/how-to-pronunciation-assessment,no prosody/NBestPhonemes for zh-CN
+tencent-soe,service,Tencent SOE 新版,commercial ToS,yes,n/a,n/a,offline tone audit (pinyin mode <=4 syllables) on DJ-owned audio only,fetched PDF,https://main.qcloudimg.com/raw/document/product/pdf/1774_107334_cn.pdf,explicit 声调评测; DJ decision 2026-09-28
