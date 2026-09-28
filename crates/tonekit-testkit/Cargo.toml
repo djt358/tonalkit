@@ -1,0 +1,14 @@
+[package]
+name = "tonekit-testkit"
+version = "0.1.0"
+description = "Dev-only deterministic synthetic voiced audio with exact f0 ground truth, for testing tonekit crates."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+tonekit-core = { path = "../tonekit-core" }
+
+[dev-dependencies]
+approx = { workspace = true }
