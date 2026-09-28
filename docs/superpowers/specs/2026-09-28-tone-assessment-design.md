@@ -456,7 +456,8 @@ w_k = max(x.voiced_weights[k], 0.25), except inside the pack's unvoiced_ok regio
 - `heard` = argmax of the posterior (prior × calibrated likelihood) if it's ≥ `heard_threshold`.
 - `distance` = √d² to the best target component; `component` names it.
 - Deltas: onset, offset, turning-point time and range differences to the best component. Emit
-  the two largest above 1σ.
+  the two largest above 1σ. Under `TooShort` only onset/offset deltas are emitted, and under
+  `LowSnr` none are, so advice never comes from a contour the scorer distrusts.
 
 ### 7.2 Closed-set decoding (any syllable count)
 
