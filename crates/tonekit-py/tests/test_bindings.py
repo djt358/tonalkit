@@ -268,9 +268,11 @@ def test_assess_with_distractors_and_compared_accents(analysis_json, pack_toml, 
 
 
 def test_the_gil_is_released_while_rust_computes(pcm):
-    """A Python thread keeps counting while another thread is inside `analyze`; if the extension
-    held the GIL for the whole call, the counter could not advance until it returned."""
-    audio = np.tile(pcm, 4)  # ~10 s, so the call outlasts thread start-up by a wide margin
+    """A Python thread keeps counting while another thread is inside `analyze`. Measured against
+    its own rate when idle: if the extension held the GIL for the whole call, the counter could
+    advance only by the one switch interval (5 ms) after the call, a few percent of the call's
+    duration at most; released, it keeps roughly its full rate."""
+    audio = np.tile(pcm, 4)  # ~10 s of audio: about a second of Rust
     counter = 0
     stop = threading.Event()
 
@@ -284,10 +286,20 @@ def test_the_gil_is_released_while_rust_computes(pcm):
     try:
         while counter == 0:  # the counting thread is running
             time.sleep(0.001)
-        before = counter
+        start_count, start_time = counter, time.perf_counter()
+        time.sleep(0.2)
+        idle_rate = (counter - start_count) / (time.perf_counter() - start_time)
+
+        start_count, start_time = counter, time.perf_counter()
         tonekit_py.analyze(audio, RATE)
-        gained = counter - before
+        duration = time.perf_counter() - start_time
+        gained = counter - start_count
     finally:
         stop.set()
         thread.join()
-    assert gained > 10_000, f"the counting thread advanced only {gained} while analyze ran"
+    assert duration > 0.25, "the call is too short for this test to mean anything"
+    share = gained / (idle_rate * duration)
+    assert share > 0.25, (
+        f"the counting thread ran at {share:.1%} of its idle rate during analyze; "
+        "the GIL is being held"
+    )

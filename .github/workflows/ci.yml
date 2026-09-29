@@ -112,3 +112,18 @@ jobs:
       - run: uv sync --locked
       - run: uv run pytest
       - run: uv run tkh provenance --register ../data-register.csv --packs-root ../packs
+
+  # Task 13: the Python module (crates/tonekit-py). The harness depends on it, so `uv sync` builds
+  # it with maturin (against the locked Cargo.lock), and its tests then check that Python gives the
+  # CLI's numbers on the shared fixture (fixtures/spoken-413.*).
+  python-bindings:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: harness
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: astral-sh/setup-uv@v9.0.0
+      - run: uv sync --locked
+      - run: uv run pytest ../crates/tonekit-py/tests

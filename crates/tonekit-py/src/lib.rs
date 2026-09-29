@@ -13,6 +13,9 @@
 //!   Nothing panics across the boundary.
 //! - The GIL is released while Rust computes, so Python threads can run alongside.
 
+// No unsafe code of our own. (`forbid` is not possible: PyO3's macros expand to unsafe.)
+#![deny(unsafe_code)]
+
 use std::ffi::CStr;
 
 use pyo3::buffer::{ElementType, PyUntypedBuffer};
