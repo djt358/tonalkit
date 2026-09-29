@@ -38,6 +38,8 @@ exceptions = [
     { allow = ["MPL-2.0"], crate = "uniffi_meta" },
     { allow = ["MPL-2.0"], crate = "uniffi_pipeline" },
     { allow = ["MPL-2.0"], crate = "uniffi_udl" },
+    # Build-time only (via pyo3-build-config, for tonekit-py); the LLVM exception only relaxes Apache-2.0.
+    { allow = ["Apache-2.0 WITH LLVM-exception"], crate = "target-lexicon" },
 ]
 
 [bans]
