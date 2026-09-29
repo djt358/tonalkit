@@ -1,8 +1,41 @@
-"""Grade every manifest clip with tonekit and collect one `Result` per clip."""
+"""Grade every manifest clip with tonekit and collect one `Result` per clip.
+
+Per clip: read the 16 kHz mono WAV, `tonekit_py.analyze` it (cached on disk), then
+`tonekit_py.assess` the clip's intended reading against its distractors. A speaker's `register`
+clips are graded first, chained so each is analysed with the register learnt from the ones before
+it, and the final register is given to that speaker's other clips; a speaker with no register
+clips is analysed cold, clip by clip.
+"""
 
 from __future__ import annotations
 
+import hashlib
+import io
+import json
+import os
+import tomllib
+import warnings
 from dataclasses import dataclass, field
+from functools import cache
+from importlib import metadata
+from pathlib import Path
+
+import numpy as np
+import tonekit_py
+from scipy.io import wavfile
+
+from .ingest import TARGET_SR, _to_float32
+from .manifest import Clip, to_candidate_json
+
+# harness/.cache/analysis, next to src/ (the directory is gitignored)
+DEFAULT_CACHE_DIR = Path(__file__).resolve().parents[2] / ".cache" / "analysis"
+
+_REGISTER_SOURCES = {"ColdStart": "cold", "Given": "given"}
+
+
+class EvalError(ValueError):
+    """A clip could not be graded; the message names the clip."""
+
 
 # A shape delta as (kind, amount): kind is a tonekit `DeltaKind` name such as "WiderRange";
 # amount is in Chao units, or in ms for "TurnEarlier" and "TurnLater".
@@ -36,3 +69,207 @@ class Result:
     syllables: list[Syllable]
     register_source: str  # "cold" (estimated from this clip alone) or "given" (from register clips)
     issues: list[str] = field(default_factory=list)  # the analysis's signal issues, e.g. "LowSnr"
+
+
+# ---- reading and caching ----------------------------------------------------------------------
+
+
+def _read_wav(clip: Clip, root: Path) -> tuple[bytes, np.ndarray]:
+    """The clip's WAV bytes (for the cache key) and its 16 kHz mono samples as float32."""
+    path = root / clip.path
+    try:
+        data = path.read_bytes()
+    except OSError as e:
+        raise EvalError(f"{clip.id}: cannot read {path}: {e.strerror or e}") from e
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", wavfile.WavFileWarning)  # unknown chunks are harmless
+            rate, samples = wavfile.read(io.BytesIO(data))
+    except ValueError as e:
+        raise EvalError(f"{clip.id}: {path} is not a readable WAV file: {e}") from e
+    if rate != TARGET_SR:
+        raise EvalError(
+            f"{clip.id}: {path} is sampled at {rate} Hz, expected {TARGET_SR} Hz (run `tkh ingest`)"
+        )
+    if samples.ndim != 1:
+        raise EvalError(f"{clip.id}: {path} is not mono (run `tkh ingest`)")
+    return data, _to_float32(samples)
+
+
+@cache
+def _tonekit_py_fingerprint() -> str:
+    """The installed tonekit_py's version and a hash of its files. The version alone would not
+    change when the Rust code does, so a rebuilt extension must also invalidate the cache."""
+    h = hashlib.sha256()
+    package = Path(tonekit_py.__file__).resolve().parent
+    for f in sorted(p for p in package.iterdir() if p.suffix in {".so", ".pyd", ".dylib"}):
+        h.update(f.name.encode())
+        h.update(f.read_bytes())
+    try:
+        version = metadata.version("tonekit-py")
+    except metadata.PackageNotFoundError:
+        version = "unknown"
+    return f"{version}+{h.hexdigest()}"
+
+
+def _cache_key(wav: bytes, register_json: str | None) -> str:
+    """sha256 over the WAV bytes, the register JSON and the tonekit_py version (each length-
+    prefixed so the parts cannot run into each other)."""
+    h = hashlib.sha256()
+    for part in (wav, (register_json or "").encode(), _tonekit_py_fingerprint().encode()):
+        h.update(len(part).to_bytes(8, "big"))
+        h.update(part)
+    return h.hexdigest()
+
+
+def _canonical(obj: dict) -> str:
+    return json.dumps(obj, sort_keys=True, separators=(",", ":"))
+
+
+def _read_cached(path: Path) -> str | None:
+    try:
+        text = path.read_text(encoding="utf-8")
+        json.loads(text)
+    except (OSError, ValueError):
+        return None  # missing or corrupt: recompute
+    return text
+
+
+def _write_cached(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+    tmp.write_text(text, encoding="utf-8")
+    os.replace(tmp, path)  # atomic: a reader never sees a half-written entry
+
+
+# ---- grading ----------------------------------------------------------------------------------
+
+
+def _base_accent(pack_toml: str) -> str:
+    try:
+        pack = tomllib.loads(pack_toml)
+    except tomllib.TOMLDecodeError as e:
+        raise EvalError(f"the pack is not valid TOML: {e}") from e
+    accent = pack.get("pack", {}).get("base_accent")
+    if not isinstance(accent, str):
+        raise EvalError("the pack has no [pack] base_accent; pass an accent explicitly")
+    return accent
+
+
+def _measured_kind(measured: str | dict) -> str:
+    """"Full", "Partial" or "NotMeasured" from tonekit's serde form (a bare string or one-key map)."""
+    return measured if isinstance(measured, str) else next(iter(measured))
+
+
+@dataclass
+class _Grader:
+    pack_toml: str
+    calib_json: str | None
+    accent: str
+    root: Path
+    cache_dir: Path | None  # None: no cache
+
+    def analysis(self, clip: Clip, register_json: str | None) -> str:
+        wav, pcm = _read_wav(clip, self.root)
+        entry = None if self.cache_dir is None else self.cache_dir / f"{_cache_key(wav, register_json)}.json"
+        if entry is not None and (text := _read_cached(entry)) is not None:
+            return text
+        try:
+            text = tonekit_py.analyze(pcm, TARGET_SR, register_json)
+        except ValueError as e:
+            raise EvalError(f"{clip.id}: {e}") from e
+        if entry is not None:
+            _write_cached(entry, text)
+        return text
+
+    def grade(self, clip: Clip, register_json: str | None) -> tuple[Result, dict]:
+        """The clip's `Result` and the raw assessment (whose `register_update` chains registers)."""
+        analysis_json = self.analysis(clip, register_json)
+        request = {
+            "grading": {"accent": self.accent, "style": None, "style_weight": 0.0},
+            "intended": json.loads(to_candidate_json(clip.intended)),
+            "distractors": [json.loads(to_candidate_json(d)) for d in clip.distractors],
+            "external": [],
+            "compare_accents": [],
+        }
+        try:
+            assessed = tonekit_py.assess(
+                analysis_json, self.pack_toml, self.calib_json, json.dumps(request)
+            )
+        except ValueError as e:
+            raise EvalError(f"{clip.id}: {e}") from e
+        assessment = json.loads(assessed)
+        analysis = json.loads(analysis_json)
+        source = analysis["register_source"]
+        result = Result(
+            id=clip.id,
+            set=clip.set,
+            pair=clip.pair,
+            label=clip.label,
+            speaker=clip.speaker,
+            overall=assessment["overall"],
+            intended_rank=assessment["intended_rank"],
+            margin_llr=assessment["margin_llr"],
+            syllables=[
+                Syllable(
+                    expected=s["expected"],
+                    heard=s["heard"],
+                    p_correct=s["p_correct"],
+                    distance=s["distance"],
+                    measured=_measured_kind(s["measured"]),
+                    deltas=[(d["kind"], d["amount"]) for d in s["deltas"]],
+                )
+                for s in assessment["syllables"]
+            ],
+            register_source=_REGISTER_SOURCES.get(source, source.lower()),
+            issues=list(analysis["issues"]),
+        )
+        return result, assessment
+
+
+def run(
+    clips: list[Clip],
+    pack_toml: str,
+    calib_json: str | None,
+    accent: str | None,
+    *,
+    root: str | Path = ".",
+    cache_dir: str | Path | None = DEFAULT_CACHE_DIR,
+    use_cache: bool = True,
+) -> list[Result]:
+    """Grade `clips`, returning one `Result` per clip in the same order.
+
+    `accent` defaults to the pack's `base_accent`. Each clip's `path` is relative to `root`.
+    Analyses are cached under `cache_dir` unless `use_cache` is false. Raises `EvalError` (naming
+    the clip) if a clip cannot be read or graded.
+    """
+    seen: set[str] = set()
+    for clip in clips:
+        if clip.id in seen:
+            raise EvalError(f"duplicate clip id {clip.id!r}")
+        seen.add(clip.id)
+
+    grader = _Grader(
+        pack_toml=pack_toml,
+        calib_json=calib_json,
+        accent=accent or _base_accent(pack_toml),
+        root=Path(root),
+        cache_dir=Path(cache_dir) if use_cache and cache_dir is not None else None,
+    )
+
+    by_id: dict[str, Result] = {}
+    registers: dict[str, str | None] = {}
+    for speaker in dict.fromkeys(c.speaker for c in clips):
+        register_json: str | None = None
+        for clip in (c for c in clips if c.speaker == speaker and c.set == "register"):
+            result, assessment = grader.grade(clip, register_json)
+            by_id[clip.id] = result
+            update = assessment["register_update"]
+            if update["n_syllables"] > 0:  # nothing measured: there is nothing to learn from
+                register_json = _canonical(update)
+        registers[speaker] = register_json
+
+    for clip in clips:
+        if clip.id not in by_id:
+            by_id[clip.id] = grader.grade(clip, registers[clip.speaker])[0]
+    return [by_id[c.id] for c in clips]
