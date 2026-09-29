@@ -4,7 +4,8 @@
 #
 # Runs on Linux and macOS and needs no Swift toolchain, so CI can run it on every push. It proves
 # that the bindings generate and have the right shape; it cannot prove that the Swift compiles or
-# that the XCFramework links: that is scripts/build-xcframework.sh plus the iOS Simulator tests.
+# that the XCFramework links (it does check that no declared FFI symbol is missing from the static
+# library): that is scripts/build-xcframework.sh plus the iOS Simulator tests.
 #
 # Usage: scripts/check-swift-bindings.sh
 set -euo pipefail
@@ -86,5 +87,8 @@ done
 have tonekit_core.swift 'public var pCorrect: Float'
 have tonekit_core.swift 'public var intendedRank: UInt32'
 have tonekit_core.swift 'public var overall: Float\?'
+
+echo "==> checking that the static library defines every function the headers declare"
+scripts/check-ffi-symbols.sh "$target_dir/debug/libtonekit_ffi.a" "$out"
 
 echo "OK: Swift bindings generated in ${out#"$root"/} and have the expected API"
