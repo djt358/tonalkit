@@ -515,10 +515,14 @@ mod tests {
 
     // --- The lattice of an analysis ---------------------------------------------------------
 
-    /// Hand-built 2 / 4 / 1 syllables, the middle one unvoiced (voiced_p 0.3), with nuclei at
-    /// their middles, boundaries at their edges and the speech region around them.
+    /// Hand-built 2 / 4 / 1 syllables, the middle one whispered (speech with no pitch), with
+    /// nuclei at their middles, boundaries at their edges and the speech region around them.
     fn two_unvoiced_one() -> Analysis {
-        let mut a = hand_with(&[(&[3.0, 5.0], 0.9), (&[5.0, 1.0], 0.3), (&[5.0, 5.0], 0.9)]);
+        let mut a = hand_with(&[
+            (&[3.0, 5.0], true),
+            (&[5.0, 1.0], false),
+            (&[5.0, 5.0], true),
+        ]);
         let starts: Vec<u32> = (0..3).map(|k| LEAD + k * (SYLLABLE + GAP)).collect();
         a.nuclei = starts
             .iter()

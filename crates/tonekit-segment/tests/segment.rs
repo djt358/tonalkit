@@ -631,6 +631,40 @@ fn voicing_crossings_are_boundaries() {
 }
 
 #[test]
+fn voicing_edges_follow_the_pitch_not_voiced_p() {
+    // R32: a frame is voiced when it has a pitch. Pitched 20..40 throughout, but voiced_p sags to
+    // 0.2 over 25..33 (as pYIN's does through a fast fall): no edge there. Then 52..56 is pitched at
+    // voiced_p 0.3: its edges count, as the pitch appears and disappears. (47 is the pause edge.)
+    let e = two_peaks(-20.0, -22.0, -50.0);
+    let frames: Vec<F0Frame> = (0..100)
+        .map(|i| match i {
+            25..33 => F0Frame {
+                hz: Some(150.0),
+                voiced_p: 0.2,
+            },
+            20..40 => F0Frame {
+                hz: Some(150.0),
+                voiced_p: 0.9,
+            },
+            52..56 => F0Frame {
+                hz: Some(150.0),
+                voiced_p: 0.3,
+            },
+            _ => F0Frame {
+                hz: None,
+                voiced_p: 0.0,
+            },
+        })
+        .collect();
+    let f0 = F0Track {
+        provider: "hand".into(),
+        frames,
+    };
+    let b = boundaries(&e, &f0, &range(12, 60), &[nuc(20), nuc(40)]);
+    assert_eq!(b, vec![12, 20, 30, 40, 47, 52, 56, 60], "{b:?}");
+}
+
+#[test]
 fn voicing_crossings_outside_the_region_are_ignored() {
     let e = two_peaks(-20.0, -22.0, -50.0);
     let mut vp = vec![0.0; 100];

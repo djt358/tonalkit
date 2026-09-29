@@ -4,8 +4,6 @@ use tonekit_core::{F0Frame, F0Track, FrameRange, Register};
 
 /// Semitones are measured re this frequency.
 const REF_HZ: f64 = 55.0;
-/// A frame is voiced when it has an f0 and `voiced_p` is at least this.
-const VOICED_P_MIN: f32 = 0.5;
 /// Register width used by [`st_to_chao`] when the register has no usable width.
 const FALLBACK_SPAN_ST: f64 = 4.0;
 
@@ -38,18 +36,19 @@ pub fn st_to_chao(st: f32, r: &Register) -> f32 {
     st_to_chao_f64(f64::from(st), r) as f32
 }
 
-/// The semitone value (re 55 Hz) of a voiced frame: `hz.is_some() && voiced_p ≥ 0.5`.
+/// The semitone value (re 55 Hz) of a voiced frame: one with `hz.is_some()`, the f0 provider's
+/// own voicing decision (ruling R32). `voiced_p` does not enter into it; it is only a confidence
+/// weight (`ToneShape::f0_confidence`).
 ///
-/// An f0 that is not a positive finite number cannot be a pitch, so such a frame is not voiced
-/// however confident it claims to be.
+/// An f0 that is not a positive finite number cannot be a pitch, so such a frame is not voiced.
 pub(crate) fn voiced_st(frame: &F0Frame) -> Option<f64> {
     let hz = frame.hz?;
-    (hz.is_finite() && hz > 0.0 && frame.voiced_p >= VOICED_P_MIN)
-        .then(|| hz_to_st_f64(f64::from(hz)))
+    (hz.is_finite() && hz > 0.0).then(|| hz_to_st_f64(f64::from(hz)))
 }
 
-/// Semitones (re 55 Hz) of the voiced frames of `f0`, in order, within the half-open
-/// `[region.start, region.end)` if a region is given (clamped to the track).
+/// Semitones (re 55 Hz) of the voiced frames of `f0` (every frame with a pitch, whatever its
+/// `voiced_p`), in order, within the half-open `[region.start, region.end)` if a region is given
+/// (clamped to the track). The register is estimated from these.
 pub fn voiced_semitones(f0: &F0Track, region: Option<&FrameRange>) -> Vec<f32> {
     let len = f0.frames.len();
     let (start, end) = match region {

@@ -217,25 +217,26 @@ pub(crate) mod test_support {
         }
     }
 
-    /// [`hand_with`] with every syllable voiced at 0.9.
+    /// [`hand_with`] with every syllable voiced.
     pub(crate) fn hand(sylls: &[&[f32]]) -> Analysis {
-        let voiced: Vec<(&[f32], f32)> = sylls.iter().map(|&k| (k, 0.9)).collect();
+        let voiced: Vec<(&[f32], bool)> = sylls.iter().map(|&k| (k, true)).collect();
         hand_with(&voiced)
     }
 
-    /// A hand-built analysis of exact f0: `LEAD` silent frames, then per `(knots, voiced_p)` a
-    /// `SYLLABLE`-frame syllable following the Chao knots (linear between them) at that
-    /// `voiced_p`, then `GAP` silent frames; a 100–200 Hz speaker with a warm register. Energy is
-    /// −20 dB on syllables and −100 dB elsewhere. Nuclei, boundaries and the speech region are
-    /// left empty for the test to set.
-    pub(crate) fn hand_with(sylls: &[(&[f32], f32)]) -> Analysis {
+    /// A hand-built analysis of exact f0: `LEAD` silent frames, then per `(knots, voiced)` a
+    /// `SYLLABLE`-frame syllable following the Chao knots (linear between them), with that pitch
+    /// at `voiced_p` 0.9 if `voiced` and no pitch at all otherwise (a whisper), then `GAP` silent
+    /// frames; a 100–200 Hz speaker with a warm register. Energy is −20 dB on syllables and
+    /// −100 dB elsewhere. Nuclei, boundaries and the speech region are left empty for the test to
+    /// set.
+    pub(crate) fn hand_with(sylls: &[(&[f32], bool)]) -> Analysis {
         let silent = F0Frame {
             hz: None,
             voiced_p: 0.0,
         };
         let mut frames = vec![silent.clone(); LEAD as usize];
         let mut db = vec![-100.0; LEAD as usize];
-        for &(knots, voiced_p) in sylls {
+        for &(knots, voiced) in sylls {
             let last = SYLLABLE - 1;
             for f in 0..SYLLABLE {
                 let u = f as f32 / last as f32 * (knots.len() - 1) as f32;
@@ -245,9 +246,12 @@ pub(crate) mod test_support {
                 } else {
                     knots[k] + (u - k as f32) * (knots[k + 1] - knots[k])
                 };
-                frames.push(F0Frame {
-                    hz: Some(chao_to_hz(chao, 100.0, 200.0)),
-                    voiced_p,
+                frames.push(match voiced {
+                    true => F0Frame {
+                        hz: Some(chao_to_hz(chao, 100.0, 200.0)),
+                        voiced_p: 0.9,
+                    },
+                    false => silent.clone(),
                 });
                 db.push(-20.0);
             }

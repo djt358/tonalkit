@@ -10,6 +10,7 @@ license.workspace = true
 tonekit-core = { path = "../tonekit-core" }
 
 [dev-dependencies]
+tonekit-f0 = { path = "../tonekit-f0" }
 tonekit-testkit = { path = "../tonekit-testkit" }
 approx = { workspace = true }
 proptest = { workspace = true }

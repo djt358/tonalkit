@@ -9,8 +9,6 @@ const DEDUP_FRAMES: usize = 2;
 /// A span between candidates longer than this many frames (350 ms) is searched for interior
 /// energy minima.
 const LONG_SPAN_FRAMES: usize = 35;
-/// `voiced_p` at or above this is voiced.
-const VOICED_P: f32 = 0.5;
 
 /// [`boundaries_with`] under the default [`SegmentParams`].
 pub fn boundaries(
@@ -36,8 +34,10 @@ pub fn boundaries(
 ///    crossing, i.e. the first frame of a loud run entering it and the last frame leaving it.
 ///    That is the frame whose window straddles the syllable edge. These do not depend on
 ///    voicing. The steepest crossing first;
-/// 4. the frames where `voiced_p` crosses 0.5 (the first frame of the new state), the biggest
-///    change in `voiced_p` first;
+/// 4. voicing edges: the frames where `hz.is_some()` changes (the first frame of the new state;
+///    ruling R32: a frame is voiced when the f0 provider gives it a pitch), the biggest change in
+///    `voiced_p` across the edge first. A dip in `voiced_p` with the pitch kept is not an edge;
+///    pYIN's `voiced_p` sags through fast falls and dips inside a syllable;
 /// 5. interior local minima of the smoothed dB inside any span longer than 35 frames between
 ///    consecutive boundaries found so far, deepest (most prominent) first.
 ///
@@ -97,10 +97,12 @@ pub fn boundaries_with(
         }
     }
 
-    // 4. Voicing crossings, biggest jump first (earliest first among equals).
+    // 4. Voicing edges (R32: pitched or not), biggest voiced_p jump first (earliest first among
+    // equals).
+    let pitched = |i: usize| f0.frames.get(i).is_some_and(|f| f.hz.is_some());
     let voiced_p = |i: usize| f0.frames.get(i).map_or(0.0, |f| f.voiced_p);
     let mut crossings: Vec<(usize, f32)> = (start.saturating_add(1)..end.min(f0.frames.len()))
-        .filter(|&i| (voiced_p(i - 1) >= VOICED_P) != (voiced_p(i) >= VOICED_P))
+        .filter(|&i| pitched(i - 1) != pitched(i))
         .map(|i| (i, (voiced_p(i) - voiced_p(i - 1)).abs()))
         .map(|(i, jump)| (i, if jump.is_finite() { jump } else { 0.0 }))
         .collect();

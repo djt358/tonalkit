@@ -952,6 +952,7 @@ dependencies = [
  "approx",
  "proptest",
  "tonekit-core",
+ "tonekit-f0",
  "tonekit-testkit",
 ]
 

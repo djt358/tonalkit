@@ -61,7 +61,9 @@ fn pyin_tracks_synthetic_f0_within_2pct() {
 
 #[test]
 fn silence_is_unvoiced() {
+    // R32: a frame is voiced when it has a pitch; silence has none (and low confidence too).
     let t = Pyin::default().track(&vec![0.0; 16_000]);
+    assert!(t.frames.iter().all(|f| f.hz.is_none()));
     assert!(t.frames.iter().all(|f| f.voiced_p < 0.5));
 }
 
@@ -140,10 +142,11 @@ fn voicing_onset_lands_within_three_frames_of_truth() {
     let s = synth(&spec(vec![3.0, 5.0], None));
     let t = Pyin::default().track(&s.pcm);
     let first_truth = s.f0_truth.iter().position(Option::is_some).unwrap();
+    // R32: pYIN's voicing decision is `hz.is_some()`.
     let first_est = t
         .frames
         .iter()
-        .position(|f| f.hz.is_some() && f.voiced_p >= 0.5)
+        .position(|f| f.hz.is_some())
         .expect("pYIN finds voicing");
     // The testkit's 20 ms raised-cosine onset ramp is near-silent, which explains up to ~2 frames.
     assert!(
@@ -392,13 +395,59 @@ fn smooth_and_moderate_tracks_are_left_alone() {
 
 #[test]
 fn repair_only_touches_voiced_frames() {
+    // R32: a frame with a pitch is voiced whatever its `voiced_p`, so the low-confidence octave
+    // error at frame 4 is repaired (its `voiced_p` kept). Frame 10 has no pitch: it is left alone,
+    // and the one-frame gap it leaves does not split the run.
     let mut frames: Vec<_> = (0..21).map(|_| voiced(150.0)).collect();
     frames[10] = unvoiced();
-    // Hz set but not voiced enough: not a voiced frame, so neither repaired nor used as a neighbour.
     frames[4] = tonekit_core::F0Frame {
         hz: Some(300.0),
         voiced_p: 0.2,
     };
+    let mut t = track(frames);
+    repair_octaves(&mut t);
+    assert_eq!(
+        t.frames[4],
+        tonekit_core::F0Frame {
+            hz: Some(150.0),
+            voiced_p: 0.2
+        }
+    );
+    assert_eq!(t.frames[10], unvoiced());
+    assert!(t
+        .frames
+        .iter()
+        .enumerate()
+        .all(|(i, f)| i == 10 || f.hz == Some(150.0)));
+}
+
+#[test]
+fn repair_neighbours_skip_bridged_gaps_and_use_original_values() {
+    // Six voiced frames, a 2-frame unvoiced gap, an octave-high frame, another 2-frame gap and six
+    // more voiced frames: gaps of up to 2 frames do not end a run, so this is one run and the lone
+    // frame's neighbours are the nearest voiced ones on each side.
+    let mut frames = vec![voiced(150.0); 6];
+    frames.extend(vec![unvoiced(); 2]);
+    frames.push(voiced(310.0));
+    frames.extend(vec![unvoiced(); 2]);
+    frames.extend(vec![voiced(150.0); 6]);
+    let mut t = track(frames);
+    repair_octaves(&mut t);
+    approx::assert_relative_eq!(t.frames[8].hz.unwrap(), 155.0, max_relative = 1e-5);
+    // The neighbours themselves are unchanged even though one of their neighbours was wrong.
+    assert!(t.frames[..6].iter().all(|f| f.hz == Some(150.0)));
+    assert!(t.frames[11..].iter().all(|f| f.hz == Some(150.0)));
+}
+
+#[test]
+fn a_gap_of_three_frames_ends_a_run() {
+    // The same lone frame behind 3-frame gaps is a run of one: too short to repair, and its
+    // neighbours' runs never see it. (Before R32 the neighbour median ignored gaps entirely.)
+    let mut frames = vec![voiced(150.0); 6];
+    frames.extend(vec![unvoiced(); 3]);
+    frames.push(voiced(310.0));
+    frames.extend(vec![unvoiced(); 3]);
+    frames.extend(vec![voiced(150.0); 6]);
     let mut t = track(frames);
     let before = t.clone();
     repair_octaves(&mut t);
@@ -406,20 +455,51 @@ fn repair_only_touches_voiced_frames() {
 }
 
 #[test]
-fn repair_neighbours_skip_unvoiced_frames_and_use_original_values() {
-    // Six voiced frames, an unvoiced gap, then a lone octave-high frame, another gap and six more
-    // voiced frames: the lone frame's neighbours are the nearest voiced ones on each side.
-    let mut frames = vec![voiced(150.0); 6];
-    frames.extend(vec![unvoiced(); 8]);
-    frames.push(voiced(310.0));
-    frames.extend(vec![unvoiced(); 8]);
-    frames.extend(vec![voiced(150.0); 6]);
+fn runs_shorter_than_five_voiced_frames_are_left_alone() {
+    // Four voiced frames with an octave error in the middle: too few voters to trust.
+    let four = [150.0, 150.0, 300.0, 150.0];
+    let mut t = track(four.iter().map(|&hz| voiced(hz)).collect());
+    let before = t.clone();
+    repair_octaves(&mut t);
+    assert_eq!(t, before);
+    // Five voiced frames (a bridged gap does not count as one) are enough.
+    let mut frames: Vec<_> = four.iter().map(|&hz| voiced(hz)).collect();
+    frames.push(unvoiced());
+    frames.push(voiced(150.0));
     let mut t = track(frames);
     repair_octaves(&mut t);
-    approx::assert_relative_eq!(t.frames[14].hz.unwrap(), 155.0, max_relative = 1e-5);
-    // The neighbours themselves are unchanged even though one of their neighbours was wrong.
-    assert!(t.frames[..6].iter().all(|f| f.hz == Some(150.0)));
-    assert!(t.frames[23..].iter().all(|f| f.hz == Some(150.0)));
+    assert_eq!(t.frames[2].hz, Some(150.0));
+}
+
+#[test]
+fn neighbouring_runs_do_not_vote() {
+    // A 5-frame low syllable at 100 Hz, a 4-frame pause, then a long high syllable at 205 Hz
+    // (12.4 st up). Pooling voiced neighbours across the pause (the pre-R32 rule) gave the low
+    // syllable's last frame four 100 Hz voters and five 205 Hz ones, and "repaired" it up an
+    // octave; within its own run the only voters are the low syllable's own frames.
+    let mut frames = vec![voiced(100.0); 5];
+    frames.extend(vec![unvoiced(); 4]);
+    frames.extend(vec![voiced(205.0); 20]);
+    let mut t = track(frames);
+    let before = t.clone();
+    repair_octaves(&mut t);
+    assert_eq!(t, before);
+}
+
+#[test]
+fn a_legitimate_jump_across_a_short_gap_is_not_repaired() {
+    // Two syllables 12 st apart with a gap of 0, 1 or 2 frames form one run, but each frame's
+    // neighbours are mostly its own syllable's (the frames beside the gap see five of each: the
+    // median falls halfway, 6 st away), so nothing moves.
+    for gap in 0..=2 {
+        let mut frames = vec![voiced(100.0); 10];
+        frames.extend(vec![unvoiced(); gap]);
+        frames.extend(vec![voiced(200.0); 10]);
+        let mut t = track(frames);
+        let before = t.clone();
+        repair_octaves(&mut t);
+        assert_eq!(t, before, "gap {gap}");
+    }
 }
 
 #[test]
@@ -437,11 +517,12 @@ fn repair_handles_empty_and_short_tracks() {
     let mut t = track(vec![]);
     repair_octaves(&mut t);
     assert!(t.frames.is_empty());
+    // Two frames 12 st apart are a run of two: too few voters to say which one is wrong (before
+    // R32 each shifted toward the other and they swapped sides).
     let mut t = track(vec![voiced(150.0), voiced(300.0)]);
+    let before = t.clone();
     repair_octaves(&mut t);
-    // Two frames disagree by 12 st, each one's only neighbour is the other: both shift toward the
-    // other from the original values, so they swap sides rather than converge. Single pass by rule.
-    assert_eq!(t.frames.len(), 2);
+    assert_eq!(t, before);
 }
 
 #[test]
@@ -519,6 +600,88 @@ fn repair_consults_exactly_five_neighbours_each_side() {
         150.0, 150.0, 600.0, 600.0, 600.0, 600.0, 600.0, 600.0, 600.0,
     ]);
     approx::assert_relative_eq!(b, 600.0, max_relative = 1e-5);
+}
+
+// --- Octave repair on real pYIN tracks (ruling R32) --------------------------------------------
+
+/// Task 9's utterances: one 250 ms syllable per entry (Chao knots) with `gap_ms` of silence after
+/// each, no onset or creak, floor 100 Hz / ceiling 200 Hz, 200 ms lead and tail.
+fn row(sylls: &[&[f32]], gap_ms: f32) -> SynthSpec {
+    SynthSpec {
+        floor_hz: 100.0,
+        ceil_hz: 200.0,
+        lead_ms: 200.0,
+        tail_ms: 200.0,
+        syllables: sylls
+            .iter()
+            .map(|chao| SynthSyllable {
+                chao: chao.to_vec(),
+                dur_ms: 250.0,
+                gap_after_ms: gap_ms,
+                unvoiced_onset_ms: 0.0,
+                creak: None,
+            })
+            .collect(),
+        snr_db: None,
+        seed: 1,
+    }
+}
+
+/// Semitones between two pitches.
+fn st_apart(a: f32, b: f32) -> f32 {
+    12.0 * (a / b).log2().abs()
+}
+
+#[test]
+fn the_octave_error_in_spoken_4_1_3_is_repaired() {
+    // spoken(4-1-3): a 5 → 1 fall, a high level tone, a final dip. pYIN tracks the fall correctly
+    // (frame 39: 118 Hz, truth 118 Hz) but with voiced_p mostly below 0.5. The pre-R32 repair only
+    // let voiced_p >= 0.5 frames vote, so frame 39's voters were three frames of its own fall and
+    // five of the next syllable's 200 Hz level; their median sat 9.1 st above it, and the "repair"
+    // doubled it to 236 Hz. Voting within its own run, the whole utterance stays on the truth.
+    let s = synth(&row(&[&[5.0, 1.0], &[5.0, 5.0], &[2.0, 1.0, 4.0]], 60.0));
+    let mut t = Pyin::default().track(&s.pcm);
+    repair_octaves(&mut t);
+    let truth39 = s.f0_truth[39].expect("frame 39 is in the fall");
+    let est39 = t.frames[39].hz.expect("pYIN voices frame 39");
+    assert!(
+        st_apart(est39, truth39) < 0.5,
+        "frame 39: {est39} Hz vs {truth39} Hz"
+    );
+    for (i, (truth, f)) in s.f0_truth.iter().zip(&t.frames).enumerate() {
+        if let (Some(truth), Some(est)) = (truth, f.hz) {
+            assert!(
+                st_apart(est, *truth) < 1.0,
+                "frame {i}: {est} Hz vs {truth} Hz"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_legitimate_12_st_jump_between_syllables_is_not_repaired() {
+    // Chao 1 then Chao 5 (100 Hz, 200 Hz: exactly 12 st) and back, with a 20 ms gap between the
+    // syllables. pYIN leaves the synthesiser's 20 ms edge ramps unpitched too, so the gap is ~5
+    // frames and the syllables are separate runs (the hand-built tests above cover a jump inside
+    // one run). The repair must leave every frame where pYIN put it.
+    for sylls in [
+        [&[1.0f32, 1.0][..], &[5.0, 5.0]],
+        [&[5.0, 5.0], &[1.0, 1.0]],
+    ] {
+        let s = synth(&row(&sylls, 20.0));
+        let raw = Pyin::default().track(&s.pcm);
+        let mut t = raw.clone();
+        repair_octaves(&mut t);
+        assert_eq!(t, raw, "{sylls:?}");
+        for (i, (truth, f)) in s.f0_truth.iter().zip(&t.frames).enumerate() {
+            if let (Some(truth), Some(est)) = (truth, f.hz) {
+                assert!(
+                    st_apart(est, *truth) < 1.0,
+                    "{sylls:?} frame {i}: {est} vs {truth}"
+                );
+            }
+        }
+    }
 }
 
 // --- Clipping and SNR --------------------------------------------------------------------------
