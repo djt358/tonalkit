@@ -1,0 +1,22 @@
+[package]
+name = "tonekit-cli"
+version = "0.1.0"
+description = "The `tonekit` command line: grade a WAV file's lexical tones, or print its open tone lattice, for quick local checks."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[[bin]]
+name = "tonekit"
+path = "src/main.rs"
+
+[dependencies]
+tonekit = { path = "../tonekit" }
+clap = { version = "4", features = ["derive"] }
+hound = "3"
+serde_json = { workspace = true }
+
+[dev-dependencies]
+tonekit-testkit = { path = "../tonekit-testkit" }
+tempfile = "3"
