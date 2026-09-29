@@ -12,7 +12,7 @@ use tonekit_core::{
 use tonekit_decode::{decode, lattice};
 use tonekit_f0::{energy, repair_octaves, F0Provider, Pyin};
 use tonekit_pack::LanguagePack;
-use tonekit_segment::{boundaries, nuclei, speech_region, SegmentParams};
+use tonekit_segment::{boundaries, nuclei, speech_region, speech_threshold, SegmentParams};
 use tonekit_shape::voiced_semitones;
 use tonekit_testkit::{register_for, synth, SynthSpec, SynthSyllable};
 
@@ -402,4 +402,66 @@ fn a_single_candidate_is_the_known_count_case() {
         assert!(fit.span.end_frame.abs_diff(end) <= 6, "{:?}", fit.span);
     }
     assert!(r.candidates[0].posterior > r.null_posterior);
+}
+
+#[test]
+fn candidate_llr_is_the_sum_of_its_path() {
+    // llr = Σ (judge's llr_target + dur) − filler_per_frame × speech frames outside syllables,
+    // with dur = −(ln(d/r))²/(2σ²) and r the median inter-nucleus interval.
+    let pack = cmn();
+    let d = pack.calibration().decode.clone();
+    let a = analysis_of(&three(vec![
+        vec![3., 3.],
+        vec![5., 1.],
+        vec![5., 5.],
+        vec![2., 1., 4.],
+    ]));
+    let mut mixed = c("mixed", &["4", "1", "3"]);
+    mixed.targets[2].lexical_variants.push(WeightedTone {
+        tone: ToneId("2".into()),
+        weight: 0.3,
+    });
+    let cands = [
+        c("spell", &["4", "1", "3"]),
+        mixed,
+        c("long", &["2", "4", "1", "3"]),
+        c("short", &["1"]),
+    ];
+    let r = decode(&a, &pack, &std_g(), &cands).unwrap();
+
+    let threshold = speech_threshold(&a.energy, &SegmentParams::default());
+    let speech = |from: u32, to: u32| {
+        (from..to)
+            .filter(|&f| a.energy.db[f as usize] >= threshold)
+            .count() as f64
+    };
+    let mut frames: Vec<u32> = a.nuclei.iter().map(|n| n.frame).collect();
+    frames.sort_unstable();
+    let mut gaps: Vec<u32> = frames.windows(2).map(|w| w[1] - w[0]).collect();
+    gaps.sort_unstable();
+    assert_eq!(gaps.len() % 2, 1, "{frames:?}");
+    let rate_s = f64::from(gaps[gaps.len() / 2]) * 0.01;
+    let sigma = f64::from(d.dur_sigma);
+    let filler = f64::from(d.filler_per_frame);
+    let n_frames = a.energy.db.len() as u32;
+
+    for cand in &r.candidates {
+        let mut want = 0.0;
+        let mut at = 0;
+        for s in &cand.syllables {
+            let (from, to) = (s.span.start_frame, s.span.end_frame);
+            let x = (f64::from(to - from) * 0.01 / rate_s).ln();
+            want += f64::from(s.judgement.llr_target) - x * x / (2.0 * sigma * sigma);
+            want -= filler * speech(at, from);
+            at = to;
+        }
+        want -= filler * speech(at, n_frames);
+        approx::assert_abs_diff_eq!(f64::from(cand.llr), want, epsilon = 1e-4);
+    }
+    // A lexical variant widens the target without losing the spoken 4-1-3.
+    let m = r.candidates.iter().find(|x| x.id.0 == "mixed").unwrap();
+    assert!(
+        m.syllables.iter().all(|f| f.judgement.llr_target > 0.0),
+        "{m:#?}"
+    );
 }

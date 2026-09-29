@@ -20,9 +20,8 @@ use tonekit_core::{
     Analysis, AssessError, GradingTarget, LatticeTbu, Measured, TbuSpan, ToneLattice, ToneShape,
 };
 use tonekit_pack::{logsumexp, LanguagePack, TargetContext};
-use tonekit_shape::extract;
 
-use crate::cache::merged_issues;
+use crate::cache::{extract_span, merged_issues};
 use crate::{clamp_log, count_u32, pack_err};
 
 /// Schema string carried by every [`ToneLattice`].
@@ -130,17 +129,15 @@ pub(crate) fn forward_backward(log_prior: &[f64], emissions: &[Emission]) -> Mar
             }
         })
         .collect();
+    // An unmeasured TBU's emission is 0 in every context, so its marginal is exactly 0 (the
+    // logsumexp would give ln Σγ, 0 only up to rounding).
     let loglik = (0..n)
-        .map(|i| {
-            (0..t)
-                .map(|c| {
-                    if i == 0 {
-                        e(0, 0, c)
-                    } else {
-                        logsumexp((0..t).map(|p| log_gamma[i - 1][p] + e(i, p, c)))
-                    }
-                })
-                .collect()
+        .map(|i| match (&emissions[i], i) {
+            (None, _) => vec![0.0; t],
+            (Some(_), 0) => (0..t).map(|c| e(0, 0, c)).collect(),
+            (Some(_), _) => (0..t)
+                .map(|c| logsumexp((0..t).map(|p| log_gamma[i - 1][p] + e(i, p, c))))
+                .collect(),
         })
         .collect();
     let posterior = log_gamma
@@ -200,7 +197,7 @@ pub(crate) fn build(
     let mut units = Vec::with_capacity(n);
     let mut emissions = Vec::with_capacity(n);
     for (i, span) in spans.into_iter().enumerate() {
-        match extract(&a.f0, &span, &a.register) {
+        match extract_span(a, span.start_frame, span.end_frame) {
             Ok(ex) => {
                 let issues = merged_issues(&a.issues, &ex.issues);
                 emissions.push(Some(emission(pack, g, &ex.shape, &issues, i, n)?));
@@ -245,6 +242,8 @@ pub(crate) fn build(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::{cmn, hand_with, std_g, GAP, LEAD, SYLLABLE};
+    use tonekit_core::{FrameRange, MeasureIssue, Nucleus, ToneId};
 
     const EPS: f64 = 1e-9;
 
@@ -372,7 +371,7 @@ mod tests {
             for (a, b) in row.iter().zip(p) {
                 assert!((a - b).abs() < EPS);
             }
-            assert!(ll.iter().all(|v| v.abs() < EPS));
+            assert!(ll.iter().all(|&v| v == 0.0));
         }
     }
 
@@ -502,7 +501,7 @@ mod tests {
         let prior = ln(&[0.5, 0.5]);
         let third = vec![-5.0, -5.0, -5.0, 0.0];
         let m = forward_backward(&prior, &[Some(vec![-8.0, 0.0]), None, Some(third)]);
-        assert!(m.loglik[1].iter().all(|v| v.abs() < EPS));
+        assert!(m.loglik[1].iter().all(|&v| v == 0.0));
         assert!(m.posterior[1][1] > 0.9, "{m:?}");
         assert!(m.posterior[2][1] > 0.9, "{m:?}");
     }
@@ -511,5 +510,113 @@ mod tests {
     fn empty_lattice() {
         let m = forward_backward(&ln(&[0.5, 0.5]), &[]);
         assert!(m.posterior.is_empty() && m.loglik.is_empty());
+    }
+
+    // --- The lattice of an analysis ---------------------------------------------------------
+
+    /// Hand-built 2 / 4 / 1 syllables, the middle one unvoiced (voiced_p 0.3), with nuclei at
+    /// their middles, boundaries at their edges and the speech region around them.
+    fn two_unvoiced_one() -> Analysis {
+        let mut a = hand_with(&[(&[3.0, 5.0], 0.9), (&[5.0, 1.0], 0.3), (&[5.0, 5.0], 0.9)]);
+        let starts: Vec<u32> = (0..3).map(|k| LEAD + k * (SYLLABLE + GAP)).collect();
+        a.nuclei = starts
+            .iter()
+            .map(|&s| Nucleus {
+                frame: s + SYLLABLE / 2,
+                strength_db: 20.0,
+            })
+            .collect();
+        a.boundaries = starts.iter().flat_map(|&s| [s, s + SYLLABLE]).collect();
+        a.speech = Some(FrameRange {
+            start: starts[0],
+            end: starts[2] + SYLLABLE,
+        });
+        a
+    }
+
+    fn context(index: u32, prev: Option<&ToneId>, phrase_final: bool) -> TargetContext {
+        TargetContext {
+            index,
+            count: 3,
+            prev: prev.cloned(),
+            phrase_final,
+        }
+    }
+
+    #[test]
+    fn lattice_emissions_are_scored_in_context() {
+        let (pack, g) = (cmn(), std_g());
+        let l = build(&two_unvoiced_one(), &pack, &g).unwrap();
+        let spans: Vec<(u32, u32)> = l
+            .tbus
+            .iter()
+            .map(|t| (t.span.start_frame, t.span.end_frame))
+            .collect();
+        assert_eq!(spans, [(10, 35), (41, 66), (72, 97)]);
+        let tones = pack.inventory();
+
+        // TBU 0: e_0(None, c), the first of three and not final.
+        let first = l.tbus[0].shape.as_ref().unwrap();
+        assert_eq!(l.tbus[0].measured, Measured::Full);
+        for (c, tone) in tones.iter().enumerate() {
+            let ctx = context(0, None, false);
+            let want = pack.tone_loglik(&g, first, tone, &ctx, &[]).unwrap();
+            assert_eq!(l.tbus[0].loglik[c], want);
+        }
+
+        // TBU 1 has no shape: no evidence, and no shape reported.
+        assert_eq!(
+            l.tbus[1].measured,
+            Measured::NotMeasured {
+                issue: MeasureIssue::Unvoiced
+            }
+        );
+        assert!(l.tbus[1].shape.is_none());
+        assert!(l.tbus[1].loglik.iter().all(|&v| v == 0.0));
+
+        // TBU 2: phrase-final, its emission marginalised over TBU 1's posterior.
+        let last = l.tbus[2].shape.as_ref().unwrap();
+        for (c, tone) in tones.iter().enumerate() {
+            let want = logsumexp(tones.iter().zip(&l.tbus[1].posterior).map(|(prev, &p)| {
+                let ctx = context(2, Some(prev), true);
+                f64::from(p).ln() + f64::from(pack.tone_loglik(&g, last, tone, &ctx, &[]).unwrap())
+            }));
+            assert!((f64::from(l.tbus[2].loglik[c]) - want).abs() < 1e-5);
+        }
+
+        // The measured TBUs read as spoken; every posterior sums to 1.
+        let best = |p: &[f32]| (0..p.len()).max_by(|&x, &y| p[x].total_cmp(&p[y])).unwrap();
+        assert_eq!(tones[best(&l.tbus[0].posterior)].0, "2");
+        assert_eq!(tones[best(&l.tbus[2].posterior)].0, "1");
+        for tbu in &l.tbus {
+            assert!((tbu.posterior.iter().sum::<f32>() - 1.0).abs() < 1e-5);
+        }
+    }
+
+    #[test]
+    fn analysis_issues_mark_measured_tbus_partial() {
+        let (pack, g) = (cmn(), std_g());
+        let mut a = two_unvoiced_one();
+        a.issues.push(MeasureIssue::LowSnr);
+        let l = build(&a, &pack, &g).unwrap();
+        let partial = Measured::Partial {
+            issues: vec![MeasureIssue::LowSnr],
+        };
+        assert_eq!(l.tbus[0].measured, partial);
+        assert_eq!(l.tbus[2].measured, partial);
+        assert!(matches!(l.tbus[1].measured, Measured::NotMeasured { .. }));
+        // The widened tolerances change the likelihoods.
+        let clean = build(&two_unvoiced_one(), &pack, &g).unwrap();
+        assert_ne!(l.tbus[0].loglik, clean.tbus[0].loglik);
+    }
+
+    #[test]
+    fn no_nuclei_no_tbus() {
+        let (pack, g) = (cmn(), std_g());
+        let mut a = two_unvoiced_one();
+        a.nuclei.clear();
+        let l = build(&a, &pack, &g).unwrap();
+        assert!(l.tbus.is_empty());
+        assert_eq!(l.schema, SCHEMA);
     }
 }

@@ -4,11 +4,16 @@
 //! Every candidate in a decode searches the same boundary pairs, so a shape is extracted at most
 //! once per pair however many candidates visit it. `judge` resolves an expectation for every
 //! inventory tone on each call (≈2 µs), so the DP does not call it per edge. For a target without
-//! lexical variants it reads a row of per-tone LLRs instead, computed once per (pair, context)
-//! from `tone_loglik` exactly as `judge` computes `llr_target` (see [`tone_llrs`]), and shared by
-//! every candidate that places any tone in that context there — tone-minimal candidates share
-//! most of their contexts. Targets with lexical variants go through `judge`, memoised per
-//! (pair, target, context). `judge` itself is only called for the syllables of chosen paths.
+//! lexical variants it reads a row of per-tone LLRs instead, computed from `tone_loglik` exactly
+//! as `judge` computes `llr_target` (see [`tone_llrs`]) once per (pair, context class).
+//!
+//! A *context class* is a set of contexts under which the pack resolves the same expectation for
+//! every inventory tone. A tone's likelihood depends on its context only through that expectation
+//! (spec §7.1: the mixture over the expectation's components), so every context in a class gives
+//! the same row. Classes are found by resolving the expectations, never by assuming which context
+//! fields the pack reads, and they let candidates of different lengths and positions share rows.
+//! Targets with lexical variants go through `judge`, memoised per (pair, target, context).
+//! `judge` itself is only called for the syllables of chosen paths.
 
 use std::collections::BTreeMap;
 
@@ -16,7 +21,7 @@ use tonekit_core::{
     Analysis, AssessError, GradingTarget, MeasureIssue, Measured, SyllableFit, TbuSpan,
     ToneJudgement, ToneTarget,
 };
-use tonekit_pack::{logsumexp, LanguagePack, TargetContext};
+use tonekit_pack::{logsumexp, Expectation, LanguagePack, TargetContext};
 use tonekit_shape::{extract, Extracted};
 
 use crate::{clamp_log, pack_err, tone_index};
@@ -98,9 +103,8 @@ fn tone_llrs(
 /// How the DP names a (target, context) pair; interned once per candidate by [`Scorer::key`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum TargetKey {
-    /// A target with no lexical variants: its main tone (an inventory index) in an interned
-    /// context.
-    Tone { ctx: usize, tone: usize },
+    /// A target with no lexical variants: its main tone (an inventory index) in a context class.
+    Tone { class: usize, tone: usize },
     /// A target with lexical variants, in its context: scored by `judge`.
     Mixed { id: usize },
 }
@@ -112,9 +116,12 @@ pub(crate) struct Scorer<'a> {
     g: &'a GradingTarget,
     unvoiced_llr: f32,
     segments: BTreeMap<(u32, u32), Segment>,
-    contexts: Vec<TargetContext>,
+    /// Every context seen, with its class.
+    contexts: Vec<(TargetContext, usize)>,
+    /// Per class: the expectation of every inventory tone, and the first context seen in it.
+    classes: Vec<(Vec<Expectation>, TargetContext)>,
     mixed: Vec<(ToneTarget, TargetContext)>,
-    /// `(from, to, context)` → [`tone_llrs`] of that segment.
+    /// `(from, to, class)` → [`tone_llrs`] of that segment.
     rows: BTreeMap<(u32, u32, usize), Vec<f32>>,
     /// `(from, to, mixed id)` → `judge(..).llr_target`.
     mixed_llrs: BTreeMap<(u32, u32, usize), f32>,
@@ -129,6 +136,7 @@ impl<'a> Scorer<'a> {
             unvoiced_llr: pack.calibration().decode.unvoiced_syllable_llr,
             segments: BTreeMap::new(),
             contexts: Vec::new(),
+            classes: Vec::new(),
             mixed: Vec::new(),
             rows: BTreeMap::new(),
             mixed_llrs: BTreeMap::new(),
@@ -143,26 +151,51 @@ impl<'a> Scorer<'a> {
     /// The key of `target` in `ctx`, interning it on first sight. A target's `label` does not
     /// affect scoring, so targets that differ only in label share a key.
     ///
-    /// Errors: `UnknownTone` for a main tone outside the inventory.
+    /// Errors: `UnknownTone` for a main tone outside the inventory; `Pack` if the pack cannot
+    /// resolve some inventory tone in `ctx` (scoring would need it for the background).
     pub(crate) fn key(
         &mut self,
         target: &ToneTarget,
         ctx: &TargetContext,
     ) -> Result<TargetKey, AssessError> {
-        if target.lexical_variants.is_empty() {
-            let tone =
-                tone_index(self.pack, &target.tone).ok_or_else(|| AssessError::UnknownTone {
-                    tone: target.tone.clone(),
-                })?;
-            let ctx = intern(&mut self.contexts, ctx, |a, b| a == b);
-            return Ok(TargetKey::Tone { ctx, tone });
+        if !target.lexical_variants.is_empty() {
+            let unlabelled = ToneTarget {
+                label: None,
+                ..target.clone()
+            };
+            let id = intern(&mut self.mixed, &(unlabelled, ctx.clone()));
+            return Ok(TargetKey::Mixed { id });
         }
-        let unlabelled = ToneTarget {
-            label: None,
-            ..target.clone()
+        let tone = tone_index(self.pack, &target.tone).ok_or_else(|| AssessError::UnknownTone {
+            tone: target.tone.clone(),
+        })?;
+        Ok(TargetKey::Tone {
+            class: self.class(ctx)?,
+            tone,
+        })
+    }
+
+    /// The context class of `ctx`: the first class whose expectations `ctx` resolves to.
+    fn class(&mut self, ctx: &TargetContext) -> Result<usize, AssessError> {
+        if let Some((_, class)) = self.contexts.iter().find(|(c, _)| c == ctx) {
+            return Ok(*class);
+        }
+        let expectations = self
+            .pack
+            .inventory()
+            .iter()
+            .map(|tone| self.pack.expect_tone(self.g, tone, ctx))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(pack_err)?;
+        let class = match self.classes.iter().position(|(e, _)| *e == expectations) {
+            Some(class) => class,
+            None => {
+                self.classes.push((expectations, ctx.clone()));
+                self.classes.len() - 1
+            }
         };
-        let id = intern(&mut self.mixed, &(unlabelled, ctx.clone()), |a, b| a == b);
-        Ok(TargetKey::Mixed { id })
+        self.contexts.push((ctx.clone(), class));
+        Ok(class)
     }
 
     /// `judge(..).llr_target` of the target behind `key` on frames `[from, to)`, or
@@ -177,13 +210,13 @@ impl<'a> Scorer<'a> {
             return Ok(self.unvoiced_llr);
         };
         match key {
-            TargetKey::Tone { ctx, tone } => {
-                if let Some(row) = self.rows.get(&(from, to, ctx)) {
+            TargetKey::Tone { class, tone } => {
+                if let Some(row) = self.rows.get(&(from, to, class)) {
                     return Ok(row[tone]);
                 }
-                let row = tone_llrs(pack, g, ex, &self.contexts[ctx], &a.issues)?;
+                let row = tone_llrs(pack, g, ex, &self.classes[class].1, &a.issues)?;
                 let v = row[tone];
-                self.rows.insert((from, to, ctx), row);
+                self.rows.insert((from, to, class), row);
                 Ok(v)
             }
             TargetKey::Mixed { id } => {
@@ -235,9 +268,9 @@ impl<'a> Scorer<'a> {
     }
 }
 
-/// The index of `item` in `table` under `same`, appending a copy if it is new.
-fn intern<T: Clone>(table: &mut Vec<T>, item: &T, same: impl Fn(&T, &T) -> bool) -> usize {
-    if let Some(i) = table.iter().position(|x| same(x, item)) {
+/// The index of `item` in `table`, appending a copy if it is new.
+fn intern<T: Clone + PartialEq>(table: &mut Vec<T>, item: &T) -> usize {
+    if let Some(i) = table.iter().position(|x| x == item) {
         return i;
     }
     table.push(item.clone());
@@ -275,24 +308,39 @@ mod tests {
         let (pack, g) = (cmn(), std_g());
         let a = hand(&[]);
         let mut s = Scorer::new(&a, &pack, &g);
-        let k = s.key(&target("3", None), &ctx(0, None, false)).unwrap();
-        assert_eq!(
-            s.key(&target("3", Some("mǎi")), &ctx(0, None, false)),
-            Ok(k)
-        );
-        // Another tone in the same context shares the context (and so its LLR row).
-        let TargetKey::Tone { ctx: c3, .. } = k else {
-            panic!("{k:?}")
+        let mut key = |t: &ToneTarget, c: &TargetContext| s.key(t, c).unwrap();
+        let class = |k: TargetKey| match k {
+            TargetKey::Tone { class, .. } => class,
+            TargetKey::Mixed { .. } => panic!("{k:?}"),
         };
-        let k4 = s.key(&target("4", None), &ctx(0, None, false)).unwrap();
-        assert!(matches!(k4, TargetKey::Tone { ctx, .. } if ctx == c3));
+        let k = key(&target("3", None), &ctx(0, None, false));
+        assert_eq!(key(&target("3", Some("mǎi")), &ctx(0, None, false)), k);
+        // Another tone in the same context shares the class (and so its LLR rows).
+        let k4 = key(&target("4", None), &ctx(0, None, false));
         assert_ne!(k4, k);
-        assert_ne!(s.key(&target("3", None), &ctx(1, None, false)), Ok(k));
-        assert_ne!(s.key(&target("3", None), &ctx(0, Some("1"), false)), Ok(k));
-        let m = s.key(&varied("3", "2", 0.3), &ctx(0, None, false)).unwrap();
+        assert_eq!(class(k4), class(k));
+        // So does any context the pack resolves identically: cmn reads prev and phrase_final.
+        let elsewhere = TargetContext {
+            index: 4,
+            count: 7,
+            ..ctx(0, None, false)
+        };
+        assert_eq!(key(&target("3", None), &elsewhere), k);
+        // Contexts the pack resolves differently get their own class: the neutral tone after
+        // "1", and the phrase-final third.
+        let after_1 = class(key(&target("3", None), &ctx(1, Some("1"), false)));
+        let after_2 = class(key(&target("3", None), &ctx(1, Some("2"), false)));
+        let last = class(key(&target("3", None), &ctx(2, None, true)));
+        let classes = [class(k), after_1, after_2, last];
+        for (i, x) in classes.iter().enumerate() {
+            assert!(!classes[i + 1..].contains(x), "{classes:?}");
+        }
+
+        let m = key(&varied("3", "2", 0.3), &ctx(0, None, false));
         assert!(matches!(m, TargetKey::Mixed { .. }));
-        assert_eq!(s.key(&varied("3", "2", 0.3), &ctx(0, None, false)), Ok(m));
-        assert_ne!(s.key(&varied("3", "2", 0.4), &ctx(0, None, false)), Ok(m));
+        assert_eq!(key(&varied("3", "2", 0.3), &ctx(0, None, false)), m);
+        assert_ne!(key(&varied("3", "2", 0.4), &ctx(0, None, false)), m);
+        assert_ne!(key(&varied("3", "2", 0.3), &ctx(1, None, false)), m);
         assert_eq!(
             s.key(&target("9", None), &ctx(0, None, false)),
             Err(AssessError::UnknownTone {
@@ -315,10 +363,20 @@ mod tests {
             varied("3", "2", 0.4),
             varied("5", "1", 0.2),
         ];
+        // Each context is followed by one of the same class at another position, which reads
+        // its rows from the first.
+        let moved = |c: TargetContext| TargetContext {
+            index: c.index + 3,
+            count: 9,
+            ..c
+        };
         let contexts = [
             ctx(0, None, false),
+            moved(ctx(0, None, false)),
             ctx(1, Some("3"), false),
+            moved(ctx(1, Some("3"), false)),
             ctx(2, Some("3"), true),
+            moved(ctx(2, Some("3"), true)),
             ctx(2, Some("1"), true),
         ];
         let mut s = Scorer::new(&a, &pack, &g);
