@@ -7,7 +7,7 @@
 
 use tonekit_core::{
     AccentId, Analysis, AssessError, Candidate, CandidateId, EnergyTrack, F0Frame, F0Track,
-    GradingTarget, Measured, RegisterSource, ToneId, ToneTarget, WeightedTone,
+    GradingTarget, MeasureIssue, Measured, RegisterSource, ToneId, ToneTarget, WeightedTone,
 };
 use tonekit_decode::{decode, lattice};
 use tonekit_f0::{energy, repair_octaves, F0Provider, Pyin};
@@ -252,10 +252,47 @@ fn no_speech_gives_unmeasured_candidates() {
         assert_eq!(cand.syllables.len(), k);
         assert_eq!(cand.llr, k as f32 * unvoiced);
         for s in &cand.syllables {
-            assert!(matches!(s.judgement.measured, Measured::NotMeasured { .. }));
+            assert_eq!(
+                s.judgement.measured,
+                Measured::NotMeasured {
+                    issue: MeasureIssue::Unvoiced
+                }
+            );
+            assert_eq!((s.span.start_frame, s.span.end_frame), (0, 0));
+            assert_eq!(s.judgement.llr_target, unvoiced);
         }
     }
     assert_eq!(r.null_llr, 0.0);
+}
+
+#[test]
+fn too_few_boundaries_gives_unmeasured_syllables_at_the_region_start() {
+    // One spoken syllable cannot hold eight: that candidate has no complete path.
+    let pack = cmn();
+    let unvoiced = pack.calibration().decode.unvoiced_syllable_llr;
+    let a = analysis_of(&three(vec![vec![5., 5.]]));
+    let start = a.speech.as_ref().unwrap().start;
+    let r = decode(
+        &a,
+        &pack,
+        &std_g(),
+        &[c("eight", &["1"; 8]), c("one", &["1"])],
+    )
+    .unwrap();
+    assert_eq!(r.candidates[0].id.0, "one");
+    let eight = &r.candidates[1];
+    assert_eq!(eight.llr, 8.0 * unvoiced);
+    assert_eq!(eight.syllables.len(), 8);
+    for s in &eight.syllables {
+        assert_eq!((s.span.start_frame, s.span.end_frame), (start, start));
+        assert_eq!(
+            s.judgement.measured,
+            Measured::NotMeasured {
+                issue: MeasureIssue::Unvoiced
+            }
+        );
+        assert_eq!(s.judgement.expected.0, "1");
+    }
 }
 
 #[test]

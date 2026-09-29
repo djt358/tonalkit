@@ -17,7 +17,8 @@
 //! `loglik_i(c) = logsumexp_p(ln γ_{i−1}(p) + e_i(p, c))` (`e_0(c)` at `i = 0`).
 
 use tonekit_core::{
-    Analysis, AssessError, GradingTarget, LatticeTbu, Measured, TbuSpan, ToneLattice, ToneShape,
+    Analysis, AssessError, GradingTarget, LatticeTbu, MeasureIssue, Measured, TbuSpan, ToneId,
+    ToneLattice, ToneShape,
 };
 use tonekit_pack::{logsumexp, LanguagePack, TargetContext};
 
@@ -152,12 +153,12 @@ fn emission(
     pack: &LanguagePack,
     g: &GradingTarget,
     shape: &ToneShape,
-    issues: &[tonekit_core::MeasureIssue],
+    issues: &[MeasureIssue],
     i: usize,
     n: usize,
 ) -> Result<Vec<f64>, AssessError> {
     let tones = pack.inventory();
-    let prevs: Vec<Option<&tonekit_core::ToneId>> = if i == 0 {
+    let prevs: Vec<Option<&ToneId>> = if i == 0 {
         vec![None]
     } else {
         tones.iter().map(Some).collect()
@@ -243,7 +244,7 @@ pub(crate) fn build(
 mod tests {
     use super::*;
     use crate::test_support::{cmn, hand_with, std_g, GAP, LEAD, SYLLABLE};
-    use tonekit_core::{FrameRange, MeasureIssue, Nucleus, ToneId};
+    use tonekit_core::{FrameRange, Nucleus};
 
     const EPS: f64 = 1e-9;
 

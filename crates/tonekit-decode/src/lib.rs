@@ -24,7 +24,7 @@ use tonekit_core::{
 };
 use tonekit_pack::{LanguagePack, PackError, TargetContext};
 
-use crate::closed::{contexts, Decoder};
+use crate::closed::Decoder;
 
 /// Log-values are clamped into `[-LOG_CLAMP, LOG_CLAMP]` (ruling R12).
 const LOG_CLAMP: f64 = 1.0e6;
@@ -39,12 +39,13 @@ const LOG_CLAMP: f64 = 1.0e6;
 /// null competitor's `null_llr + null_bias`; candidates come back sorted by llr, highest first
 /// (ties keep the caller's order).
 ///
-/// Errors, all raised before any audio is scored:
+/// Errors (the candidates and the grading are checked before any audio is scored):
 /// - `Pack { "empty candidate set" }` for no candidates;
 /// - `DuplicateCandidate` for a repeated id;
 /// - `Pack { "candidate <id> has no targets" }` for a candidate with no targets;
 /// - `UnknownTone` for a target or lexical-variant tone outside the pack's inventory;
-/// - `Pack` for anything the pack rejects (unknown accent, bad variant weights, bad style).
+/// - `Pack` for anything the pack rejects (unknown accent, bad variant weights, bad style, a
+///   tone it cannot realise in a context the decode needs).
 pub fn decode(
     a: &Analysis,
     pack: &LanguagePack,
@@ -53,17 +54,16 @@ pub fn decode(
 ) -> Result<DecodeResult, AssessError> {
     check_candidates(pack, candidates)?;
     check_grading(pack, g)?;
-    for cand in candidates {
-        for (target, ctx) in cand.targets.iter().zip(contexts(&cand.targets)) {
-            pack.expect(g, target, &ctx).map_err(pack_err)?;
-        }
-    }
+    let mut decoder = Decoder::new(a, pack, g);
+    let plans = candidates
+        .iter()
+        .map(|cand| decoder.plan(cand))
+        .collect::<Result<Vec<_>, _>>()?;
 
     let null_llr = null::null_llr(&lattice::build(a, pack, g)?);
-    let mut decoder = Decoder::new(a, pack, g);
     let mut scores = Vec::with_capacity(candidates.len());
-    for cand in candidates {
-        scores.push(decoder.score(cand)?);
+    for (cand, plan) in candidates.iter().zip(&plans) {
+        scores.push(decoder.score(cand, plan)?);
     }
 
     let d = &pack.calibration().decode;

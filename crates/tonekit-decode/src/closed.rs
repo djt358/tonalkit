@@ -15,7 +15,7 @@ use tonekit_core::{
 use tonekit_pack::{LanguagePack, TargetContext};
 use tonekit_segment::{speech_threshold, SegmentParams};
 
-use crate::cache::{unmeasured, Scorer};
+use crate::cache::{unmeasured, Scorer, TargetKey};
 use crate::duration::{log_prior, rate_s, FRAME_S};
 use crate::{clamp_log, count_u32};
 
@@ -216,18 +216,26 @@ impl<'a> Decoder<'a> {
         }
     }
 
+    /// The keys of the candidate's targets in their contexts, resolving (and so validating)
+    /// everything [`Decoder::score`] will ask of the pack. Call it for every candidate before
+    /// scoring any.
+    pub(crate) fn plan(&mut self, cand: &Candidate) -> Result<Vec<TargetKey>, AssessError> {
+        cand.targets
+            .iter()
+            .zip(contexts(&cand.targets))
+            .map(|(t, c)| self.scorer.key(t, &c))
+            .collect()
+    }
+
     /// The candidate's best path, its LLR (the path score) and its syllables, each judged in its
-    /// context. `posterior` is left at 0 for the caller to fill.
-    pub(crate) fn score(&mut self, cand: &Candidate) -> Result<CandidateScore, AssessError> {
-        let ctxs = contexts(&cand.targets);
+    /// context; `keys` is its [`Decoder::plan`]. `posterior` is left at 0 for the caller to fill.
+    pub(crate) fn score(
+        &mut self,
+        cand: &Candidate,
+        keys: &[TargetKey],
+    ) -> Result<CandidateScore, AssessError> {
         let path = match self.speech_start {
             Some(_) => {
-                let keys = cand
-                    .targets
-                    .iter()
-                    .zip(&ctxs)
-                    .map(|(t, c)| self.scorer.key(t, c))
-                    .collect::<Result<Vec<_>, _>>()?;
                 let (bounds, scorer) = (&self.bounds, &mut self.scorer);
                 let (rate, sigma) = (self.rate_s, self.dur_sigma);
                 best_path(bounds, &self.filler, keys.len(), |i, j, s| {
@@ -243,6 +251,7 @@ impl<'a> Decoder<'a> {
             return Ok(self.no_path(cand));
         };
 
+        let ctxs = contexts(&cand.targets);
         let mut syllables = Vec::with_capacity(path.syllables.len());
         for ((&(i, j), target), ctx) in path.syllables.iter().zip(&cand.targets).zip(&ctxs) {
             let (from, to) = (self.bounds[i], self.bounds[j]);

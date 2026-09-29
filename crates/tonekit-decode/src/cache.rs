@@ -151,27 +151,39 @@ impl<'a> Scorer<'a> {
     /// The key of `target` in `ctx`, interning it on first sight. A target's `label` does not
     /// affect scoring, so targets that differ only in label share a key.
     ///
-    /// Errors: `UnknownTone` for a main tone outside the inventory; `Pack` if the pack cannot
-    /// resolve some inventory tone in `ctx` (scoring would need it for the background).
+    /// Interning resolves everything scoring the target will need, so a pack error surfaces here
+    /// rather than midway through a decode: every inventory tone in `ctx` (the background), and a
+    /// target with lexical variants as a whole.
+    ///
+    /// Errors: `UnknownTone` for a main tone outside the inventory; `Pack` for anything the pack
+    /// rejects (unknown accent, a tone it cannot realise in `ctx`, bad variant weights or style).
     pub(crate) fn key(
         &mut self,
         target: &ToneTarget,
         ctx: &TargetContext,
     ) -> Result<TargetKey, AssessError> {
-        if !target.lexical_variants.is_empty() {
-            let unlabelled = ToneTarget {
+        let class = self.class(ctx)?;
+        if target.lexical_variants.is_empty() {
+            let tone =
+                tone_index(self.pack, &target.tone).ok_or_else(|| AssessError::UnknownTone {
+                    tone: target.tone.clone(),
+                })?;
+            return Ok(TargetKey::Tone { class, tone });
+        }
+        let item = (
+            ToneTarget {
                 label: None,
                 ..target.clone()
-            };
-            let id = intern(&mut self.mixed, &(unlabelled, ctx.clone()));
+            },
+            ctx.clone(),
+        );
+        if let Some(id) = self.mixed.iter().position(|x| *x == item) {
             return Ok(TargetKey::Mixed { id });
         }
-        let tone = tone_index(self.pack, &target.tone).ok_or_else(|| AssessError::UnknownTone {
-            tone: target.tone.clone(),
-        })?;
-        Ok(TargetKey::Tone {
-            class: self.class(ctx)?,
-            tone,
+        self.pack.expect(self.g, target, ctx).map_err(pack_err)?;
+        self.mixed.push(item);
+        Ok(TargetKey::Mixed {
+            id: self.mixed.len() - 1,
         })
     }
 
@@ -268,15 +280,6 @@ impl<'a> Scorer<'a> {
     }
 }
 
-/// The index of `item` in `table`, appending a copy if it is new.
-fn intern<T: Clone + PartialEq>(table: &mut Vec<T>, item: &T) -> usize {
-    if let Some(i) = table.iter().position(|x| x == item) {
-        return i;
-    }
-    table.push(item.clone());
-    table.len() - 1
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -347,6 +350,14 @@ mod tests {
                 tone: ToneId("9".into())
             })
         );
+        // Interning resolves what scoring will need, so pack errors surface here.
+        let heavy = s.key(&varied("3", "2", 1.5), &ctx(0, None, false));
+        assert!(matches!(heavy, Err(AssessError::Pack { .. })), "{heavy:?}");
+        let mut bad = std_g();
+        bad.accent.0 = "cmn-XX".into();
+        let mut s = Scorer::new(&a, &pack, &bad);
+        let r = s.key(&target("1", None), &ctx(0, None, false));
+        assert!(matches!(r, Err(AssessError::Pack { ref message }) if message.contains("cmn-XX")));
     }
 
     #[test]
