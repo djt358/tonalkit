@@ -8,7 +8,8 @@
 //!
 //! * [`F0Provider`] is the extension point; [`Pyin`] is the built-in provider. An external track
 //!   is brought to the right length with [`fit_length`].
-//! * [`repair_octaves`] post-processes a track, fixing isolated octave jumps.
+//! * [`repair_octaves`] post-processes a track, fixing isolated octave jumps within each voiced
+//!   run.
 //! * [`clipping_ratio`] and [`snr_db`] are the signal checks behind the `Clipped` and `LowSnr`
 //!   issues.
 

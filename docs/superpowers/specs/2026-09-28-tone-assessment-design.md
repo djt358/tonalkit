@@ -177,6 +177,8 @@ pub struct CandidateId(pub String);
 // signal.rs
 pub const SAMPLE_RATE: u32 = 16_000;
 pub const HOP: usize = 160;                           // 10 ms
+/// Voiced ⇔ `hz.is_some()`: the provider's own voicing decision (pYIN's HMM), everywhere (R32).
+/// `voiced_p` is only a confidence weight (`ToneShape::f0_confidence`).
 pub struct F0Frame { pub hz: Option<f32>, pub voiced_p: f32 }
 pub struct F0Track { pub frames: Vec<F0Frame>, pub provider: String }   // frame i at i*10 ms
 pub struct EnergyTrack { pub db: Vec<f32> }
@@ -211,7 +213,8 @@ pub struct ToneShape {
     pub voiced_weights: Vec<f32>,
     pub onset: f32, pub offset: f32, pub mean: f32,
     pub slope: f32, pub curvature: f32, pub turning_point: Option<f32>, pub range: f32,
-    pub duration_ms: f32, pub voiced_fraction: f32, pub f0_confidence: f32,
+    pub duration_ms: f32, pub voiced_fraction: f32,
+    pub f0_confidence: f32,                    // mean voiced_p over the voiced frames
     pub phonation: Option<Phonation>,          // reserved; None until a pack declares it
 }
 pub struct Phonation { pub creak_ratio: f32, pub cpp_db: f32 }
@@ -467,12 +470,22 @@ Inputs: boundary candidates B (sorted frames), speech region, candidates of any 
   `MeasureIssue` if unvoiced or too short).
 - **Per candidate with K targets,** a DP over (boundary index, syllables consumed):
   - A *syllable* edge (b_i → b_j, target k) scores `LLR(shape_ij, target_k, ctx_k) + dur(b_j − b_i)`.
-    Here `ctx_k` = previous *target* tone, index, count, and `phrase_final = (k = K−1)`.
+    Here `ctx_k` = previous *target* tone, index, count, and `phrase_final = (k = K−1)`. Its span
+    [b_i, b_j) must contain exactly one nucleus, so a target can neither hide on a sliver of a
+    syllable nor straddle two.
   - A *gap* edge (b_i → b_j) costs `filler_per_frame × speech frames in (b_i, b_j)`, while
-    silent frames are free. This covers hesitations, restarts and extra words.
-  - Paths start at any boundary with leading speech frames charged as filler, and end the same
-    way.
+    silent frames are free, and adds `insertion_llr` for each nucleus it covers (an inserted
+    syllable). This covers hesitations, restarts and extra words.
+  - Paths start at any boundary with leading speech frames and nuclei charged like a gap edge,
+    and end the same way.
   - An unmeasurable syllable scores `unvoiced_syllable_llr`.
+  - **Relaxed pass:** only if no such path exists and the analysis has ≥ 1 nucleus, syllables may
+    hold at most one nucleus. A syllable without one (a missing syllable) scores
+    `unvoiced_syllable_llr` and is `Partial(Unvoiced)`, so it counts toward `overall` as a likely
+    miss.
+  - **No path:** the candidate's K syllables sit at an empty span at the speech-region start and
+    score `K × unvoiced_syllable_llr`. They're `NotMeasured(Unvoiced)` ("tone not checked",
+    `overall = None`) only if the analysis has no nuclei; otherwise they're `Partial(Unvoiced)`.
 - `dur(d) = logN(d; ln r, 0.4) − logN(r; ln r, 0.4)`, where r = median inter-nucleus interval
   (default 220 ms).
 - **Null hypothesis ("something else was said"):**
@@ -480,7 +493,7 @@ Inputs: boundary candidates B (sorted frames), speech region, candidates of any 
   (§7.3). That is the best free choice of tone per nucleus, which is always ≥ 0. Candidate
   posteriors are a softmax over `{llr_c} ∪ {null_llr + null_bias}`.
 - Seeds live in `cmn.calib.json`: `filler_per_frame = 0.03`, `unvoiced_syllable_llr = −3.0`,
-  `null_bias = −2.0`.
+  `insertion_llr = −2.0`, `null_bias = −2.0`.
 - Cost is O(|B|²·K) per candidate. With |B| ≤ 4·nuclei + 2 and up to 64 candidates, this is
   microseconds to milliseconds.
 
@@ -596,12 +609,14 @@ to a literal GAN.
 
 - Input: 16 kHz mono f32. Other rates return `AssessError::UnsupportedSampleRate`; the caller
   resamples.
-- pYIN: 10 ms hop, 1024-sample frame, 50–600 Hz.
+- pYIN: 10 ms hop, 1024-sample frame, 50–600 Hz. Its voicing decision (`hz.is_some()`) is what
+  "voiced" means everywhere downstream (R32); `voiced_p` only weights confidence.
 - Budget: `analyze + assess` with ≤16 candidates, p95 ≤100 ms for a 3 s utterance on iPhone 12.
   Stripped static library ≤2 MB without SwiftF0.
 - **No networking code in any crate.** `deny.toml` bans HTTP/TLS crates.
 - **Register:**
-  - Per utterance, take the 5th/50th/95th percentiles of voiced semitones. Merge with weight
+  - Per utterance, take the 5th/50th/95th percentiles of voiced semitones (every frame with an
+    f0). Merge with weight
     `w = min(0.5, u/(n+u))`, where u = syllables this utterance and n = syllables so far.
   - Cold start (no register given): use utterance percentiles widened by ±2 st, and flag
     `ColdStartRegister` until n ≥ 30.
@@ -709,10 +724,10 @@ learner's own audio, on-device, is inside that boundary.
 |---|---|---|
 | Wrong sample rate / empty audio | input check | `AssessError` |
 | No speech | no speech region | every syllable `NotMeasured(Unvoiced)`; `overall = None`; consumer shows "tone not checked" |
-| Whisper | voiced fraction < 0.2 in speech region | as above |
+| Whisper | no nucleus (periodic energy peak) in the speech region | as above |
 | Clipping (>1% samples ≥ 0.99) / low SNR (<10 dB) | analyze | `Partial` issue; σ ×1.5; deltas suppressed under LowSnr |
-| Extra, missing or hesitation syllables | decode | absorbed by gap edges / low candidate LLR; never shifts every tone by one |
-| Octave jump (>9 st from neighbour median) | f0 post-process | shifted ±12 st toward median |
+| Extra, missing or hesitation syllables | decode | one nucleus per syllable, so no tone shifts by one or hides on a sliver. Extra/hesitation: a gap edge (`insertion_llr` + filler). Missing: a nucleus-less syllable (relaxed pass), `Partial(Unvoiced)` at `unvoiced_syllable_llr`, counted in `overall` |
+| Octave jump (>9 st from the median of its neighbours in its own voiced run: `hz.is_some()` frames, gaps ≤ 2 frames bridged) | f0 post-process | shifted ±12 st toward median; runs < 5 frames untouched |
 | T3 creak | unvoiced_ok | not penalised |
 | Voiced part < 80 ms | shape | `Partial(TooShort)`; onset/offset terms only |
 | Unknown tone / accent / missing realisation | pack | `PackError`, surfaced at load where possible |

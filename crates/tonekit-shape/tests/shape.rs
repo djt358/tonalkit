@@ -200,19 +200,22 @@ fn track(frames: Vec<F0Frame>) -> F0Track {
 }
 
 #[test]
-fn voiced_semitones_needs_hz_and_probability() {
+fn voiced_semitones_needs_a_pitch_not_a_probability() {
+    // R32: a frame is voiced when it has an f0, whatever its voiced_p.
     let t = track(vec![
         frame(Some(110.0), 1.0),  // voiced
-        frame(None, 1.0),         // no f0
-        frame(Some(220.0), 0.49), // f0 but not voiced enough
-        frame(Some(220.0), 0.5),  // exactly at the threshold: voiced
+        frame(None, 1.0),         // no f0: unvoiced however confident
+        frame(Some(220.0), 0.49), // f0 at low confidence: voiced
+        frame(Some(440.0), 0.0),  // f0 at zero confidence: voiced
+        frame(Some(0.0), 0.9),    // not a pitch
         frame(Some(55.0), 0.9),   // voiced
     ]);
     let st = voiced_semitones(&t, None);
-    assert_eq!(st.len(), 3);
+    assert_eq!(st.len(), 4);
     assert_abs_diff_eq!(st[0], 12.0, epsilon = 1e-5);
     assert_abs_diff_eq!(st[1], 24.0, epsilon = 1e-5);
-    assert_abs_diff_eq!(st[2], 0.0, epsilon = 1e-5);
+    assert_abs_diff_eq!(st[2], 36.0, epsilon = 1e-5);
+    assert_abs_diff_eq!(st[3], 0.0, epsilon = 1e-5);
 }
 
 #[test]
@@ -689,8 +692,9 @@ fn fewer_than_three_voiced_frames_is_unvoiced() {
 }
 
 #[test]
-fn low_voicing_probability_frames_are_not_voiced() {
-    // f0 is present but voiced_p < 0.5 everywhere: unvoiced.
+fn low_voicing_probability_is_confidence_not_voicing() {
+    // R32: f0 present with voiced_p 0.3 everywhere is voiced (pYIN's own decision); the low
+    // probability only lowers f0_confidence. Before R32 this span was Unvoiced.
     let frames: Vec<F0Frame> = (0..30)
         .map(|_| F0Frame {
             hz: Some(150.0),
@@ -701,7 +705,7 @@ fn low_voicing_probability_frames_are_not_voiced() {
         frames,
         provider: "x".into(),
     };
-    let err = extract(
+    let e = extract(
         &t,
         &TbuSpan {
             start_frame: 0,
@@ -709,8 +713,13 @@ fn low_voicing_probability_frames_are_not_voiced() {
         },
         &register_for(100., 200.),
     )
-    .unwrap_err();
-    assert_eq!(err, MeasureIssue::Unvoiced);
+    .unwrap();
+    assert!(e.issues.is_empty());
+    assert_abs_diff_eq!(e.shape.voiced_fraction, 1.0, epsilon = 1e-6);
+    assert!(e.shape.voiced_weights.iter().all(|&w| w == 1.0));
+    assert_abs_diff_eq!(e.shape.f0_confidence, 0.3, epsilon = 1e-6);
+    let level = st_to_chao(hz_to_st(150.0), &register_for(100., 200.));
+    assert!(e.shape.contour.iter().all(|&c| (c - level).abs() < 1e-4));
 }
 
 #[test]
@@ -750,4 +759,60 @@ fn extraction_is_deterministic() {
     let a = extract_of(vec![2., 1., 4.], 350.);
     let b = extract_of(vec![2., 1., 4.], 350.);
     assert_eq!(a, b);
+}
+
+// ---------------------------------------------------------------------------------------------
+// Real pYIN (ruling R32): a voiced frame is `hz.is_some()`.
+// ---------------------------------------------------------------------------------------------
+
+#[test]
+fn the_initial_fall_of_spoken_4_1_3_reads_as_a_fall_on_real_pyin() {
+    use tonekit_f0::{repair_octaves, F0Provider, Pyin};
+    use tonekit_testkit::{synth, SynthSpec, SynthSyllable};
+    // Task 9's spoken(4-1-3): three 250 ms syllables [5,1], [5,5], [2,1,4] with 60 ms gaps. pYIN
+    // tracks the first syllable's fall to within a few Hz but with voiced_p mostly below 0.5.
+    // Before R32 only 4 of its 25 frames counted as voiced (one of them octave-doubled by the old
+    // repair) and it read as a dip-rise, about [4.4 ... 3.0 ... 6.0].
+    let spec = SynthSpec {
+        floor_hz: 100.0,
+        ceil_hz: 200.0,
+        lead_ms: 200.0,
+        tail_ms: 200.0,
+        syllables: [vec![5.0, 1.0], vec![5.0, 5.0], vec![2.0, 1.0, 4.0]]
+            .into_iter()
+            .map(|chao| SynthSyllable {
+                chao,
+                dur_ms: 250.0,
+                gap_after_ms: 60.0,
+                unvoiced_onset_ms: 0.0,
+                creak: None,
+            })
+            .collect(),
+        snr_db: None,
+        seed: 1,
+    };
+    let s = synth(&spec);
+    let mut f0 = Pyin::default().track(&s.pcm);
+    repair_octaves(&mut f0);
+    let (start_frame, end_frame) = s.syllable_frames[0];
+    let e = extract(
+        &f0,
+        &TbuSpan {
+            start_frame,
+            end_frame,
+        },
+        &register_for(100.0, 200.0),
+    )
+    .expect("the fall is voiced");
+    let c = &e.shape.contour;
+    assert!(e.issues.is_empty(), "{e:?}");
+    assert!(e.shape.voiced_fraction > 0.9, "{e:?}");
+    assert!(e.shape.voiced_weights.iter().all(|&w| w == 1.0), "{e:?}");
+    // A clean fall from near Chao 5 to near Chao 1, never rising by more than R23's jitter.
+    assert!(c[0] > 4.5 && c[9] < 1.5, "{c:?}");
+    assert!(c.windows(2).all(|w| w[1] < w[0] + 0.15), "{c:?}");
+    assert!(
+        e.shape.slope < 0.0 && e.shape.turning_point.is_none(),
+        "{e:?}"
+    );
 }

@@ -56,8 +56,8 @@ pub struct Extracted {
 /// Extracts the Chao-scale shape of the syllable in `span` from `f0`, normalised by `r`.
 ///
 /// The voiced part runs from the first to the last voiced frame in the span (a voiced frame has
-/// an f0 and `voiced_p ≥ 0.5`); unvoiced frames inside it are filled by linear interpolation in
-/// semitones. `Err(Unvoiced)` if the span holds fewer than three voiced frames. A voiced part
+/// an f0, `hz.is_some()`: the provider's own voicing decision, ruling R32); unvoiced frames inside
+/// it are filled by linear interpolation in semitones. `Err(Unvoiced)` if the span holds fewer than three voiced frames. A voiced part
 /// under 80 ms still yields a shape, flagged [`MeasureIssue::TooShort`].
 ///
 /// - `contour[k]` is centred at fraction `k/(K−1)` of the voiced part and is the mean of the
@@ -71,6 +71,8 @@ pub struct Extracted {
 /// - `slope` is the least-squares slope of Chao against time in seconds over the truly voiced
 ///   frames; `curvature` is the quadratic coefficient of a least-squares fit against the voiced
 ///   part's normalised time (0..1).
+/// - `voiced_fraction` is the share of the span's frames that are voiced; `f0_confidence` is the
+///   mean `voiced_p` of the voiced frames, the only place `voiced_p` enters.
 /// - `turning_point` follows ruling R4, see [`crate::fit`].
 pub fn extract(f0: &F0Track, span: &TbuSpan, r: &Register) -> Result<Extracted, MeasureIssue> {
     let start = span.start_frame as usize;

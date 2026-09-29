@@ -10,6 +10,7 @@
   "decode": {
     "filler_per_frame": 0.03,
     "unvoiced_syllable_llr": -3.0,
+    "insertion_llr": -2.0,
     "null_bias": -2.0,
     "dur_sigma": 0.4,
     "default_rate_s": 0.22

@@ -121,6 +121,7 @@ fn seed_calibration() -> Calibration {
         decode: DecodeParams {
             filler_per_frame: 0.03,
             unvoiced_syllable_llr: -3.0,
+            insertion_llr: -2.0,
             null_bias: -2.0,
             dur_sigma: 0.4,
             default_rate_s: 0.22,
@@ -171,6 +172,24 @@ fn rejects_bad_calibration() {
         let r = LanguagePack::from_toml(CMN_TOML, Some(&json));
         assert!(matches!(r, Err(PackError::Parse(_))), "{json}: {r:?}");
     }
+}
+
+#[test]
+fn insertion_llr_is_a_required_calibration_field() {
+    // R33: the per-nucleus insertion cost is read from the file, and a file without it is invalid.
+    let json = mutate(
+        CMN_CALIB,
+        "\"insertion_llr\": -2.0",
+        "\"insertion_llr\": -4.5",
+    );
+    let p = LanguagePack::from_toml(CMN_TOML, Some(&json)).unwrap();
+    assert_eq!(p.calibration().decode.insertion_llr, -4.5);
+    let json = mutate(CMN_CALIB, "\"insertion_llr\": -2.0,", "");
+    let r = LanguagePack::from_toml(CMN_TOML, Some(&json));
+    assert!(
+        matches!(r, Err(PackError::Parse(ref m)) if m.contains("insertion_llr")),
+        "{r:?}"
+    );
 }
 
 #[test]

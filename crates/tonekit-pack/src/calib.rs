@@ -13,6 +13,9 @@ pub struct DecodeParams {
     pub filler_per_frame: f32,
     /// Log-likelihood of a syllable segment with no voiced evidence.
     pub unvoiced_syllable_llr: f32,
+    /// Log-likelihood added for every nucleus that no syllable covers (an inserted syllable), on
+    /// top of the per-frame filler (ruling R33).
+    pub insertion_llr: f32,
     /// Added to the null competitor's log-likelihood before the softmax.
     pub null_bias: f32,
     /// σ of the log-duration prior `dur(d) = −(ln(d/r))²/(2σ²)`.
@@ -45,6 +48,7 @@ impl Default for Calibration {
             decode: DecodeParams {
                 filler_per_frame: 0.03,
                 unvoiced_syllable_llr: -3.0,
+                insertion_llr: -2.0,
                 null_bias: -2.0,
                 dur_sigma: 0.4,
                 default_rate_s: 0.22,
@@ -102,6 +106,7 @@ impl Calibration {
             ("fusion.beta_transcript", fu.beta_transcript),
             ("fusion.beta_neural", fu.beta_neural),
             ("decode.unvoiced_syllable_llr", d.unvoiced_syllable_llr),
+            ("decode.insertion_llr", d.insertion_llr),
             ("decode.null_bias", d.null_bias),
         ];
         for (name, v) in finite {

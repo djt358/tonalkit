@@ -22,7 +22,7 @@ mod score;
 pub use calib::{Calibration, DecodeParams};
 pub use error::PackError;
 pub use expect::{Component, Expectation, TargetContext, Tolerance};
-pub use score::widen_for;
+pub use score::{logsumexp, widen_for};
 
 use tonekit_core::{AccentId, Lect, ToneId};
 
