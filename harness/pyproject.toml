@@ -8,10 +8,16 @@ dependencies = [
     "numpy",
     "scipy",
     "pydantic>=2",
+    # The Rust tonekit library, for evaluation, synthetic tests and calibration (JSON in, JSON
+    # out). `uv sync` builds it with maturin, so a Rust toolchain must be on the PATH.
+    "tonekit-py",
 ]
 
 [project.scripts]
 tkh = "tonekit_harness.cli:main"
+
+[tool.uv.sources]
+tonekit-py = { path = "../crates/tonekit-py" }
 
 [dependency-groups]
 dev = [

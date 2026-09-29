@@ -509,6 +509,7 @@ dependencies = [
     { name = "pydantic" },
     { name = "scipy", version = "1.17.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
     { name = "scipy", version = "1.18.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+    { name = "tonekit-py" },
 ]
 
 [package.dev-dependencies]
@@ -521,10 +522,15 @@ requires-dist = [
     { name = "numpy" },
     { name = "pydantic", specifier = ">=2" },
     { name = "scipy" },
+    { name = "tonekit-py", directory = "../crates/tonekit-py" },
 ]
 
 [package.metadata.requires-dev]
 dev = [{ name = "pytest" }]
+
+[[package]]
+name = "tonekit-py"
+source = { directory = "../crates/tonekit-py" }
 
 [[package]]
 name = "typing-extensions"
