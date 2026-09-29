@@ -14,7 +14,7 @@ from scipy.signal import resample_poly
 TARGET_SR = 16_000
 
 
-def _to_float32(data: np.ndarray) -> np.ndarray:
+def to_float32(data: np.ndarray) -> np.ndarray:
     """Integer PCM to float32 in [-1, 1); float input is only cast."""
     if data.dtype == np.uint8:
         return ((data.astype(np.float32) - 128.0) / 128.0).astype(np.float32)
@@ -26,7 +26,7 @@ def _to_float32(data: np.ndarray) -> np.ndarray:
 def to_16k_mono(in_path: str | Path, out_path: str | Path) -> None:
     """Read `in_path`, mix down to mono, resample to 16 kHz, write float32 WAV to `out_path`."""
     sr, data = wavfile.read(in_path)
-    x = _to_float32(data)
+    x = to_float32(data)
     if x.ndim > 1:
         x = x.mean(axis=1, dtype=np.float32)
     if sr != TARGET_SR:

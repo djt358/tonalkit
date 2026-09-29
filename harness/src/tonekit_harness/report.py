@@ -14,7 +14,6 @@ if TYPE_CHECKING:
     from .evaluate import Result
     from .metrics import Failure, GateMetrics
 
-_TOP_DELTAS = 2
 _MS_DELTAS = {"TurnEarlier", "TurnLater"}  # the other kinds are in Chao units
 
 
@@ -46,9 +45,10 @@ def _delta(kind: str, amount: float) -> str:
     return f"{kind} {amount:.0f} ms" if kind in _MS_DELTAS else f"{kind} {amount:.2f}"
 
 
-def _top_deltas(deltas: Sequence[tuple[str, float]]) -> str:
-    top = sorted(deltas, key=lambda d: (-abs(d[1]), d[0]))[:_TOP_DELTAS]
-    return ", ".join(_delta(kind, amount) for kind, amount in top) or "none"
+def _deltas(deltas: Sequence[tuple[str, float]]) -> str:
+    """The deltas in the order tonekit returns them: at most two, most significant (by z-score)
+    first. They are not re-sorted by amount, which mixes ms with Chao units."""
+    return ", ".join(_delta(kind, amount) for kind, amount in deltas) or "none"
 
 
 def _headline(gate: GateMetrics) -> str:
@@ -60,9 +60,9 @@ def _headline(gate: GateMetrics) -> str:
         f"(needs at most {float(WA_MAX):.2f}), {n} gate pairs."
     )
     broken = []
-    if gate.ca < CA_MIN:
+    if not gate.ca_ok:
         broken.append("correct-accept is below its bound")
-    if gate.wa > WA_MAX:
+    if not gate.wa_ok:
         broken.append("wrong-accept is above its bound")
     if broken:
         text += " " + " and ".join(broken).capitalize() + "."
@@ -77,21 +77,18 @@ def _metrics_table(
     n_count: int | None,
 ) -> list[str]:
     n = len(gate.thresholds)
-    accepted_correct = sum(o.correct_accepted for o in gate.outcomes)
-    accepted_wrong = sum(o.wrong_accepted for o in gate.outcomes)
-    ca_ok, wa_ok = gate.ca >= CA_MIN, gate.wa <= WA_MAX
     rows = [
         [
             "Correct-accept (leave-one-pair-out)",
-            f"{gate.ca:.3f} ({accepted_correct}/{n})",
+            f"{gate.ca:.3f} ({gate.correct_accepted}/{n})",
             f"at least {float(CA_MIN):.2f}",
-            "pass" if ca_ok else "fail",
+            "pass" if gate.ca_ok else "fail",
         ],
         [
             "Wrong-accept (leave-one-pair-out)",
-            f"{gate.wa:.3f} ({accepted_wrong}/{n})",
+            f"{gate.wa:.3f} ({gate.wrong_accepted}/{n})",
             f"at most {float(WA_MAX):.2f}",
-            "pass" if wa_ok else "fail",
+            "pass" if gate.wa_ok else "fail",
         ],
         ["Candidate-ID accuracy (diag_minimal)", _rate(cand_acc, n_minimal), "diagnostic", "-"],
         ["Count robustness (diag_count)", _rate(count_rob, n_count), "diagnostic", "-"],
@@ -137,7 +134,7 @@ def _failure(f: Failure) -> list[str]:
                 _num(s.p_correct),
                 _num(s.distance),
                 s.measured,
-                _top_deltas(s.deltas),
+                _deltas(s.deltas),
             ]
             for i, s in enumerate(r.syllables, start=1)
         ]

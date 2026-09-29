@@ -14,6 +14,7 @@ import hashlib
 import io
 import json
 import os
+import struct
 import sys
 import tomllib
 import warnings
@@ -27,7 +28,7 @@ import tonekit_py
 from scipy.io import wavfile
 
 from . import manifest, metrics, report
-from .ingest import TARGET_SR, _to_float32
+from .ingest import TARGET_SR, to_float32
 from .manifest import Clip, ManifestError, to_candidate_json
 
 # harness/.cache/analysis, next to src/ (the directory is gitignored)
@@ -86,9 +87,16 @@ def _read_wav(clip: Clip, root: Path) -> tuple[bytes, np.ndarray]:
         raise EvalError(f"{clip.id}: cannot read {path}: {e.strerror or e}") from e
     try:
         with warnings.catch_warnings():
-            warnings.simplefilter("ignore", wavfile.WavFileWarning)  # unknown chunks are harmless
+            # scipy only warns about a file cut short ("Reached EOF prematurely") and returns
+            # fewer samples: that is an error here. Only a skipped unknown chunk is harmless.
+            warnings.simplefilter("error", wavfile.WavFileWarning)
+            warnings.filterwarnings(
+                "ignore",
+                message=r"Chunk \(non-data\) not understood",
+                category=wavfile.WavFileWarning,
+            )
             rate, samples = wavfile.read(io.BytesIO(data))
-    except ValueError as e:
+    except (ValueError, struct.error, wavfile.WavFileWarning) as e:
         raise EvalError(f"{clip.id}: {path} is not a readable WAV file: {e}") from e
     if rate != TARGET_SR:
         raise EvalError(
@@ -96,7 +104,7 @@ def _read_wav(clip: Clip, root: Path) -> tuple[bytes, np.ndarray]:
         )
     if samples.ndim != 1:
         raise EvalError(f"{clip.id}: {path} is not mono (run `tkh ingest`)")
-    return data, _to_float32(samples)
+    return data, to_float32(samples)
 
 
 def _tonekit_py_version() -> str:

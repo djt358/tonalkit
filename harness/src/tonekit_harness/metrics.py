@@ -46,9 +46,34 @@ class GateMetrics:
     ca: float  # correct clips accepted / all correct clips
     wa: float  # wrong (tone_error) clips accepted / all wrong clips
     thresholds: dict[str, float]  # held-out pair id -> θ fitted on the other pairs; may be ±inf
-    passed: bool
     rejected_none: list[str]  # clip ids with no score, counted as rejects
     outcomes: list[PairOutcome] = field(default_factory=list)  # sorted by pair id
+
+    @property
+    def correct_accepted(self) -> int:
+        """How many held-out correct clips were accepted (one per pair at most)."""
+        return sum(o.correct_accepted for o in self.outcomes)
+
+    @property
+    def wrong_accepted(self) -> int:
+        """How many held-out wrong clips were accepted (one per pair at most)."""
+        return sum(o.wrong_accepted for o in self.outcomes)
+
+    @property
+    def ca_ok(self) -> bool:
+        """Correct-accept is at least `CA_MIN`, decided exactly from the counts: the float `ca`
+        can sit a rounding error either side of a bound (2/20 as a float is above 1/10)."""
+        return Fraction(self.correct_accepted, len(self.outcomes)) >= CA_MIN
+
+    @property
+    def wa_ok(self) -> bool:
+        """Wrong-accept is at most `WA_MAX`, decided exactly from the counts."""
+        return Fraction(self.wrong_accepted, len(self.outcomes)) <= WA_MAX
+
+    @property
+    def passed(self) -> bool:
+        """Gate S1: both bounds hold."""
+        return self.ca_ok and self.wa_ok
 
     @property
     def median_threshold(self) -> float:
@@ -135,7 +160,8 @@ def loo_gate(results: Sequence[Result]) -> GateMetrics:
 
     For each held-out pair, θ is fitted on the other pairs (`_fit_threshold`) and applied to the
     held-out pair. CA and WA aggregate the held-out decisions over all pairs; `passed` is
-    CA ≥ 0.90 and WA ≤ 0.10. Raises `MetricsError` for fewer than 2 pairs or a malformed pair.
+    CA ≥ 0.90 and WA ≤ 0.10, compared exactly on the counts (`GateMetrics.ca_ok`, `wa_ok`).
+    Raises `MetricsError` for fewer than 2 pairs or a malformed pair.
     """
     pairs = _gate_pairs(results)
     if len(pairs) < 2:
@@ -159,16 +185,13 @@ def loo_gate(results: Sequence[Result]) -> GateMetrics:
             )
         )
     n = len(pairs)
-    accepted_correct = sum(o.correct_accepted for o in outcomes)
-    accepted_wrong = sum(o.wrong_accepted for o in outcomes)
     rejected_none = sorted(
         r.id for _, c, w in pairs for r in (c, w) if r.overall is None
     )
     return GateMetrics(
-        ca=accepted_correct / n,
-        wa=accepted_wrong / n,
+        ca=sum(o.correct_accepted for o in outcomes) / n,
+        wa=sum(o.wrong_accepted for o in outcomes) / n,
         thresholds={o.pair: o.theta for o in outcomes},
-        passed=Fraction(accepted_correct, n) >= CA_MIN and Fraction(accepted_wrong, n) <= WA_MAX,
         rejected_none=rejected_none,
         outcomes=outcomes,
     )

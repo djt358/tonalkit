@@ -83,18 +83,18 @@ def test_ca_0_90_and_wa_0_10_exactly_at_the_gate_edge_still_pass():
     gate = metrics.loo_gate(gate_pairs(scores))
     assert gate.ca == pytest.approx(0.90)
     assert gate.wa == pytest.approx(0.10)
-    assert gate.passed is True
+    assert (gate.ca_ok, gate.wa_ok, gate.passed) == (True, True, True)
 
     scores[14] = (scores[14][0], 0.97)  # a third accepted wrong clip: WA 0.15
     over = metrics.loo_gate(gate_pairs(scores))
     assert over.wa == pytest.approx(0.15)
-    assert over.passed is False
+    assert (over.ca_ok, over.wa_ok, over.passed) == (True, False, False)
 
     scores[14] = (scores[14][0], 0.1 + 0.01 * 14)
     scores[16] = (0.05, scores[16][1])  # a third rejected correct clip: CA 0.85
     under = metrics.loo_gate(gate_pairs(scores))
     assert under.ca == pytest.approx(0.85)
-    assert under.passed is False
+    assert (under.ca_ok, under.wa_ok, under.passed) == (False, True, False)
 
 
 def test_a_held_out_pair_is_judged_by_a_threshold_that_never_saw_it():
@@ -129,6 +129,24 @@ def test_a_none_wrong_clip_is_a_reject_too_and_is_never_accepted_at_any_threshol
     assert gate.accepted["gate-02-error"] is False
 
 
+@pytest.mark.parametrize(
+    ("last_pair", "none_id", "measured_id"),
+    [
+        ((None, 0.7), "gate-03-correct", "gate-03-error"),
+        ((0.3, None), "gate-03-error", "gate-03-correct"),
+    ],
+)
+def test_a_none_score_is_a_reject_even_at_theta_minus_inf(last_pair, none_id, measured_id):
+    """In the other pairs every wrong clip outscores every correct one, so the best J is 0 at -inf
+    and +inf, tied, and the lower-middle is -inf. A literal -inf score would pass `-inf >= -inf`;
+    keeping None as None makes the held-out clip a reject at any threshold."""
+    gate = metrics.loo_gate(gate_pairs([(0.1, 0.9), (0.2, 0.8), last_pair]))
+    assert gate.thresholds["gate-03"] == -math.inf
+    assert gate.rejected_none == [none_id]
+    assert gate.accepted[none_id] is False
+    assert gate.accepted[measured_id] is True  # the same θ accepts the pair's measured clip
+
+
 def test_none_scores_in_the_other_pairs_do_not_move_the_threshold():
     """Held-out gate-03's threshold is fitted on gate-01/02/04/05; the None there is skipped."""
     scores = [(0.6, 0.1), (None, 0.2), (0.7, 0.15), (0.8, 0.3), (0.9, None)]
@@ -139,7 +157,7 @@ def test_none_scores_in_the_other_pairs_do_not_move_the_threshold():
     assert gate.accepted["gate-03-error"] is False
 
 
-def test_all_none_on_the_other_pairs_is_reject_everything_not_a_crash():
+def test_unmeasured_other_pairs_leave_theta_at_minus_inf_which_accepts_every_measured_score():
     scores = [(None, None), (None, None), (0.9, 0.1)]
     gate = metrics.loo_gate(gate_pairs(scores))
     # Held-out gate-03 saw only None scores: every candidate θ has J = 0; the tied set is
@@ -172,12 +190,59 @@ def test_candidate_thresholds_include_infinities():
     assert gate.passed is False
 
 
-def test_thresholds_are_reported_per_held_out_pair_and_have_a_median():
-    results = gate_pairs([(0.6, 0.1), (0.7, 0.2), (0.8, 0.3), (0.9, 0.4)])
-    gate = metrics.loo_gate(results)
-    assert gate.median_threshold == pytest.approx(
-        sorted(gate.thresholds.values())[1] / 2 + sorted(gate.thresholds.values())[2] / 2
+def test_thresholds_and_the_median_match_a_hand_worked_example():
+    """Scores are multiples of 1/8, so every midpoint is exact. In eighths the pairs are
+    (correct, wrong): gate-01 (6, 3), gate-02 (7, 0), gate-03 (5, 1), gate-04 (2, 4).
+
+    Held out gate-01: the others score C 7 5 2, W 0 1 4; J = 2 at the midpoints 1.5 and 4.5, tied,
+    so the lower one, 1.5.  Held out gate-02: C 6 5 2, W 3 1 4; J = 2 at 4.5 alone.
+    Held out gate-03: C 6 7 2, W 3 0 4; J = 2 at 5 alone.
+    Held out gate-04: C 6 7 5, W 3 0 1 separate; the gap 3..5 has midpoint 4.
+    The held-out decisions: gate-01 accepts both clips, gate-02 and gate-03 accept only the correct
+    one, gate-04 accepts only the wrong one.
+    """
+    scores = [(6 / 8, 3 / 8), (7 / 8, 0 / 8), (5 / 8, 1 / 8), (2 / 8, 4 / 8)]
+    gate = metrics.loo_gate(gate_pairs(scores))
+    assert gate.thresholds == {
+        "gate-01": 1.5 / 8,
+        "gate-02": 4.5 / 8,
+        "gate-03": 5 / 8,
+        "gate-04": 4 / 8,
+    }
+    # Sorted: 1.5/8, 4/8, 4.5/8, 5/8; the middle two are 4/8 and 4.5/8.
+    assert gate.median_threshold == 4.25 / 8
+    assert [(o.correct_accepted, o.wrong_accepted) for o in gate.outcomes] == [
+        (True, True),
+        (True, False),
+        (True, False),
+        (False, True),
+    ]
+    assert (gate.ca, gate.wa) == (3 / 4, 2 / 4)
+    assert (gate.ca_ok, gate.wa_ok, gate.passed) == (False, False, False)
+
+
+@pytest.mark.parametrize(
+    ("thresholds", "median"),
+    [
+        ([0.3, 0.5, 0.9], 0.5),  # odd: the middle one
+        ([0.25, 0.75], 0.5),  # even and finite: the mean of the middle two
+        ([-math.inf, 0.5, math.inf], 0.5),  # infinite ends do not matter with an odd count
+        ([-math.inf, 0.25, 0.75, math.inf], 0.5),  # ... nor with an even count
+        ([-math.inf, -math.inf, 0.5, 0.7], -math.inf),  # an infinite middle: the lower of the two
+        ([0.3, 0.5, math.inf, math.inf], 0.5),  # a finite lower middle, an infinite upper
+        ([-math.inf, -math.inf, -math.inf], -math.inf),
+        ([0.2, math.inf, math.inf], math.inf),
+        ([math.inf, math.inf], math.inf),
+    ],
+)
+def test_the_median_threshold_copes_with_infinite_thresholds(thresholds, median):
+    gate = metrics.GateMetrics(
+        ca=0.0,
+        wa=0.0,
+        thresholds={f"gate-{i:02d}": theta for i, theta in enumerate(thresholds, start=1)},
+        rejected_none=[],
     )
+    assert gate.median_threshold == median
 
 
 def test_outcomes_carry_scores_and_decisions_for_the_report():

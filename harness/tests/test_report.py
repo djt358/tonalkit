@@ -40,10 +40,8 @@ def gate_results(scores):
 
 SYLLABLES = [
     Syllable("4", "4", 0.91, 0.3, "Full", []),
-    Syllable(
-        "1", "2", 0.22, 1.7, "Partial",
-        [("NarrowerRange", 0.4), ("StartHigher", 1.86), ("TurnLater", 45.0)],
-    ),  # fmt: skip
+    # tonekit's order (by z-score), which is neither by amount nor alphabetical
+    Syllable("1", "2", 0.22, 1.7, "Partial", [("WiderRange", 0.4), ("TurnLater", 45.0)]),
     Syllable("3", None, 0.0, None, "NotMeasured", []),
 ]
 
@@ -102,6 +100,52 @@ def test_a_failing_gate_says_fail_and_which_bound_broke(tmp_path):
     assert "pass" in rows["Wrong-accept (leave-one-pair-out)"]
 
 
+def bound_results(wrong_accepted: int):
+    """20 gate pairs: 2 correct clips rejected (CA 18/20) and `wrong_accepted` wrong clips accepted
+    (2 sits exactly on the WA bound of 2/20, 3 is one over)."""
+    scores = [(0.6 + 0.01 * i, 0.1 + 0.01 * i) for i in range(20)]
+    for i in (2, 4):  # correct clips below every wrong clip: rejected
+        scores[i] = (0.05, scores[i][1])
+    for i, wrong in list(zip((6, 10, 14), (0.95, 0.96, 0.97)))[:wrong_accepted]:
+        scores[i] = (scores[i][0], wrong)  # wrong clips above every correct clip: accepted
+    return gate_results(scores)
+
+
+def result_cells(text: str) -> dict[str, str]:
+    """Metric name to its Result cell (the last column of the metrics table)."""
+    rows = [line for line in text.splitlines() if line.startswith("| ")]
+    return {
+        cells[0]: cells[-1]
+        for cells in ([c.strip() for c in line.strip("| ").split(" | ")] for line in rows)
+    }
+
+
+def test_a_gate_exactly_on_both_bounds_passes_and_the_report_agrees(tmp_path):
+    """CA 18/20 and WA 2/20 are exactly the bounds. The float 0.1 is above Fraction(1, 10), so a
+    float comparison would print the PASS headline next to "wrong-accept is above its bound"."""
+    results = bound_results(wrong_accepted=2)
+    assert metrics.loo_gate(results).passed is True
+    text = render(results, tmp_path)
+    assert "**S1: PASS**" in text and "S1: FAIL" not in text
+    assert "correct-accept 0.900" in text and "wrong-accept 0.100" in text
+    assert "above its bound" not in text and "below its bound" not in text
+    cells = result_cells(text)
+    assert cells["Correct-accept (leave-one-pair-out)"] == "pass"
+    assert cells["Wrong-accept (leave-one-pair-out)"] == "pass"
+    assert "0.900 (18/20)" in text and "0.100 (2/20)" in text
+
+
+def test_a_gate_just_outside_a_bound_fails_and_names_that_bound(tmp_path):
+    results = bound_results(wrong_accepted=3)  # WA 3/20 = 0.15
+    text = render(results, tmp_path)
+    assert "**S1: FAIL**" in text and "S1: PASS" not in text
+    assert "Wrong-accept is above its bound." in text
+    assert "below its bound" not in text
+    cells = result_cells(text)
+    assert cells["Wrong-accept (leave-one-pair-out)"] == "fail"
+    assert cells["Correct-accept (leave-one-pair-out)"] == "pass"
+
+
 def test_the_metrics_table_has_counts_diagnostics_and_the_median_threshold(tmp_path):
     results = passing_results() + [
         res("min-1", 0.5, set="diag_minimal", rank=1),
@@ -126,7 +170,7 @@ def test_the_per_pair_table_lists_every_held_out_pair(tmp_path):
         assert f"| gate-{i:02d} |" in text
 
 
-def test_failures_show_clip_id_scores_per_syllable_p_and_top_deltas(tmp_path):
+def test_failures_show_clip_id_scores_per_syllable_p_and_deltas(tmp_path):
     text = render(failing_results(), tmp_path)
     assert "## Failures" in text
     assert "### gate-05-correct" in text
@@ -134,11 +178,10 @@ def test_failures_show_clip_id_scores_per_syllable_p_and_top_deltas(tmp_path):
     assert "correct clip rejected" in section
     assert "LowSnr" in section
     assert "0.050" in section  # overall
-    # Per-syllable table: p_correct, distance, measured kind and the two largest deltas.
+    # Per-syllable table: p_correct, distance, measured kind and the deltas, in the order
+    # tonekit returned them (not re-sorted by amount, which would put 45 ms before 0.40 Chao).
     assert "0.910" in section and "0.220" in section
-    assert "StartHigher 1.86" in section
-    assert "TurnLater 45 ms" in section
-    assert "NarrowerRange" not in section  # only the top two deltas by size
+    assert "WiderRange 0.40, TurnLater 45 ms" in section
     assert "NotMeasured" in section
 
 

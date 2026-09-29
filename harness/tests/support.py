@@ -3,8 +3,9 @@
 The voice is a sum of eight harmonics whose f0 follows the tone's Chao knots (equally spaced in
 time, linear in Chao value) between a 100 Hz floor and a 200 Hz ceiling. Chao value c maps to
 100 * 2**((c - 1) / 4) Hz, exactly tonekit's `1 + 4 * (st - floor_st) / (ceil_st - floor_st)`.
-Syllables are 250 ms with 150 ms gaps and 300 ms of near-silence (a fixed low noise floor) on each
-side, so the segmenter finds one nucleus per syllable. Everything is deterministic.
+By default syllables are 250 ms (the neutral tone half that) with 150 ms gaps, and 300 ms of
+near-silence (a fixed low noise floor) on each side, so the segmenter finds one nucleus per
+syllable. Everything is deterministic.
 
 Synthetic audio is for testing the harness only; it is never used to fit shipped calibration.
 """
@@ -26,9 +27,10 @@ GAP_S = 0.15
 EDGE_S = 0.30
 NOISE_FLOOR = 1e-4
 
-# The Chao knots of the cmn pack's tones (packs/cmn/cmn.toml); the neutral tone depends on context
-# and is not synthesised.
-CHAO = {"1": [5.0, 5.0], "2": [3.0, 5.0], "3": [2.0, 1.0, 4.0], "4": [5.0, 1.0]}
+# The Chao knots of the cmn pack's tones (packs/cmn/cmn.toml). The pack's neutral tone depends on
+# context; here it is a fixed short fall from 3 to 2, rendered at half the syllable duration.
+CHAO = {"1": [5.0, 5.0], "2": [3.0, 5.0], "3": [2.0, 1.0, 4.0], "4": [5.0, 1.0], "5": [3.0, 2.0]}
+NEUTRAL_LENGTH = 0.5  # the neutral tone's share of the syllable duration
 
 
 def chao_to_hz(chao: np.ndarray) -> np.ndarray:
@@ -37,7 +39,8 @@ def chao_to_hz(chao: np.ndarray) -> np.ndarray:
 
 
 def syllable(tone: str, dur: float = SYLLABLE_S) -> np.ndarray:
-    n = round(dur * RATE)
+    """One syllable of `tone` ("1".."5") lasting `dur` seconds (half that for the neutral "5")."""
+    n = round(dur * (NEUTRAL_LENGTH if tone == "5" else 1.0) * RATE)
     knots = CHAO[tone]
     chao = np.interp(np.linspace(0.0, 1.0, n), np.linspace(0.0, 1.0, len(knots)), knots)
     phase = 2.0 * np.pi * np.cumsum(chao_to_hz(chao)) / RATE
@@ -50,16 +53,19 @@ def syllable(tone: str, dur: float = SYLLABLE_S) -> np.ndarray:
     return 0.5 * wave / np.abs(wave).max()
 
 
-def utterance(tones: list[str], seed: int = 0) -> np.ndarray:
-    """A 16 kHz float32 utterance saying `tones` (each "1".."4"), one syllable per tone."""
+def utterance(
+    tones: list[str], seed: int = 0, *, syllable_s: float = SYLLABLE_S, gap_s: float = GAP_S
+) -> np.ndarray:
+    """A 16 kHz float32 utterance saying `tones` (each "1".."5"), one syllable per tone, with
+    syllables of `syllable_s` seconds and gaps of `gap_s` seconds between them."""
     rng = np.random.default_rng(seed)
-    gap = np.zeros(round(GAP_S * RATE))
+    gap = np.zeros(round(gap_s * RATE))
     edge = np.zeros(round(EDGE_S * RATE))
     parts: list[np.ndarray] = [edge]
     for i, tone in enumerate(tones):
         if i:
             parts.append(gap)
-        parts.append(syllable(tone))
+        parts.append(syllable(tone, syllable_s))
     parts.append(edge)
     x = np.concatenate(parts)
     x = x + NOISE_FLOOR * rng.standard_normal(len(x))
@@ -68,6 +74,40 @@ def utterance(tones: list[str], seed: int = 0) -> np.ndarray:
 
 def candidate(tones: list[str]) -> Candidate:
     return Candidate(id="-".join(tones), tones=list(tones), labels=[])
+
+
+def write_clip(
+    root: Path,
+    cid: str,
+    pcm: np.ndarray,
+    *,
+    intended: list[str],
+    set: str = "gate",
+    pair: str | None = None,
+    label: str = "correct",
+    speaker: str = "dj",
+    distractors: list[list[str]] | None = None,
+    produced: list[str] | None = None,
+) -> Clip:
+    """Write `pcm` (16 kHz mono samples) to `<root>/<cid>.wav` and return its manifest `Clip`,
+    whose path is relative to `root`. `intended` is the reading the clip aims for; `produced` the
+    tones actually spoken, if known (`produced_tones` is null otherwise)."""
+    root.mkdir(parents=True, exist_ok=True)
+    wavfile.write(root / f"{cid}.wav", RATE, np.asarray(pcm, dtype=np.float32))
+    return Clip(
+        id=cid,
+        path=f"{cid}.wav",
+        speaker=speaker,
+        set=set,  # type: ignore[arg-type]
+        pair=pair,
+        label=label,  # type: ignore[arg-type]
+        intended=candidate(intended),
+        distractors=[candidate(d) for d in distractors or []],
+        produced_tones=None if produced is None else list(produced),
+        condition=Condition(noise="none", distance="synthetic"),
+        source="synthetic-test",
+        synthetic={"generator": "tests/support.py"},
+    )
 
 
 def make_clip(
@@ -82,24 +122,22 @@ def make_clip(
     speaker: str = "dj",
     distractors: list[list[str]] | None = None,
     seed: int = 0,
+    syllable_s: float = SYLLABLE_S,
+    gap_s: float = GAP_S,
 ) -> Clip:
-    """Write `<root>/<cid>.wav` speaking `produced` and return its manifest `Clip`, whose intended
-    reading is `intended` (default: what was produced) and whose path is relative to `root`."""
-    root.mkdir(parents=True, exist_ok=True)
-    wavfile.write(root / f"{cid}.wav", RATE, utterance(produced, seed))
-    return Clip(
-        id=cid,
-        path=f"{cid}.wav",
-        speaker=speaker,
-        set=set,  # type: ignore[arg-type]
+    """Synthesise `<root>/<cid>.wav` speaking `produced` (see `utterance`) and return its manifest
+    `Clip`, whose intended reading is `intended` (default: what was produced)."""
+    return write_clip(
+        root,
+        cid,
+        utterance(produced, seed, syllable_s=syllable_s, gap_s=gap_s),
+        intended=intended or produced,
+        set=set,
         pair=pair,
-        label=label,  # type: ignore[arg-type]
-        intended=candidate(intended or produced),
-        distractors=[candidate(d) for d in distractors or []],
-        produced_tones=list(produced),
-        condition=Condition(noise="none", distance="synthetic"),
-        source="synthetic-test",
-        synthetic={"generator": "tests/support.py"},
+        label=label,
+        speaker=speaker,
+        distractors=distractors,
+        produced=produced,
     )
 
 

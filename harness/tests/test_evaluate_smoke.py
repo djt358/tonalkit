@@ -98,16 +98,34 @@ def test_results_feed_the_gate_and_the_report(results, tmp_path):
     assert "gate-01" in text and "gate-02" in text
 
 
-def test_the_request_names_the_accent_and_distractors(corpus, pack_toml, calib_json, tmp_path):
+def test_the_request_names_the_accent_and_distractors(
+    corpus, pack_toml, calib_json, tmp_path, monkeypatch
+):
     root, _ = corpus
     clip = make_clip(
         root, "min-1", ["4", "1", "3"], set="diag_minimal", label="correct",
         distractors=[["4", "2", "3"], ["4", "3", "3"]],
     )  # fmt: skip
+
+    requests: list[dict] = []  # the request of each assess call
+    real_assess = tonekit_py.assess
+
+    def spy(analysis_json, pack, calib, request_json):
+        requests.append(json.loads(request_json))
+        return real_assess(analysis_json, pack, calib, request_json)
+
+    monkeypatch.setattr(evaluate.tonekit_py, "assess", spy)
     (result,) = evaluate.run([clip], pack_toml, calib_json, "cmn-TW", root=root, cache_dir=tmp_path)
-    assert result.intended_rank >= 1
-    # Ranks are among intended + the two distractors.
-    assert result.intended_rank <= 3
+
+    (request,) = requests
+    assert request["grading"]["accent"] == "cmn-TW"
+    assert request["intended"]["id"] == "4-1-3"
+    assert [d["id"] for d in request["distractors"]] == ["4-2-3", "4-3-3"]
+    assert [[t["tone"] for t in d["targets"]] for d in request["distractors"]] == [
+        ["4", "2", "3"],
+        ["4", "3", "3"],
+    ]
+    assert 1 <= result.intended_rank <= 3  # ranked among the intended reading and its 2 distractors
 
 
 def test_an_unknown_accent_is_an_error_naming_the_clip(corpus, pack_toml, calib_json, tmp_path):
@@ -244,6 +262,38 @@ def test_only_16k_mono_wavs_are_accepted(corpus, pack_toml, calib_json, tmp_path
         clip = clips[0].model_copy(update={"id": name, "path": f"{name}.wav"})
         with pytest.raises(EvalError, match=f"{name}.*{why}.*tkh ingest"):
             evaluate.run([clip], pack_toml, calib_json, None, root=root, cache_dir=tmp_path)
+
+
+@pytest.mark.parametrize(
+    ("name", "cut", "why"),
+    [
+        ("one-sample-short", -4, "Reached EOF prematurely"),  # scipy only warns, and drops a sample
+        ("mid-sample", -2, "buffer size"),
+        ("mid-header", 30, "unpack"),
+    ],
+)
+def test_a_truncated_wav_is_an_error_naming_the_clip(
+    corpus, pack_toml, calib_json, tmp_path, name, cut, why
+):
+    root, clips = corpus
+    whole = (root / clips[0].path).read_bytes()
+    (root / f"{name}.wav").write_bytes(whole[:cut])
+    clip = clips[0].model_copy(update={"id": name, "path": f"{name}.wav"})
+    with pytest.raises(EvalError, match=f"{name}.*not a readable WAV file.*{why}"):
+        evaluate.run([clip], pack_toml, calib_json, None, root=root, cache_dir=tmp_path)
+
+
+def test_a_wav_with_an_unknown_chunk_is_still_read(corpus, pack_toml, calib_json, tmp_path):
+    """scipy warns "Chunk (non-data) not understood" for chunks it skips; that is harmless."""
+    root, clips = corpus
+    whole = (root / clips[0].path).read_bytes()
+    extra = b"abcd" + (6).to_bytes(4, "little") + b"noise!"
+    body = whole[8:] + extra
+    (root / "extra-chunk.wav").write_bytes(b"RIFF" + len(body).to_bytes(4, "little") + body)
+    clip = clips[0].model_copy(update={"id": "extra-chunk", "path": "extra-chunk.wav"})
+    (result,) = evaluate.run([clip], pack_toml, calib_json, None, root=root, cache_dir=tmp_path)
+    (plain,) = evaluate.run(clips[:1], pack_toml, calib_json, None, root=root, cache_dir=tmp_path)
+    assert result.overall == plain.overall
 
 
 def test_duplicate_clip_ids_are_an_error(corpus, pack_toml, calib_json, tmp_path):

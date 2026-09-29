@@ -20,15 +20,15 @@ under the self-release in `RELEASE-dj.md` so that derived calibration can ship.
 | `diag_count` | Hesitation before the spell (嗯…), restart, extra word, dropped syllable. | 10 |
 | `diag_minimal` | 10 tone-minimal spell sets of 2 members each (买/卖, 水/睡 patterns). Record each member once; list the other member as a `distractor`. | 20 |
 | `quiet` | 5 gate pairs re-recorded in a quiet room. | 10 |
-| `register` | 妈麻马骂, three times. | 3 |
+| `register` | 妈麻马骂 ×8 (eight clips). Eight clips make 32 syllables, above tonekit's 30-syllable cold-start threshold, so gate clips are graded with a warm register and no ×1.5 tolerance widening. | 8 |
 | `synthetic` | Not recorded. Derived clips (WORLD resynthesis) for tests and diagnostics only. | n/a |
 
-The recorded sets total 123 clips (40 + 40 + 10 + 20 + 10 + 3). After writing the manifest, check
+The recorded sets total 128 clips (40 + 40 + 10 + 20 + 10 + 8). After writing the manifest, check
 the count from `harness/`:
 
     uv run python -c "from tonekit_harness.manifest import load; print(len(load('corpus/manifest.jsonl')))"
 
-It should print 123.
+It should print 128.
 
 ## Workflow
 
