@@ -9,8 +9,9 @@
 //!   `ToneId`, `CandidateId`) are plain `String`s.
 //!
 //! Every function returns `Result<_, AssessError>`, which Swift sees as a thrown `AssessError`; a
-//! pack the library rejects is `AssessError.Pack(message:)`. Nothing here panics on bad input, and
-//! an external f0 track is sanitised inside `analyze` (ruling R43): Swift may pass any floats.
+//! pack the library rejects is `AssessError.Pack(message:)`. Bad input comes back as such an error,
+//! not a panic (and UniFFI turns any panic into a thrown internal error, never a crash). An
+//! external f0 track is sanitised inside `analyze` (ruling R43): Swift may pass any floats.
 //!
 //! The crate builds as `staticlib` (the iOS XCFramework), `cdylib` (the host build that the
 //! bindings generator reads) and `lib` (Rust tests). Build steps are in `scripts/`.

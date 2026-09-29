@@ -112,7 +112,7 @@ xcodebuild test -scheme TonekitSmoke -destination 'platform=iOS Simulator,name=<
 If the list is empty, install a Simulator runtime: Xcode > Settings > Components. The device name
 does not matter to the test; the CI job pins `iPhone 15` on the macos-14 runner image.
 
-### 2. The package does not see the library: `No such module 'TonekitFFI'`, or `Scheme TonekitSmoke ... not configured for the test action`, or `binary target ... does not contain a binary artifact`
+### 2. The package is not wired up: `No such module 'TonekitFFI'`, `does not contain a scheme named "TonekitSmoke"` (or `not configured for the test action`), or `binary target ... does not contain a binary artifact`
 
 The last one means step 1 did not finish: `swift/TonekitSmoke/Frameworks/Tonekit.xcframework`
 must exist. For `No such module 'TonekitFFI'`, check that the module map made it into the

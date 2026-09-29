@@ -73,7 +73,13 @@ jobs:
         working-directory: swift/TonekitSmoke
         run: |
           set -o pipefail
-          xcodebuild test -scheme TonekitSmoke \
+          # SwiftPM names the scheme after the library product; if this Xcode only offers the
+          # package-wide scheme, use that.
+          scheme=TonekitSmoke
+          schemes=$(xcodebuild -list)
+          grep -Eq '^[[:space:]]+TonekitSmoke$' <<<"$schemes" || scheme=TonekitSmoke-Package
+          echo "scheme: $scheme"
+          xcodebuild test -scheme "$scheme" \
             -destination 'platform=iOS Simulator,name=iPhone 15' \
             | tee ../../build/xcodebuild-test.log
       - name: Latency on the Simulator (informational)
