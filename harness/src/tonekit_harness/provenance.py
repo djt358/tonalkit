@@ -160,7 +160,7 @@ def _artifact_problem(artifact: str, repo_root: Path, pack_dir: Path) -> str | N
             return f"does not exist (resolved against {repo_root})"
         if not target.is_file():
             return "is not a regular file"
-    except (OSError, ValueError) as e:  # e.g. an embedded NUL character
+    except (OSError, ValueError, RuntimeError) as e:  # an embedded NUL; a symlink loop (RuntimeError on 3.11/3.12)
         return f"is not a usable path: {e}"
     return None
 

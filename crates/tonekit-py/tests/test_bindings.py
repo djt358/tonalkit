@@ -359,7 +359,11 @@ def test_the_gil_is_released_while_rust_computes(pcm):
     finally:
         stop.set()
         thread.join()
-    assert duration > MIN_CALL_S / 2, "the call is too short for this test to mean anything"
+    if duration <= MIN_CALL_S / 2:  # a faster machine or a warm cache: too short to judge
+        pytest.skip(
+            f"the measured analyze call took {duration:.3f} s (need > {MIN_CALL_S / 2:.3f} s); "
+            f"the counter gained {gained} against an idle rate of {idle_rate:.0f}/s"
+        )
     share = gained / (idle_rate * duration)
     assert share > 0.25, (
         f"the counting thread ran at {share:.1%} of its idle rate during analyze; "

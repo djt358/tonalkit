@@ -26,12 +26,14 @@ const RATE: u32 = 16_000;
 
 /// The speaker of the harness's synthetic corpus (`tests/support.py`): harmonic voice, floor
 /// 100 Hz / ceiling 200 Hz, 250 ms syllables, 150 ms gaps, 300 ms of silence either side. Unlike
-/// the facade's own tests, every third tone is spoken as the full dip, wherever it stands.
+/// the facade's own tests, a `"3"` is spoken as the full dip, wherever it stands; `"3h"` is the
+/// half-third (Chao 2-1) for the clips that need one.
 fn spoken_tones(tones: &[&str]) -> Vec<f32> {
     let knots = |tone: &str| match tone {
         "1" => vec![5.0, 5.0],
         "2" => vec![3.0, 5.0],
         "3" => vec![2.0, 1.0, 4.0],
+        "3h" => vec![2.0, 1.0],
         "4" => vec![5.0, 1.0],
         other => panic!("no spoken form for tone {other}"),
     };
@@ -118,4 +120,19 @@ fn an_intended_third_tone_keeps_its_credit_for_the_full_dip() {
     let (overall, p) = grade(&["1", "3", "4"], &["1", "3", "4"], None);
     eprintln!("R47 intended 1-3-4, produced 1-3-4: overall {overall:.4} {p:.4?}");
     assert!(p[1] > 0.65, "intended T3 middle p_correct {:.4}", p[1]);
+}
+
+#[test]
+fn a_second_tone_for_an_intended_non_final_third_tone_still_scores_far_below_the_half_third() {
+    // The reverse trade of R47: widening the expected non-final T3 with the full dip could let a
+    // T2 pass for an intended T3. Intended 1-3-4, cold register: the T2-for-T3 error must stay
+    // well below the correct clip spoken with the standard half-third middle. (Measured with the
+    // old pack: error 0.069 against correct 0.723; with the R47 pack: 0.273 against 0.723.)
+    let (error, error_p) = grade(&["1", "2", "4"], &["1", "3", "4"], None);
+    let (correct, correct_p) = grade(&["1", "3h", "4"], &["1", "3", "4"], None);
+    eprintln!("R47 reverse: error {error:.4} {error_p:.4?}, correct half-third {correct:.4} {correct_p:.4?}");
+    assert!(
+        error <= correct - 0.03,
+        "T2-for-T3 error overall {error:.4} is not 0.03 below the correct half-third overall {correct:.4}"
+    );
 }

@@ -2,7 +2,8 @@
 
 Every function takes and returns JSON text in the tonekit facade's serde format, so the numbers
 are exactly the CLI's and the Swift package's. Failures raise ``ValueError`` with the library's
-message (``TypeError`` for a ``pcm`` that is not audio).
+message (``TypeError`` for a ``pcm`` that is not audio or a ``sample_rate`` that is not an
+integer).
 """
 
 from collections.abc import Sequence

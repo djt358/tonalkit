@@ -170,7 +170,8 @@ def test_a_register_that_is_not_utf8_raises_a_provenance_error_naming_it(tmp_pat
 
 
 def test_a_malformed_register_csv_raises_a_provenance_error_naming_it(tmp_path):
-    # A field longer than csv's 128 KiB limit is a csv.Error.
+    # A field longer than csv's 128 KiB limit is a csv.Error (relies on the default
+    # csv.field_size_limit of 131072).
     reg = write(tmp_path, "reg.csv", "id,shipped_weights_training\na," + "x" * 200_000 + "\n")
     with pytest.raises(provenance.ProvenanceError, match="reg.csv"):
         provenance.check(reg, [ZERO])
@@ -367,7 +368,20 @@ def test_a_symlink_out_of_the_pack_directory_is_a_violation(tmp_path):
 
 def test_an_artifact_path_the_filesystem_cannot_take_is_a_violation(tmp_path):
     v = one_bad_pack(tmp_path, '"packs/foo/x\\u0000.json"')  # an embedded NUL character
-    assert len(v) == 1 and "foo" in v[0]
+    assert len(v) == 1 and "foo" in v[0] and "not a usable path" in v[0]
+
+
+def test_a_self_referential_symlink_artifact_is_a_violation_not_a_traceback(tmp_path):
+    # `loop.json -> loop.json`: Path.resolve() raises RuntimeError on Python 3.11/3.12 (later
+    # versions return the path and `exists()` is False), so it is a violation either way.
+    make_pack(tmp_path, "foo", prov("foo", "loop.json"))
+    try:
+        (tmp_path / "packs" / "foo" / "loop.json").symlink_to("loop.json")
+    except OSError:
+        pytest.skip("cannot create symlinks here")
+    v = provenance.check_packs(REGISTER, tmp_path / "packs")
+    assert len(v) == 1 and "loop.json" in v[0]
+    assert "not a usable path" in v[0] or "does not exist" in v[0]
 
 
 def test_a_regular_file_inside_the_pack_directory_passes(tmp_path):
