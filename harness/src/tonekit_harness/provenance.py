@@ -20,7 +20,15 @@ class ProvenanceError(ValueError):
 
 
 def _load_register(register_csv: Path) -> dict[str, str]:
-    with Path(register_csv).open(newline="", encoding="utf-8") as f:
+    try:
+        return _read_register(Path(register_csv))
+    except (UnicodeDecodeError, csv.Error) as e:
+        # Decoding and parsing happen while the rows are read, so they surface here, not at open().
+        raise ProvenanceError(f"{register_csv}: cannot read the register: {e}") from e
+
+
+def _read_register(register_csv: Path) -> dict[str, str]:
+    with register_csv.open(newline="", encoding="utf-8") as f:
         reader = csv.DictReader(f)
         missing = {"id", "shipped_weights_training"} - set(reader.fieldnames or [])
         if missing:
@@ -69,7 +77,7 @@ def _check_one(register: dict[str, str], manifest: Path) -> list[str]:
     try:
         with manifest.open("rb") as f:
             doc = tomllib.load(f)
-    except (OSError, tomllib.TOMLDecodeError) as e:
+    except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError) as e:
         return [f"{manifest}: cannot read manifest: {e}"]
 
     violations = _check_format(manifest, doc)
@@ -136,26 +144,48 @@ def check(register_csv: str | Path, manifests: Iterable[Path]) -> list[str]:
     return violations
 
 
+def _artifact_problem(artifact: str, repo_root: Path, pack_dir: Path) -> str | None:
+    """Why `artifact` is not a regular file inside `pack_dir`, or None if it is.
+
+    The path is relative to the repo root (so `packs/cmn/cmn.calib.json`), and what it names must
+    lie inside the pack's own directory once `..` parts and symlinks are resolved.
+    """
+    if Path(artifact).is_absolute():
+        return "must be a relative path, not an absolute one"
+    try:
+        target = (repo_root / artifact).resolve()
+        if not target.is_relative_to(pack_dir):
+            return f"is outside the pack directory {pack_dir} (no `..` escapes or links out of it)"
+        if not target.exists():
+            return f"does not exist (resolved against {repo_root})"
+        if not target.is_file():
+            return "is not a regular file"
+    except (OSError, ValueError) as e:  # e.g. an embedded NUL character
+        return f"is not a usable path: {e}"
+    return None
+
+
 def _artifact_violations(manifest: Path, repo_root: Path) -> list[str]:
-    """The manifest's `artifact` (a repo-root-relative path) must exist."""
+    """The manifest's `artifact` (a repo-root-relative path) must be a regular file inside the
+    manifest's own directory."""
     try:
         with manifest.open("rb") as f:
             artifact = tomllib.load(f).get("artifact")
-    except (OSError, tomllib.TOMLDecodeError):
+    except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError):
         return []  # check() reports an unreadable manifest
     if not _is_text(artifact):
         return []  # check() reports a missing or empty artifact
-    if not (repo_root / artifact).exists():
-        return [f"{manifest}: artifact {artifact!r} does not exist (resolved against {repo_root})"]
-    return []
+    problem = _artifact_problem(artifact, repo_root, manifest.parent.resolve())
+    return [f"{manifest}: artifact {artifact!r} {problem}"] if problem else []
 
 
 def check_packs(register_csv: str | Path, packs_root: str | Path, manifests: Iterable[Path] = ()) -> list[str]:
     """Check every pack under `packs_root`, plus any extra `manifests`.
 
-    Each immediate subdirectory of `packs_root` must hold a PROVENANCE.toml whose `artifact`
-    exists. Artifact paths are relative to the repo root, which is the parent of `packs_root`
-    (e.g. `packs/cmn/cmn.calib.json`). Every manifest found is then checked like an explicit one.
+    Each immediate subdirectory of `packs_root` must hold a PROVENANCE.toml whose `artifact` is a
+    regular file inside that subdirectory. Artifact paths are relative to the repo root, which is
+    the parent of `packs_root` (e.g. `packs/cmn/cmn.calib.json`). Every manifest found is then
+    checked like an explicit one.
     """
     packs_root = Path(packs_root)
     violations: list[str] = []
@@ -179,11 +209,15 @@ def check_packs(register_csv: str | Path, packs_root: str | Path, manifests: Ite
 
 
 def _run(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
-    if not args.files and not args.packs_root:
+    if not args.files and args.packs_root is None:
         parser.error("give at least one PROVENANCE.toml file or --packs-root")
+    if args.packs_root is not None and not args.packs_root.strip():
+        # Path("") is the current directory: an empty value (an unset shell variable, say) must
+        # neither be skipped nor silently mean "here".
+        parser.error("--packs-root must not be empty")
     files = [Path(f) for f in args.files]
     try:
-        if args.packs_root:
+        if args.packs_root is not None:
             violations = check_packs(args.register, args.packs_root, files)
         else:
             violations = check(args.register, files)

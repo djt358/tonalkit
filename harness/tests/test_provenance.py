@@ -159,6 +159,37 @@ def test_duplicate_register_ids_raise(tmp_path):
         provenance.check(reg, [ZERO])
 
 
+# --- unreadable input: a clean error that names the file, never a traceback ---------------
+
+
+def test_a_register_that_is_not_utf8_raises_a_provenance_error_naming_it(tmp_path):
+    reg = tmp_path / "reg.csv"
+    reg.write_bytes(b"id,shipped_weights_training\nname\xff,allow\n")
+    with pytest.raises(provenance.ProvenanceError, match="reg.csv"):
+        provenance.check(reg, [ZERO])
+
+
+def test_a_malformed_register_csv_raises_a_provenance_error_naming_it(tmp_path):
+    # A field longer than csv's 128 KiB limit is a csv.Error.
+    reg = write(tmp_path, "reg.csv", "id,shipped_weights_training\na," + "x" * 200_000 + "\n")
+    with pytest.raises(provenance.ProvenanceError, match="reg.csv"):
+        provenance.check(reg, [ZERO])
+
+
+def test_a_manifest_that_is_not_utf8_is_a_violation_naming_it(tmp_path):
+    p = tmp_path / "PROVENANCE.toml"
+    p.write_bytes(b'artifact = "\xff"\nnote = "t"\n')
+    v = provenance.check(REGISTER, [p])
+    assert len(v) == 1 and "PROVENANCE.toml" in v[0] and "cannot read manifest" in v[0]
+
+
+def test_packs_root_survives_a_manifest_that_is_not_utf8(tmp_path):
+    d = make_pack(tmp_path, "foo", body=None)
+    (d / "PROVENANCE.toml").write_bytes(b"\xff\xfe")
+    v = provenance.check_packs(REGISTER, tmp_path / "packs")
+    assert len(v) == 1 and "foo" in v[0] and "cannot read manifest" in v[0]
+
+
 # --- strict format: a typo must never look like a clean zero-source file -------------------
 
 
@@ -280,6 +311,70 @@ def test_packs_root_flags_artifact_pointing_at_a_missing_file(tmp_path):
     assert "packs/foo/gone.calib.json" in v[0] and "does not exist" in v[0]
 
 
+def one_bad_pack(tmp_path, artifact_toml: str, *, files: dict[str, str | None] | None = None):
+    """A valid pack `bar`, plus pack `foo` whose manifest says `artifact = <artifact_toml>` (TOML
+    text), plus `files` under the repo root (a value of None makes a directory). Returns the
+    violations of `check_packs`."""
+    make_pack(tmp_path, "bar", prov("bar"))
+    make_pack(tmp_path, "foo", f"artifact = {artifact_toml}\nnote = \"t\"\n")
+    for name, text in (files or {}).items():
+        path = tmp_path / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if text is None:
+            path.mkdir()
+        else:
+            path.write_text(text, encoding="utf-8")
+    return provenance.check_packs(REGISTER, tmp_path / "packs")
+
+
+def test_an_absolute_artifact_path_is_a_violation_even_if_the_file_exists(tmp_path):
+    existing = tmp_path / "packs" / "foo" / "x.calib.json"
+    v = one_bad_pack(tmp_path, f'"{existing.as_posix()}"')
+    assert existing.is_file()
+    assert len(v) == 1 and "relative" in v[0] and "foo" in v[0]
+
+
+@pytest.mark.parametrize(
+    "artifact",
+    [
+        "packs/foo/../../secret.json",  # out of the repo root
+        "packs/foo/../bar/x.calib.json",  # into another pack
+        "packs/bar/x.calib.json",  # another pack's file, no `..`
+        "secret.json",  # inside the repo root but outside the pack
+    ],
+)
+def test_an_artifact_outside_the_pack_directory_is_a_violation(tmp_path, artifact):
+    (tmp_path / "secret.json").write_text("{}", encoding="utf-8")
+    v = one_bad_pack(tmp_path, f'"{artifact}"')
+    assert len(v) == 1 and "outside the pack directory" in v[0] and "foo" in v[0]
+
+
+def test_an_artifact_that_is_a_directory_is_a_violation(tmp_path):
+    v = one_bad_pack(tmp_path, '"packs/foo/sub"', files={"packs/foo/sub": None})
+    assert len(v) == 1 and "not a regular file" in v[0]
+
+
+def test_a_symlink_out_of_the_pack_directory_is_a_violation(tmp_path):
+    (tmp_path / "secret.json").write_text("{}", encoding="utf-8")
+    make_pack(tmp_path, "foo", prov("foo", "link.json"))
+    try:
+        (tmp_path / "packs" / "foo" / "link.json").symlink_to(tmp_path / "secret.json")
+    except OSError:
+        pytest.skip("cannot create symlinks here")
+    v = provenance.check_packs(REGISTER, tmp_path / "packs")
+    assert len(v) == 1 and "outside the pack directory" in v[0]
+
+
+def test_an_artifact_path_the_filesystem_cannot_take_is_a_violation(tmp_path):
+    v = one_bad_pack(tmp_path, '"packs/foo/x\\u0000.json"')  # an embedded NUL character
+    assert len(v) == 1 and "foo" in v[0]
+
+
+def test_a_regular_file_inside_the_pack_directory_passes(tmp_path):
+    v = one_bad_pack(tmp_path, '"packs/foo/sub/deep.json"', files={"packs/foo/sub/deep.json": "{}"})
+    assert v == []
+
+
 def test_artifact_is_resolved_against_the_parent_of_packs_root(tmp_path):
     # artifact paths are repo-root-relative, so the same manifest passes from any cwd
     make_pack(tmp_path, "foo", prov("foo", "foo.calib.json"), artifact_file="foo.calib.json")
@@ -377,6 +472,23 @@ def test_cli_missing_register_exits_2(tmp_path, capsys):
     rc = cli.main(["provenance", "--register", str(tmp_path / "nope.csv"), str(ZERO)])
     assert rc == 2
     assert "nope.csv" in capsys.readouterr().err
+
+
+def test_cli_register_that_is_not_utf8_exits_2_naming_it(tmp_path, capsys):
+    reg = tmp_path / "reg.csv"
+    reg.write_bytes(b"id,shipped_weights_training\nname\xff,allow\n")
+    rc = cli.main(["provenance", "--register", str(reg), str(ZERO)])
+    assert rc == 2
+    err = capsys.readouterr().err
+    assert "reg.csv" in err and "Traceback" not in err
+
+
+def test_cli_empty_packs_root_is_refused_even_when_files_are_given(capsys):
+    """`--packs-root ""` (say, an unset shell variable) must not be skipped as if it was absent."""
+    with pytest.raises(SystemExit) as e:
+        cli.main(["provenance", "--register", str(REGISTER), "--packs-root", "", str(ZERO)])
+    assert e.value.code == 2
+    assert "--packs-root" in capsys.readouterr().err
 
 
 def test_cli_requires_register_and_something_to_check(capsys):
