@@ -1,0 +1,64 @@
+---
+source: crates/tonekit/tests/end_to_end.rs
+expression: "round3(serde_json::to_value(&r).unwrap())"
+---
+{
+  "accent_fit": [],
+  "intended": "spell",
+  "intended_rank": 1,
+  "margin_llr": -0.03,
+  "overall": 0.766,
+  "register_update": {
+    "ceil_st": 22.35,
+    "floor_st": 10.37,
+    "median_st": 16.385,
+    "n_syllables": 103
+  },
+  "schema": "tonekit.assessment.v1",
+  "syllables": [
+    {
+      "basis": [
+        "Acoustic"
+      ],
+      "component": "cmn-standard/citation",
+      "deltas": [
+        {
+          "amount": 0.708,
+          "kind": "WiderRange"
+        }
+      ],
+      "distance": 0.66,
+      "expected": "4",
+      "heard": "4",
+      "heard_as": null,
+      "measured": "Full",
+      "p_correct": 0.766
+    },
+    {
+      "basis": [
+        "Acoustic"
+      ],
+      "component": "cmn-standard/citation",
+      "deltas": [],
+      "distance": 0.0,
+      "expected": "1",
+      "heard": "1",
+      "heard_as": null,
+      "measured": "Full",
+      "p_correct": 0.812
+    },
+    {
+      "basis": [
+        "Acoustic"
+      ],
+      "component": "cmn-standard/t3-final-dip#0",
+      "deltas": [],
+      "distance": 0.349,
+      "expected": "3",
+      "heard": "3",
+      "heard_as": null,
+      "measured": "Full",
+      "p_correct": 0.839
+    }
+  ]
+}
