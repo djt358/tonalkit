@@ -192,6 +192,53 @@ fn insertion_llr_is_a_required_calibration_field() {
     );
 }
 
+/// Load the cmn pack with the decode field `field` changed from its seed value to `value`.
+fn load_with_decode_llr(field: &str, seed: &str, value: &str) -> Result<LanguagePack, PackError> {
+    let json = mutate(
+        CMN_CALIB,
+        &format!("\"{field}\": {seed}"),
+        &format!("\"{field}\": {value}"),
+    );
+    LanguagePack::from_toml(CMN_TOML, Some(&json))
+}
+
+#[test]
+fn unvoiced_syllable_llr_must_not_be_positive() {
+    // A positive value would reward skipped or unmeasurable syllables.
+    let r = load_with_decode_llr("unvoiced_syllable_llr", "-3.0", "0.5");
+    assert!(
+        matches!(r, Err(PackError::Invalid(ref m))
+            if m.contains("decode.unvoiced_syllable_llr must be <= 0") && m.contains("0.5")),
+        "{r:?}"
+    );
+    // Zero (a free skip) and the seed both load.
+    for ok in ["0.0", "-3.0"] {
+        let p = load_with_decode_llr("unvoiced_syllable_llr", "-3.0", ok).unwrap();
+        assert_eq!(
+            p.calibration().decode.unvoiced_syllable_llr,
+            ok.parse::<f32>().unwrap()
+        );
+    }
+}
+
+#[test]
+fn insertion_llr_must_not_be_positive() {
+    // A positive value would reward skipped or unmeasurable syllables.
+    let r = load_with_decode_llr("insertion_llr", "-2.0", "0.5");
+    assert!(
+        matches!(r, Err(PackError::Invalid(ref m))
+            if m.contains("decode.insertion_llr must be <= 0") && m.contains("0.5")),
+        "{r:?}"
+    );
+    for ok in ["0.0", "-2.0"] {
+        let p = load_with_decode_llr("insertion_llr", "-2.0", ok).unwrap();
+        assert_eq!(
+            p.calibration().decode.insertion_llr,
+            ok.parse::<f32>().unwrap()
+        );
+    }
+}
+
 #[test]
 fn provenance_declares_the_calib_file_and_no_sources() {
     let v: toml::Table = toml::from_str(CMN_PROVENANCE).unwrap();

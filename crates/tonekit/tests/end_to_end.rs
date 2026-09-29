@@ -166,7 +166,6 @@ fn assess_correct_vs_single_tone_error() {
     let ok = assess_of(&spoken(&["4", "1", "3"]), intended(&["4", "1", "3"]));
     let bad = assess_of(&spoken(&["4", "1", "4"]), intended(&["4", "1", "3"]));
     let (ok, bad) = (ok.overall.unwrap(), bad.overall.unwrap());
-    eprintln!("overall: correct {ok:.4}, single wrong tone {bad:.4}");
     // Thresholds per ruling R9. Observed on these utterances: correct 0.766, wrong 0.003.
     assert!(ok > 0.6, "correct overall {ok}");
     assert!(bad < 0.3, "wrong overall {bad}");
@@ -371,7 +370,6 @@ fn external_f0_track_is_used() {
     let request = req(&["4", "1", "3"]);
     let overall_ext = assess(&ext, &cmn(), &request).unwrap().overall.unwrap();
     let overall_pyin = assess(&pyin, &cmn(), &request).unwrap().overall.unwrap();
-    eprintln!("overall: external {overall_ext:.4}, pyin {overall_pyin:.4}");
     assert!((overall_ext - overall_pyin).abs() < 0.2);
 }
 

@@ -112,14 +112,22 @@ xcodebuild test -scheme TonekitSmoke -destination 'platform=iOS Simulator,name=<
 If the list is empty, install a Simulator runtime: Xcode > Settings > Components. The device name
 does not matter to the test; the CI job pins `iPhone 15` on the macos-14 runner image.
 
-### 2. The package is not wired up: `No such module 'TonekitFFI'`, `does not contain a scheme named "TonekitSmoke"` (or `not configured for the test action`), or `binary target ... does not contain a binary artifact`
+### 2. The package is not wired up: hundreds of `cannot find type 'RustBuffer' in scope` errors, `does not contain a scheme named "TonekitSmoke"` (or `not configured for the test action`), or `binary target ... does not contain a binary artifact`
 
 The last one means step 1 did not finish: `swift/TonekitSmoke/Frameworks/Tonekit.xcframework`
-must exist. For `No such module 'TonekitFFI'`, check that the module map made it into the
-Simulator slice:
+must exist. If the C module `TonekitFFI` is not wired up, you do **not** get
+`No such module 'TonekitFFI'`: the generated Swift wraps `import TonekitFFI` in
+`#if canImport(TonekitFFI)`, so the missing module goes unreported and everything that needs it
+fails instead. The symptoms are hundreds of errors in `Sources/Tonekit/Generated/*.swift` such as
+`cannot find type 'RustBuffer' in scope` and
+`cannot find 'ffi_tonekit_..._rustbuffer_from_bytes' in scope`, or
+`missing required module 'TonekitFFI'` in the test target. Check that the module map made it into
+the Simulator slice:
 
 ```sh
-cat swift/TonekitSmoke/Frameworks/Tonekit.xcframework/ios-arm64-simulator/Headers/module.modulemap
+# from swift/TonekitSmoke (where step 2 leaves you); from the repository root, prefix the path
+# with swift/TonekitSmoke/
+cat Frameworks/Tonekit.xcframework/ios-arm64-simulator/Headers/module.modulemap
 ```
 
 It must say `module TonekitFFI` and list `tonekitFFI.h`, `tonekit_coreFFI.h` and

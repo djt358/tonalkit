@@ -91,6 +91,8 @@ rm -rf "$build/swift" "$build/headers"
     --metadata-no-deps --config crates/tonekit-ffi/uniffi.toml \
     "$target_dir/aarch64-apple-ios-sim/release/libtonekit_ffi.a" "$build/swift"
 ls "$build/swift" | sed 's/^/    /'
+compgen -G "$build/swift/*.swift" >/dev/null ||
+    fail "uniffi-bindgen-swift generated no Swift from $target_dir/aarch64-apple-ios-sim/release/libtonekit_ffi.a"
 for swift in "$build"/swift/*.swift; do
     grep -q "^import $ffi_module\$" "$swift" ||
         fail "$(basename "$swift") does not import $ffi_module: is crates/tonekit-ffi/uniffi.toml being read?"

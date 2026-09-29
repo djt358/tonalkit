@@ -49,7 +49,7 @@ skip = [
     { crate = "toml_datetime@1", reason = "via toml 1.x, see above" },
     { crate = "serde_spanned@1", reason = "via toml 1.x, see above" },
     { crate = "winnow@1", reason = "via toml 1.x and askama_parser (uniffi_bindgen, build-time)" },
-    { crate = "getrandom@0.4", reason = "via tempfile (uniffi_bindgen, build-time)" },
+    { crate = "getrandom@0.4", reason = "via tempfile (uniffi_pipeline <- uniffi_meta <- uniffi_macros; proc-macro/host only)" },
 ]
 # tonekit is on-device and offline: no network or TLS stacks, direct or transitive.
 deny = [

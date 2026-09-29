@@ -10,6 +10,9 @@ publish = false
 [[bin]]
 name = "tonekit"
 path = "src/main.rs"
+# The facade library is also called `tonekit`; without this, `cargo doc --workspace` writes both
+# to target/doc/tonekit and warns about the collision.
+doc = false
 
 [dependencies]
 tonekit = { path = "../tonekit" }

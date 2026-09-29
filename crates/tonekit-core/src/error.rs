@@ -4,13 +4,14 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::ids::{CandidateId, ToneId};
+use crate::signal::SAMPLE_RATE;
 
 #[derive(Clone, Debug, PartialEq, Error, Serialize, Deserialize)]
 #[cfg_attr(feature = "ffi", derive(uniffi::Error))]
 pub enum AssessError {
     #[error("audio is empty")]
     EmptyAudio,
-    #[error("unsupported sample rate {got} Hz (expected 16000 Hz)")]
+    #[error("unsupported sample rate {got} Hz (expected {} Hz)", SAMPLE_RATE)]
     UnsupportedSampleRate { got: u32 },
     #[error("unknown tone {tone:?}")]
     UnknownTone { tone: ToneId },
