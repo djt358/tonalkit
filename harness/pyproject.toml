@@ -11,6 +11,11 @@ dependencies = [
     # The Rust tonekit library, for evaluation, synthetic tests and calibration (JSON in, JSON
     # out). `uv sync` builds it with maturin, so a Rust toolchain must be on the PATH.
     "tonekit-py",
+    # WORLD vocoder for the synthetic perturbation corpus (`tkh synth`, `tkh adversary`).
+    "pyworld>=0.3.5",
+    # pyworld 0.3.5 imports `pkg_resources` (only to read its own version) but does not declare
+    # setuptools; setuptools 81 and later no longer ship `pkg_resources`.
+    "setuptools<81",
 ]
 
 [project.scripts]

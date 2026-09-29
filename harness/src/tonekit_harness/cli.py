@@ -9,9 +9,9 @@ from __future__ import annotations
 
 import argparse
 
-from . import evaluate, ingest, provenance
+from . import adversary, evaluate, ingest, provenance, synth
 
-MODULES = [ingest, provenance, evaluate]
+MODULES = [ingest, provenance, evaluate, synth, adversary]
 
 
 def build_parser() -> argparse.ArgumentParser:
