@@ -26,8 +26,8 @@ import numpy as np
 import tonekit_py
 from scipy.io import wavfile
 
-from .ingest import TARGET_SR, _to_float32
 from . import manifest, metrics, report
+from .ingest import TARGET_SR, _to_float32
 from .manifest import Clip, ManifestError, to_candidate_json
 
 # harness/.cache/analysis, next to src/ (the directory is gitignored)
@@ -99,6 +99,13 @@ def _read_wav(clip: Clip, root: Path) -> tuple[bytes, np.ndarray]:
     return data, _to_float32(samples)
 
 
+def _tonekit_py_version() -> str:
+    try:
+        return metadata.version("tonekit-py")
+    except metadata.PackageNotFoundError:
+        return "unknown"
+
+
 @cache
 def _tonekit_py_fingerprint() -> str:
     """The installed tonekit_py's version and a hash of its files. The version alone would not
@@ -108,11 +115,7 @@ def _tonekit_py_fingerprint() -> str:
     for f in sorted(p for p in package.iterdir() if p.suffix in {".so", ".pyd", ".dylib"}):
         h.update(f.name.encode())
         h.update(f.read_bytes())
-    try:
-        version = metadata.version("tonekit-py")
-    except metadata.PackageNotFoundError:
-        version = "unknown"
-    return f"{version}+{h.hexdigest()}"
+    return f"{_tonekit_py_version()}+{h.hexdigest()}"
 
 
 def _cache_key(wav: bytes, register_json: str | None) -> str:
@@ -160,7 +163,7 @@ def _base_accent(pack_toml: str) -> str:
 
 
 def _measured_kind(measured: str | dict) -> str:
-    """"Full", "Partial" or "NotMeasured" from tonekit's serde form (a bare string or one-key map)."""
+    """"Full", "Partial" or "NotMeasured" from tonekit's serde form (a string or a one-key map)."""
     return measured if isinstance(measured, str) else next(iter(measured))
 
 
@@ -298,35 +301,29 @@ def _run(args: argparse.Namespace) -> int:
             use_cache=not args.no_cache,
         )
         gate = metrics.loo_gate(results)
+        theta = gate.median_threshold
+        sets = list(dict.fromkeys(c.set for c in clips))
+        per_set = {name: sum(c.set == name for c in clips) for name in sets}
+        report.write(
+            args.report,
+            gate,
+            metrics.candidate_id_accuracy(results),
+            metrics.count_robustness(results, theta),
+            metrics.failures(results, gate, theta),
+            n_minimal=per_set.get("diag_minimal", 0),
+            n_count=per_set.get("diag_count", 0),
+            context={
+                "manifest": str(args.manifest),
+                "pack": str(args.pack),
+                "calibration": str(args.calib) if args.calib else "the pack's own",
+                "accent": args.accent or "the pack's base accent",
+                "clips": ", ".join(f"{name} {n}" for name, n in per_set.items()),
+                "tonekit-py": _tonekit_py_version(),
+            },
+        )
     except (ManifestError, EvalError, metrics.MetricsError, OSError) as e:
         print(f"error: {e}", file=sys.stderr)
         return 1
-
-    theta = gate.median_threshold
-    n_minimal = sum(c.set == "diag_minimal" for c in clips)
-    n_count = sum(c.set == "diag_count" for c in clips)
-    per_set = {name: sum(c.set == name for c in clips) for name in dict.fromkeys(c.set for c in clips)}
-    try:
-        version = metadata.version("tonekit-py")
-    except metadata.PackageNotFoundError:
-        version = "unknown"
-    report.write(
-        args.report,
-        gate,
-        metrics.candidate_id_accuracy(results),
-        metrics.count_robustness(results, theta),
-        metrics.failures(results, gate, theta),
-        n_minimal=n_minimal,
-        n_count=n_count,
-        context={
-            "manifest": str(args.manifest),
-            "pack": str(args.pack),
-            "calibration": str(args.calib) if args.calib else "the pack's own",
-            "accent": args.accent or "the pack's base accent",
-            "clips": ", ".join(f"{name} {n}" for name, n in per_set.items()),
-            "tonekit-py": version,
-        },
-    )
     verdict = "PASS" if gate.passed else "FAIL"
     print(f"S1: {verdict} (CA {gate.ca:.3f}, WA {gate.wa:.3f}); report written to {args.report}")
     return 0
@@ -341,5 +338,7 @@ def register(subparsers) -> None:
     p.add_argument("--calib", help="calibration JSON (default: the pack's own)")
     p.add_argument("--accent", help="accent to grade against (default: the pack's base accent)")
     p.add_argument("--report", required=True, help="markdown report to write")
-    p.add_argument("--no-cache", action="store_true", help="neither read nor write the analysis cache")
+    p.add_argument(
+        "--no-cache", action="store_true", help="neither read nor write the analysis cache"
+    )
     p.set_defaults(func=_run)

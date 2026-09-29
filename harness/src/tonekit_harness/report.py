@@ -162,12 +162,12 @@ def write(
     `cand_acc` and `count_rob` are `metrics.candidate_id_accuracy` and `metrics.count_robustness`
     (None when the corpus has no such clips); `n_minimal` and `n_count` are those sets' clip counts,
     shown beside them. `failures` is `metrics.failures(...)`, listed in the order given.
-    `context` (label to value) is printed as a "Run" section. The output depends only on the
+    `context` (label to text) is printed as a "Run" section. The output depends only on the
     arguments: no timestamps.
     """
     lines = ["# P0 gate report", "", _headline(gate), ""]
     if context:
-        lines += ["## Run", ""] + [f"- {label}: `{value}`" for label, value in context.items()]
+        lines += ["## Run", ""] + [f"- {label}: {value}" for label, value in context.items()]
         lines.append("")
     lines += ["## Metrics", ""] + _metrics_table(gate, cand_acc, count_rob, n_minimal, n_count)
     lines += ["", "## Gate pairs", ""]

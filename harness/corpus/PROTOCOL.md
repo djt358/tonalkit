@@ -39,6 +39,13 @@ From `harness/`:
    to mono, then resampled to 16 kHz). Without `--out`, the output goes to `corpus/ingested/`.
 3. Add one row per clip to `corpus/manifest.jsonl`, then run the count check above. It fails with
    the file and line number of the first invalid row.
+4. `uv run tkh eval --manifest corpus/manifest.jsonl --pack ../packs/cmn/cmn.toml --calib
+   ../packs/cmn/cmn.calib.json --report reports/p0-gate.md` grades every clip, computes the
+   leave-one-pair-out gate S1 (correct-accept at least 0.90, wrong-accept at most 0.10 over the 20
+   gate pairs) and writes the report. It exits 0 whether or not the gate passes; the report's
+   headline says which. A speaker's `register` clips are graded first and their register is
+   used for that speaker's other clips. Analyses are cached in `.cache/analysis/` (keyed by the
+   WAV bytes, the register and the installed `tonekit_py`); `--no-cache` bypasses the cache.
 
 ## Manifest: `corpus/manifest.jsonl`
 

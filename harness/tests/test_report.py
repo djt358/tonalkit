@@ -173,7 +173,7 @@ def test_the_report_is_deterministic_whatever_the_result_order(tmp_path):
 
 def test_the_report_carries_run_context_when_given(tmp_path):
     text = render(passing_results(), tmp_path, context={"manifest": "corpus/manifest.jsonl"})
-    assert "manifest: `corpus/manifest.jsonl`" in text
+    assert "- manifest: corpus/manifest.jsonl" in text
 
 
 def test_write_creates_missing_directories(tmp_path):
@@ -214,7 +214,7 @@ def test_tkh_eval_writes_the_report_and_exits_zero_whatever_the_gate_says(
     assert "**S1: " in text
     out = capsys.readouterr().out
     assert "S1:" in out and "p0-gate.md" in out
-    assert f"manifest: `{corpus / 'manifest.jsonl'}`" in text  # run context
+    assert f"- manifest: {corpus / 'manifest.jsonl'}" in text  # run context
     assert (tmp_path / "cache").is_dir()  # analyses were cached
 
 
@@ -239,6 +239,13 @@ def test_tkh_eval_errors_exit_non_zero_with_a_message(corpus, tmp_path, capsys):
     assert cli.main(eval_args(corpus, tmp_path, "--accent", "cmn-nowhere")) == 1
     assert "accent" in capsys.readouterr().err
     assert not (tmp_path / "reports" / "p0-gate.md").exists()
+
+
+def test_tkh_eval_an_unwritable_report_path_is_an_error(corpus, tmp_path, capsys):
+    blocker = tmp_path / "reports"
+    blocker.write_text("a file where the report directory should go", encoding="utf-8")
+    assert cli.main(eval_args(corpus, tmp_path)) == 1
+    assert "error:" in capsys.readouterr().err
 
 
 def test_tkh_eval_with_fewer_than_two_gate_pairs_is_an_error(corpus, tmp_path, capsys):

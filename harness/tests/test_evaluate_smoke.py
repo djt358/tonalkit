@@ -49,7 +49,9 @@ def test_run_returns_one_result_per_clip_in_manifest_order(corpus, results):
     assert [r.id for r in results] == [c.id for c in clips]
     for clip, r in zip(clips, results):
         assert isinstance(r, Result)
-        assert (r.set, r.pair, r.label, r.speaker) == (clip.set, clip.pair, clip.label, clip.speaker)
+        assert (r.set, r.pair, r.label, r.speaker) == (
+            clip.set, clip.pair, clip.label, clip.speaker
+        )  # fmt: skip
         assert r.register_source == "cold"  # no register clips in this manifest
 
 
@@ -176,7 +178,9 @@ def test_register_clips_give_the_speakers_other_clips_a_given_register(
 # ---- cache -------------------------------------------------------------------------------------
 
 
-def test_analyses_are_cached_by_content_and_reused(corpus, pack_toml, calib_json, tmp_path, monkeypatch):
+def test_analyses_are_cached_by_content_and_reused(
+    corpus, pack_toml, calib_json, tmp_path, monkeypatch
+):
     root, clips = corpus
     first = evaluate.run(clips, pack_toml, calib_json, None, root=root, cache_dir=tmp_path)
     cached = sorted(tmp_path.glob("*.json"))
@@ -253,4 +257,6 @@ def test_duplicate_clip_ids_are_an_error(corpus, pack_toml, calib_json, tmp_path
 def test_a_pack_without_a_base_accent_needs_an_explicit_accent(corpus, calib_json, tmp_path):
     root, clips = corpus
     with pytest.raises(EvalError, match="base_accent"):
-        evaluate.run(clips[:1], "[pack]\nlect = 'cmn'\n", calib_json, None, root=root, cache_dir=tmp_path)
+        evaluate.run(
+            clips[:1], "[pack]\nlect = 'cmn'\n", calib_json, None, root=root, cache_dir=tmp_path
+        )
