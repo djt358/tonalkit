@@ -88,6 +88,25 @@ have tonekit_core.swift 'public var pCorrect: Float'
 have tonekit_core.swift 'public var intendedRank: UInt32'
 have tonekit_core.swift 'public var overall: Float\?'
 
+# The three headers and the module map are one clang module: this is what Swift's `import
+# TonekitFFI` sees inside the XCFramework. (Linux clang has no Darwin module, so drop that line.)
+if command -v clang >/dev/null; then
+    echo "==> checking that the headers form one clang module"
+    tmp=$(mktemp -d)
+    trap 'rm -rf "$tmp"' EXIT
+    cp "$out"/*.h "$tmp/"
+    if [ "$(uname -s)" = Darwin ]; then
+        cp "$out/module.modulemap" "$tmp/module.modulemap"
+    else
+        grep -v 'use "Darwin"' "$out/module.modulemap" >"$tmp/module.modulemap"
+    fi
+    printf '#include "tonekit_coreFFI.h"\n#include "tonekitFFI.h"\n#include "tonekit_ffiFFI.h"\nRustBuffer f(RustBuffer b) { return b; }\n' >"$tmp/t.c"
+    clang -fmodules -fmodules-cache-path="$tmp/cache" -fmodule-map-file="$tmp/module.modulemap" \
+        -I"$tmp" -fsyntax-only -x c "$tmp/t.c" || fail "the headers and module map do not compile as one module"
+else
+    echo "==> (no clang here: skipping the module map check)"
+fi
+
 echo "==> checking that the static library defines every function the headers declare"
 scripts/check-ffi-symbols.sh "$target_dir/debug/libtonekit_ffi.a" "$out"
 
