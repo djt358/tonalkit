@@ -43,6 +43,49 @@ jobs:
         with:
           command: check
 
+  # The default builds stay free of UniFFI, and the Swift bindings generate with the expected API.
+  # (`cargo test --workspace` compiles with the `ffi` feature on, because the workspace includes
+  # tonekit-ffi; this job builds the crates alone, as their other consumers do.)
+  ffi:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Default builds have no UniFFI
+        run: |
+          cargo check -p tonekit-core -p tonekit -p tonekit-cli
+          test "$(cargo tree -p tonekit-cli -e normal,build | grep -c uniffi)" = 0
+      - name: Swift bindings generate and have the expected API
+        run: scripts/check-swift-bindings.sh
+
+  # Task 12: the iOS build, proven on the Simulator (spec 4.3). Builds the XCFramework, then runs
+  # the Swift tests in swift/TonekitSmoke against it.
+  ios:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios,aarch64-apple-ios-sim
+      - name: Build the XCFramework
+        run: scripts/build-xcframework.sh
+      - name: Swift tests on the iOS Simulator
+        working-directory: swift/TonekitSmoke
+        run: |
+          set -o pipefail
+          xcodebuild test -scheme TonekitSmoke \
+            -destination 'platform=iOS Simulator,name=iPhone 15' \
+            | tee ../../build/xcodebuild-test.log
+      - name: Latency on the Simulator (informational)
+        if: always()
+        run: grep -E 'measured \[Time|TONEKIT_LATENCY' build/xcodebuild-test.log || true
+      - name: Keep the logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-logs
+          path: build/*.log
+
   harness:
     runs-on: ubuntu-latest
     defaults:
