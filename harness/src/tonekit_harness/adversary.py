@@ -2,7 +2,9 @@
 keep the cases where tonekit is wrong.
 
 A trial perturbs one source with a random tone-error or nuisance family and asks tonekit to grade
-the result against the source's intended reading. The overall score is accepted at or above θ
+the result against the source's intended reading, the way `tkh eval` grades a clip: analysed with
+the speaker's register (from their register clips, if the manifest has any; cold otherwise) and
+scored by the same `assess`. That keeps θ, typically fitted on `tkh eval` scores, comparable. The overall score is accepted at or above θ
 (no score, "tone not checked", is a rejection). A find is a false accept (a tone error tonekit
 accepts) or a false reject (a nuisance-only clip, which a listener would accept, that tonekit
 rejects). Graded families have no binary truth, so they are not searched. Finds sit near the
@@ -59,7 +61,10 @@ def search(
 
     `bounds` maps a family to `{parameter: (lo, hi)}` to narrow the spec's bounds (for a signed
     parameter, a magnitude); anything outside the spec's is a `SynthError`. The search is
-    deterministic in `seed`. A trial in which tonekit raises is counted as failed and skipped."""
+    deterministic in `seed`. Each trial is graded with its source's register (`Source.register_json`,
+    the speaker's, so as `tkh eval` grades that speaker's clips) and each find records whether that
+    register was `given` or `cold`. A trial in which tonekit raises is counted as failed and
+    skipped."""
     if not sources:
         raise SynthError("no sources to search")
     if n_trials < 0:
@@ -79,7 +84,7 @@ def search(
         if key not in graders:
             graders[key] = evaluate.Grader(*key, root=Path("."), cache_dir=None)
         try:
-            result, _ = graders[key].grade_pcm(clip, audio)
+            result, _ = graders[key].grade_pcm(clip, audio, src.register_json)
         except evaluate.EvalError:
             failed += 1
             continue
@@ -96,7 +101,12 @@ def search(
                 "needs_listen": True,
                 "synthetic": {
                     **(clip.synthetic or {}),
-                    "adversary": {"kind": kind, "score": score, "theta": theta},
+                    "adversary": {
+                        "kind": kind,
+                        "score": score,
+                        "theta": theta,
+                        "register": result.register_source,
+                    },
                 },
             }
         )

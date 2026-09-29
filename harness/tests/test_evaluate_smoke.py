@@ -193,6 +193,25 @@ def test_register_clips_give_the_speakers_other_clips_a_given_register(
     assert 0 < after_one["n_syllables"] < after_two["n_syllables"]
 
 
+def test_speaker_registers_chains_each_speakers_register_clips(corpus, pack_toml, calib_json):
+    root, clips = corpus
+    register = [
+        make_clip(
+            root, f"register-{i}", ["1", "2", "3", "4"], set="register", label="n/a", speaker="dj",
+            seed=10 + i,
+        )
+        for i in (1, 2)
+    ]  # fmt: skip
+    other = make_clip(root, "gate-03-correct", ["1", "1", "1"], pair="gate-03", speaker="ann")
+    grader = evaluate.Grader(pack_toml, calib_json, "cmn-standard", root=root, cache_dir=None)
+
+    registers = evaluate.speaker_registers([clips[0], *register, other], grader)
+
+    assert list(registers) == ["dj", "ann"]
+    assert json.loads(registers["dj"])["n_syllables"] > 0
+    assert registers["ann"] is None  # no register clips: analysed cold
+
+
 # ---- cache -------------------------------------------------------------------------------------
 
 

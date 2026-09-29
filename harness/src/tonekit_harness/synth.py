@@ -45,6 +45,7 @@ class Source:
     pack_toml: str
     calib_json: str | None
     accent: str
+    register_json: str | None  # the speaker's register from their register clips; None: cold
 
 
 # ---- analysis ---------------------------------------------------------------------------------
@@ -67,15 +68,21 @@ def register_bounds(voiced_st: np.ndarray) -> tuple[float, float]:
 
 
 def _extents(
-    clip: Clip, pcm: np.ndarray, world_voiced: np.ndarray, pack_toml: str, calib_json, accent
+    clip: Clip,
+    pcm: np.ndarray,
+    world_voiced: np.ndarray,
+    pack_toml: str,
+    calib_json: str | None,
+    accent: str,
+    register_json: str | None,
 ) -> list[tuple[int, int] | None]:
     """The voiced core [start, end) of each intended syllable, or None if it has none to redraw.
 
-    tonekit decodes the clip against its own intended reading (analysed cold, so the same way the
-    grader will see it) to say where each syllable is. A decoded span can include silence or a
+    tonekit decodes the clip against its own intended reading (analysed with the speaker's
+    register, so the same way the grader will see it) to say where each syllable is. A decoded span can include silence or a
     neighbour's tail, and WORLD calls some noise voiced, so the core is the run from the first to
     the last frame that both WORLD and tonekit's pitch tracker call voiced within the span."""
-    analysis_json = evaluate.analyze_pcm(clip.id, pcm)
+    analysis_json = evaluate.analyze_pcm(clip.id, pcm, register_json)
     analysis = json.loads(analysis_json)
     voiced = world_voiced & np.array([f["hz"] is not None for f in analysis["f0"]["frames"]])
     intended = json.loads(manifest.to_candidate_json(clip.intended))
@@ -113,8 +120,12 @@ def prepare(
     pack_toml: str,
     calib_json: str | None = None,
     accent: str | None = None,
+    register_json: str | None = None,
 ) -> Source:
     """Read `clip` (its `path` is relative to `root`) and do the once-per-clip analysis.
+
+    `register_json` is the speaker's register (see `evaluate.speaker_registers`); the clip's spans
+    are decoded with it, and `adversary.search` grades the clip's perturbations with it.
 
     Only correct, non-synthetic clips can be perturbed: the label of a perturbed clip comes from
     the family, and would be wrong for a clip that is already wrong or already synthetic."""
@@ -135,7 +146,11 @@ def prepare(
     _, pcm = evaluate.read_wav(Path(root) / clip.path, clip.id)
     analysed = world.analyse(pcm)
     voiced = analysed.f0 > 0
-    extents = _extents(clip, pcm, voiced, pack_toml, calib_json, accent) if voiced.any() else []
+    extents = (
+        _extents(clip, pcm, voiced, pack_toml, calib_json, accent, register_json)
+        if voiced.any()
+        else []
+    )
     if not any(extents):
         raise SynthError(
             f"{clip.id}: no syllable with at least {MIN_VOICED_FRAMES} voiced frames to perturb"
@@ -151,7 +166,7 @@ def prepare(
         ceil=ceil,
         pack=pack,
     )
-    return Source(clip, pcm, analysed, voice, pack_toml, calib_json, accent)
+    return Source(clip, pcm, analysed, voice, pack_toml, calib_json, accent, register_json)
 
 
 # ---- perturbation -----------------------------------------------------------------------------
@@ -288,12 +303,22 @@ def _plural(n: int, noun: str) -> str:
 def load_sources(
     manifest_path: str | Path, pack: str | Path, calib: str | Path | None, accent: str | None
 ) -> list[Source]:
-    """`prepare` every non-synthetic clip labelled `correct` in the manifest. A clip with nothing
-    to perturb is skipped with a warning; it is an error if none can be perturbed."""
+    """`prepare` every non-synthetic clip labelled `correct` in the manifest, each with its
+    speaker's register (chained from their `register` clips exactly as `tkh eval` does; cold if
+    they have none). A clip with nothing to perturb is skipped with a warning; it is an error if
+    none can be perturbed."""
     manifest_path = Path(manifest_path)
     clips = manifest.load(manifest_path)
     pack_toml = Path(pack).read_text(encoding="utf-8")
     calib_json = Path(calib).read_text(encoding="utf-8") if calib else None
+    grader = evaluate.Grader(
+        pack_toml,
+        calib_json,
+        accent or evaluate.base_accent(pack_toml),
+        root=manifest_path.parent,
+        cache_dir=None,
+    )
+    registers = evaluate.speaker_registers(clips, grader)
     candidates = [c for c in clips if c.label == "correct" and c.set != "synthetic"]
     sources = []
     for clip in candidates:
@@ -305,6 +330,7 @@ def load_sources(
                     pack_toml=pack_toml,
                     calib_json=calib_json,
                     accent=accent,
+                    register_json=registers[clip.speaker],
                 )
             )
         except SynthError as e:

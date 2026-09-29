@@ -9,6 +9,7 @@ import json
 from pathlib import Path
 
 import pytest
+import tonekit_py
 from support import utterance, write_clip, write_manifest
 
 from tonekit_harness import adversary, cli, evaluate, manifest, synth
@@ -44,14 +45,18 @@ def family_of(clip) -> str:
     return clip.synthetic["family"]
 
 
-def scripted(monkeypatch, score):
-    """Replace the grader: `score(clip)` is each trial's `overall` (or raises EvalError)."""
+def scripted(monkeypatch, score, calls=None):
+    """Replace the grader: `score(clip)` is each trial's `overall` (or raises EvalError). Each
+    call's (clip, register_json) is appended to `calls`, if given."""
 
     def grade_pcm(self, clip, pcm, register_json=None):
+        if calls is not None:
+            calls.append((clip, register_json))
         overall = score(clip)
         result = Result(
             id=clip.id, set=clip.set, pair=None, label=clip.label, speaker=clip.speaker,
-            overall=overall, intended_rank=1, margin_llr=0.0, syllables=[], register_source="cold",
+            overall=overall, intended_rank=1, margin_llr=0.0, syllables=[],
+            register_source="given" if register_json else "cold",
         )  # fmt: skip
         return result, {}
 
@@ -303,3 +308,83 @@ def test_tkh_adversary_reports_errors_and_exits_non_zero(tmp_path, capsys):
     )  # fmt: skip
     assert code == 1
     assert "error:" in capsys.readouterr().err
+
+
+# ---- the speaker's register ----------------------------------------------------------------------
+
+
+@pytest.fixture(scope="module")
+def register_manifest(tmp_path_factory) -> Path:
+    """dj has two register clips and one correct clip; ann has only a correct clip."""
+    root = tmp_path_factory.mktemp("adversary-register")
+    tones = ["1", "2", "3", "4"]
+    clips = [
+        write_clip(
+            root,
+            f"reg-{i}",
+            0.5 * utterance(tones, seed=10 + i),
+            intended=tones,
+            produced=tones,
+            set="register",
+            label="n/a",
+            speaker="dj",
+        )  # fmt: skip
+        for i in (1, 2)
+    ]
+    for cid, speaker in [("dj-413", "dj"), ("ann-413", "ann")]:
+        tones = ["4", "1", "3"]
+        clips.append(
+            write_clip(
+                root, cid, 0.5 * utterance(tones), intended=tones, produced=tones, speaker=speaker
+            )
+        )
+    return write_manifest(root / "manifest.jsonl", clips)
+
+
+def load(manifest_path):
+    return synth.load_sources(manifest_path, PACKS / "cmn.toml", PACKS / "cmn.calib.json", None)
+
+
+def test_a_source_carries_its_speakers_register_and_is_analysed_with_it(
+    register_manifest, monkeypatch
+):
+    registers = []  # the register_json of each analyze call, in call order
+    real_analyze = tonekit_py.analyze
+
+    def spy(pcm, sample_rate, register_json=None, f0_json=None):
+        registers.append(register_json)
+        return real_analyze(pcm, sample_rate, register_json, f0_json)
+
+    monkeypatch.setattr(evaluate.tonekit_py, "analyze", spy)
+    by_id = {s.clip.id: s for s in load(register_manifest)}
+
+    dj = json.loads(by_id["dj-413"].register_json)
+    assert set(dj) == {"floor_st", "median_st", "ceil_st", "n_syllables"} and dj["n_syllables"] > 0
+    assert by_id["ann-413"].register_json is None  # no register clips: stays cold
+    # analyze ran reg-1 (cold), reg-2 (after reg-1), then each source's spans with its register
+    assert registers[0] is None and registers[1] is not None
+    assert registers[-2:] == [by_id["dj-413"].register_json, None]
+
+
+def test_the_adversary_grades_each_trial_with_its_sources_register(
+    register_manifest, tmp_path, monkeypatch
+):
+    calls = []
+    scripted(monkeypatch, lambda clip: None, calls)  # every nuisance trial is a find
+    sources = load(register_manifest)
+    finds = adversary.search(sources, 16, None, seed=1, theta=0.5, out_dir=tmp_path)
+
+    registers = {s.clip.id: s.register_json for s in sources}
+    assert {c.synthetic["from"] for c, _ in calls} == {"dj-413", "ann-413"}
+    for clip, register_json in calls:
+        assert register_json == registers[clip.synthetic["from"]]
+    assert finds
+    for find in finds:
+        expected = "given" if find.speaker == "dj" else "cold"
+        assert find.synthetic["adversary"]["register"] == expected
+
+
+def test_the_real_grader_scores_a_dj_trial_against_the_given_register(register_manifest, tmp_path):
+    (dj,) = [s for s in load(register_manifest) if s.clip.speaker == "dj"]
+    finds = adversary.search([dj], 6, None, seed=2, theta=1.01, out_dir=tmp_path)
+    assert finds and {c.synthetic["adversary"]["register"] for c in finds} == {"given"}

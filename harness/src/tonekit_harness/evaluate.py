@@ -261,6 +261,34 @@ class Grader:
         return result, assessment
 
 
+def _chain_registers(
+    clips: list[Clip], grader: Grader
+) -> tuple[dict[str, str | None], dict[str, Result]]:
+    """Each speaker's register after their `register` clips, and those clips' results.
+
+    A speaker's register clips are graded in manifest order, each analysed with the register
+    learnt from the ones before it; a clip that measured nothing teaches nothing. A speaker with
+    no register clips maps to None."""
+    by_id: dict[str, Result] = {}
+    registers: dict[str, str | None] = {}
+    for speaker in dict.fromkeys(c.speaker for c in clips):
+        register_json: str | None = None
+        for clip in (c for c in clips if c.speaker == speaker and c.set == "register"):
+            result, assessment = grader.grade(clip, register_json)
+            by_id[clip.id] = result
+            update = assessment["register_update"]
+            if update["n_syllables"] > 0:  # nothing measured: there is nothing to learn from
+                register_json = _canonical(update)
+        registers[speaker] = register_json
+    return registers, by_id
+
+
+def speaker_registers(clips: list[Clip], grader: Grader) -> dict[str, str | None]:
+    """Each speaker's register as tonekit `Register` JSON (None if they have no register clips or
+    none measured anything): what `run` analyses that speaker's other clips with."""
+    return _chain_registers(clips, grader)[0]
+
+
 def run(
     clips: list[Clip],
     pack_toml: str,
@@ -291,18 +319,7 @@ def run(
         cache_dir=Path(cache_dir or DEFAULT_CACHE_DIR) if use_cache else None,
     )
 
-    by_id: dict[str, Result] = {}
-    registers: dict[str, str | None] = {}
-    for speaker in dict.fromkeys(c.speaker for c in clips):
-        register_json: str | None = None
-        for clip in (c for c in clips if c.speaker == speaker and c.set == "register"):
-            result, assessment = grader.grade(clip, register_json)
-            by_id[clip.id] = result
-            update = assessment["register_update"]
-            if update["n_syllables"] > 0:  # nothing measured: there is nothing to learn from
-                register_json = _canonical(update)
-        registers[speaker] = register_json
-
+    registers, by_id = _chain_registers(clips, grader)
     for clip in clips:
         if clip.id not in by_id:
             by_id[clip.id] = grader.grade(clip, registers[clip.speaker])[0]

@@ -307,14 +307,17 @@ class Family:
             x = float(rng.uniform(lo, hi))
             if spec.signed and rng.random() < 0.5:
                 x = -x
-            p[name] = _tidy(x, lo, hi)
+            p[name] = _tidy(x, lo, hi, spec.signed)
         return p
 
 
-def _tidy(x: float, lo: float, hi: float) -> float:
-    """`x` rounded to three decimals, kept inside the magnitude range `lo..hi`."""
-    magnitude = min(max(round(abs(x), 3), lo), hi)
-    return magnitude if x >= 0 else -magnitude
+def _tidy(x: float, lo: float, hi: float, signed: bool) -> float:
+    """`x` rounded to three decimals and kept inside `lo..hi`; for a signed parameter (whose
+    bounds are on the magnitude) that is the magnitude, and the sign is kept."""
+    if signed:
+        magnitude = min(max(round(abs(x), 3), lo), hi)
+        return magnitude if x >= 0 else -magnitude
+    return min(max(round(x, 3), lo), hi)
 
 
 class Identity(Family):
