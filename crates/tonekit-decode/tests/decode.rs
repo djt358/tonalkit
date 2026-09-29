@@ -180,7 +180,8 @@ fn candidates_of_different_lengths_compete() {
 
 #[test]
 fn leading_filler_syllable_does_not_shift_tones() {
-    // 嗯 + 4-1-3: the hesitation is absorbed as filler, not matched to the first target.
+    // 嗯 + 4-1-3: the hesitation is absorbed as an insertion (R33), not matched to the first
+    // target.
     let a = analysis_of(&three(vec![
         vec![3., 3.],
         vec![5., 1.],
@@ -191,8 +192,11 @@ fn leading_filler_syllable_does_not_shift_tones() {
     let s = &r.candidates[0].syllables;
     assert_eq!(s.len(), 3);
     assert!(s.iter().all(|f| f.judgement.llr_target > 0.0), "{s:#?}");
-    // And the syllables sit on the spoken 4-1-3, after the filler (which ends near frame 45).
+    // And the syllables sit on the spoken 4-1-3, after the filler (which ends near frame 45)...
     assert!(s[0].span.start_frame >= 45, "{:?}", s[0].span);
+    // ...whose nucleus no syllable holds.
+    assert_eq!(a.nuclei.len(), 4, "{:?}", a.nuclei);
+    assert!(a.nuclei[0].frame < 45, "{:?}", a.nuclei);
 }
 
 #[test]
@@ -266,8 +270,9 @@ fn no_speech_gives_unmeasured_candidates() {
 }
 
 #[test]
-fn too_few_boundaries_gives_unmeasured_syllables_at_the_region_start() {
-    // One spoken syllable cannot hold eight: that candidate has no complete path.
+fn too_few_boundaries_gives_missed_syllables_at_the_region_start() {
+    // One spoken syllable cannot hold eight: that candidate has no complete path, even relaxed.
+    // The utterance has a nucleus, so its syllables are likely misses (R33), not "not checked".
     let pack = cmn();
     let unvoiced = pack.calibration().decode.unvoiced_syllable_llr;
     let a = analysis_of(&three(vec![vec![5., 5.]]));
@@ -287,11 +292,12 @@ fn too_few_boundaries_gives_unmeasured_syllables_at_the_region_start() {
         assert_eq!((s.span.start_frame, s.span.end_frame), (start, start));
         assert_eq!(
             s.judgement.measured,
-            Measured::NotMeasured {
-                issue: MeasureIssue::Unvoiced
+            Measured::Partial {
+                issues: vec![MeasureIssue::Unvoiced]
             }
         );
         assert_eq!(s.judgement.expected.0, "1");
+        assert_eq!(s.judgement.llr_target, unvoiced);
     }
 }
 
@@ -421,30 +427,30 @@ fn results_are_sorted_normalised_and_finite() {
 #[test]
 fn a_single_candidate_is_the_known_count_case() {
     // A set of size one is v1's "known N": the decoder still places each syllable on its own.
-    // (2-4-1 rather than 4-1-3: in this synthetic 4-1-3, pYIN leaves the initial fall with too few
-    // voiced frames to measure, an upstream f0 matter this test is not about.)
-    let a = analysis_of(&three(vec![vec![3., 5.], vec![5., 1.], vec![5., 5.]]));
-    let r = decode(&a, &cmn(), &std_g(), &[c("spell", &["2", "4", "1"])]).unwrap();
+    // Task 10's spoken(4-1-3), restored now that R32 measures its initial fall.
+    let a = analysis_of(&three(vec![vec![5., 1.], vec![5., 5.], vec![2., 1., 4.]]));
+    let r = decode(&a, &cmn(), &std_g(), &[c("spell", &["4", "1", "3"])]).unwrap();
     let s = &r.candidates[0].syllables;
-    for (fit, tone) in s.iter().zip(["2", "4", "1"]) {
+    for (fit, tone) in s.iter().zip(["4", "1", "3"]) {
         assert_eq!(fit.judgement.expected.0, tone);
         assert!(fit.judgement.llr_target > 0.0, "{fit:#?}");
         assert!(matches!(fit.judgement.measured, Measured::Full));
     }
-    // Each syllable lands on its spoken one (frames 20-45, 51-76, 82-107): it may absorb the
-    // 6-frame pause beside it, since the duration prior centres on the inter-nucleus interval.
+    // Each syllable lands on its spoken one (frames 20-45, 51-76, 82-107), give or take the half
+    // of the 6-frame pause up to the boundary between the nuclei.
     let spoken = [(20, 45), (51, 76), (82, 107)];
     for (fit, (start, end)) in s.iter().zip(spoken) {
-        assert!(fit.span.start_frame.abs_diff(start) <= 6, "{:?}", fit.span);
-        assert!(fit.span.end_frame.abs_diff(end) <= 6, "{:?}", fit.span);
+        assert!(fit.span.start_frame.abs_diff(start) <= 3, "{:?}", fit.span);
+        assert!(fit.span.end_frame.abs_diff(end) <= 3, "{:?}", fit.span);
     }
     assert!(r.candidates[0].posterior > r.null_posterior);
 }
 
 #[test]
 fn candidate_llr_is_the_sum_of_its_path() {
-    // llr = Σ (judge's llr_target + dur) − filler_per_frame × speech frames outside syllables,
-    // with dur = −(ln(d/r))²/(2σ²) and r the median inter-nucleus interval.
+    // llr = Σ (judge's llr_target + dur) − filler_per_frame × speech frames outside syllables
+    // + insertion_llr × nuclei outside syllables, with dur = −(ln(d/r))²/(2σ²) and r the median
+    // inter-nucleus interval.
     let pack = cmn();
     let d = pack.calibration().decode.clone();
     let a = analysis_of(&three(vec![
@@ -480,25 +486,169 @@ fn candidate_llr_is_the_sum_of_its_path() {
     let rate_s = f64::from(gaps[gaps.len() / 2]) * 0.01;
     let sigma = f64::from(d.dur_sigma);
     let filler = f64::from(d.filler_per_frame);
+    let insertion = f64::from(d.insertion_llr);
     let n_frames = a.energy.db.len() as u32;
+    let nuclei = |from: u32, to: u32| frames.iter().filter(|&&f| from <= f && f < to).count();
+    let left_over =
+        |from: u32, to: u32| -filler * speech(from, to) + insertion * nuclei(from, to) as f64;
 
     for cand in &r.candidates {
         let mut want = 0.0;
         let mut at = 0;
+        let mut covered = 0;
         for s in &cand.syllables {
             let (from, to) = (s.span.start_frame, s.span.end_frame);
             let x = (f64::from(to - from) * 0.01 / rate_s).ln();
             want += f64::from(s.judgement.llr_target) - x * x / (2.0 * sigma * sigma);
-            want -= filler * speech(at, from);
+            want += left_over(at, from);
+            covered += nuclei(from, to);
             at = to;
         }
-        want -= filler * speech(at, n_frames);
+        want += left_over(at, n_frames);
         approx::assert_abs_diff_eq!(f64::from(cand.llr), want, epsilon = 1e-4);
+        // Every syllable holds exactly one nucleus (a strict path exists for each candidate).
+        assert_eq!(covered, cand.syllables.len(), "{}", cand.id.0);
     }
+    // The hesitation's nucleus is an insertion for the three-syllable spellings.
+    let spell = r.candidates.iter().find(|x| x.id.0 == "spell").unwrap();
+    assert!(
+        frames[0] < spell.syllables[0].span.start_frame,
+        "{frames:?} {spell:#?}"
+    );
     // A lexical variant widens the target without losing the spoken 4-1-3.
     let m = r.candidates.iter().find(|x| x.id.0 == "mixed").unwrap();
     assert!(
         m.syllables.iter().all(|f| f.judgement.llr_target > 0.0),
         "{m:#?}"
     );
+}
+
+// --- Ruling R32: a voiced frame is `hz.is_some()` ---------------------------------------------
+
+#[test]
+fn the_initial_fall_of_spoken_4_1_3_scores_as_a_4() {
+    // Before R32 only 4 of this fall's 25 frames counted as voiced (voiced_p >= 0.5), one of them
+    // octave-doubled by the repair, and "4" scored llr −13.8 on it. With pYIN's own voicing it is
+    // a clean fall, and "4" is the tone it supports.
+    let pack = cmn();
+    let a = analysis_of(&three(vec![vec![5., 1.], vec![5., 5.], vec![2., 1., 4.]]));
+    let (start_frame, end_frame) = synth(&three(vec![vec![5., 1.]])).syllable_frames[0];
+    let span = tonekit_core::TbuSpan {
+        start_frame,
+        end_frame,
+    };
+    let ex = tonekit_shape::extract(&a.f0, &span, &a.register).expect("the fall is voiced");
+    let c = &ex.shape.contour;
+    assert!(c[0] > c[9] + 3.0 && ex.shape.slope < 0.0, "{c:?}");
+    let ctx = tonekit_pack::TargetContext {
+        index: 0,
+        count: 3,
+        prev: None,
+        phrase_final: false,
+    };
+    let j = pack
+        .judge(&std_g(), &ex.shape, &target("4"), &ctx, &ex.issues)
+        .unwrap();
+    assert!(j.llr_target > 0.0, "{j:#?}");
+    assert_eq!(j.heard, Some(ToneId("4".into())), "{j:#?}");
+}
+
+// --- Ruling R33: syllables are anchored on nuclei ----------------------------------------------
+
+#[test]
+fn a_wrong_final_tone_is_judged_on_the_whole_syllable() {
+    // spoken 4-1-4 (and 4-1-1) against intended 4-1-3: the "3" cannot hide on the unvoiced pause
+    // before the last syllable or on the low tail of a final fall; it sits on the whole final
+    // syllable (frames 82-107) and scores clearly negative, below even an unmeasured syllable.
+    let pack = cmn();
+    let unvoiced = pack.calibration().decode.unvoiced_syllable_llr;
+    for last in [vec![5., 1.], vec![5., 5.]] {
+        let a = analysis_of(&three(vec![vec![5., 1.], vec![5., 5.], last.clone()]));
+        let r = decode(&a, &pack, &std_g(), &[c("intended", &["4", "1", "3"])]).unwrap();
+        let s = &r.candidates[0].syllables;
+        let three = &s[2];
+        assert_eq!(three.judgement.expected.0, "3");
+        assert!(
+            three.span.start_frame <= 82 && three.span.end_frame >= 107,
+            "{last:?}: {three:#?}"
+        );
+        assert!(
+            matches!(three.judgement.measured, Measured::Full),
+            "{three:#?}"
+        );
+        assert!(
+            three.judgement.llr_target < unvoiced,
+            "{last:?}: {three:#?}"
+        );
+        // The first two are right, and measured as such.
+        for fit in &s[..2] {
+            assert!(fit.judgement.llr_target > 0.0, "{fit:#?}");
+        }
+        // Losing to the null: this is not what was said.
+        assert!(r.null_posterior > r.candidates[0].posterior, "{r:#?}");
+    }
+}
+
+#[test]
+fn a_dropped_syllable_is_a_likely_miss_not_unmeasured() {
+    // Two voiced syllables (4, 3) against a three-target candidate (4-1-3): no strict path, so
+    // the relaxed pass puts one target on a span without a nucleus. It scores the unvoiced LLR and
+    // is `Partial { [Unvoiced] }`, so it counts towards `overall` as a miss.
+    let pack = cmn();
+    let unvoiced = pack.calibration().decode.unvoiced_syllable_llr;
+    let a = analysis_of(&three(vec![vec![5., 1.], vec![2., 1., 4.]]));
+    assert_eq!(a.nuclei.len(), 2, "{:?}", a.nuclei);
+    let r = decode(&a, &pack, &std_g(), &[c("spell", &["4", "1", "3"])]).unwrap();
+    let s = &r.candidates[0].syllables;
+    assert_eq!(s.len(), 3);
+    let missed = Measured::Partial {
+        issues: vec![MeasureIssue::Unvoiced],
+    };
+    assert!(
+        s.iter()
+            .all(|f| !matches!(f.judgement.measured, Measured::NotMeasured { .. })),
+        "{s:#?}"
+    );
+    let misses: Vec<&str> = s
+        .iter()
+        .filter(|f| f.judgement.measured == missed)
+        .map(|f| f.judgement.expected.0.as_str())
+        .collect();
+    assert_eq!(misses, ["1"], "{s:#?}");
+    let one = &s[1];
+    assert_eq!(one.judgement.llr_target, unvoiced);
+    assert!(one.judgement.loglik.is_empty() && one.judgement.heard.is_none());
+    // The spoken 4 and 3 keep their syllables.
+    assert!(
+        s[0].judgement.llr_target > 0.0 && s[2].judgement.llr_target > 0.0,
+        "{s:#?}"
+    );
+}
+
+#[test]
+fn whisper_has_no_nuclei_and_is_not_measured() {
+    // Whispered 4-1-3: speech, but no periodicity, so no nuclei; nothing can be anchored and every
+    // syllable is NotMeasured ("tone not checked"), at the start of the speech region.
+    let pack = cmn();
+    let unvoiced = pack.calibration().decode.unvoiced_syllable_llr;
+    let mut spec = three(vec![vec![5., 1.], vec![5., 5.], vec![2., 1., 4.]]);
+    for s in &mut spec.syllables {
+        s.unvoiced_onset_ms = s.dur_ms;
+    }
+    let a = analysis_of(&spec);
+    let start = a.speech.as_ref().expect("whisper is speech").start;
+    assert!(a.nuclei.is_empty(), "{:?}", a.nuclei);
+    let r = decode(&a, &pack, &std_g(), &[c("spell", &["4", "1", "3"])]).unwrap();
+    let cand = &r.candidates[0];
+    assert_eq!(cand.llr, 3.0 * unvoiced);
+    for s in &cand.syllables {
+        assert_eq!(
+            s.judgement.measured,
+            Measured::NotMeasured {
+                issue: MeasureIssue::Unvoiced
+            }
+        );
+        assert_eq!((s.span.start_frame, s.span.end_frame), (start, start));
+    }
+    assert_eq!(r.null_llr, 0.0);
 }

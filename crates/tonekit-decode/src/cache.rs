@@ -52,9 +52,9 @@ pub(crate) fn extract_span(a: &Analysis, from: u32, to: u32) -> Segment {
     extract(&a.f0, &span, &a.register)
 }
 
-/// The judgement of a syllable with no measurable shape: the target is expected, nothing was
-/// heard, and the LLR is `llr` (`unvoiced_syllable_llr`).
-pub(crate) fn unmeasured(target: &ToneTarget, issue: MeasureIssue, llr: f32) -> ToneJudgement {
+/// The judgement of a syllable that gives no tone evidence: the target is expected, nothing was
+/// heard, the LLR is `llr` (`unvoiced_syllable_llr`) and `measured` says why.
+fn shapeless(target: &ToneTarget, llr: f32, measured: Measured) -> ToneJudgement {
     ToneJudgement {
         expected: target.tone.clone(),
         loglik: Vec::new(),
@@ -63,8 +63,27 @@ pub(crate) fn unmeasured(target: &ToneTarget, issue: MeasureIssue, llr: f32) -> 
         component: None,
         heard: None,
         deltas: Vec::new(),
-        measured: Measured::NotMeasured { issue },
+        measured,
     }
+}
+
+/// The judgement of a syllable with no measurable shape: `NotMeasured { issue }` at `llr`.
+pub(crate) fn unmeasured(target: &ToneTarget, issue: MeasureIssue, llr: f32) -> ToneJudgement {
+    shapeless(target, llr, Measured::NotMeasured { issue })
+}
+
+/// The judgement of a target the utterance has no syllable for (ruling R33: a syllable without a
+/// nucleus, or a candidate with nowhere to put it): a likely miss at `llr`, reported
+/// `Partial { [Unvoiced] }` so that it counts towards `overall` rather than reading as "tone not
+/// checked".
+pub(crate) fn missed(target: &ToneTarget, llr: f32) -> ToneJudgement {
+    shapeless(
+        target,
+        llr,
+        Measured::Partial {
+            issues: vec![MeasureIssue::Unvoiced],
+        },
+    )
 }
 
 /// Every inventory tone's LLR on `ex` in `ctx`, in inventory order: its calibrated

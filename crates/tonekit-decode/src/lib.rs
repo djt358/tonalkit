@@ -1,10 +1,11 @@
 //! Closed-set decoding of any syllable count and the open tone lattice (spec §7.2–7.3).
 //!
 //! - [`decode`] scores caller candidates of *any* length against the whole utterance: a segmental
-//!   DP over the analysis's boundary candidates places each candidate's targets on syllables,
-//!   scoring each by its LLR against a background of all tones plus a log-duration prior, and
-//!   charges speech it leaves unused (hesitations, restarts, extra words) as filler. Candidates
-//!   compete in one softmax with a null "something else was said" competitor.
+//!   DP over the analysis's boundary candidates places each candidate's targets on syllables, one
+//!   nucleus each (ruling R33), scoring each by its LLR against a background of all tones plus a
+//!   log-duration prior, and charges what it leaves unused (hesitations, restarts, extra words)
+//!   as filler per speech frame plus an insertion per nucleus. Candidates compete in one softmax
+//!   with a null "something else was said" competitor.
 //! - [`lattice`] gives one tone-bearing unit per nucleus with per-tone likelihoods and posteriors
 //!   from forward–backward over (previous tone, current tone), so context-dependent realisations
 //!   (the neutral tone, the half third) are scored in context.
@@ -32,12 +33,15 @@ const LOG_CLAMP: f64 = 1.0e6;
 /// Scores `candidates` against the utterance in `a`, graded against `g`.
 ///
 /// Each candidate's `llr` is its best path: the sum of its syllables' target LLRs and duration
-/// priors, less `filler_per_frame` for every speech frame no syllable covers. A candidate whose
-/// targets cannot all be placed (no speech region, or too few boundaries) scores
-/// `K × unvoiced_syllable_llr` with every syllable `NotMeasured { Unvoiced }` at an empty span
-/// where the speech region starts. Posteriors are a softmax over the candidates' llrs and the
-/// null competitor's `null_llr + null_bias`; candidates come back sorted by llr, highest first
-/// (ties keep the caller's order).
+/// priors, less `filler_per_frame` for every speech frame and plus `insertion_llr` for every
+/// nucleus that no syllable covers. Each syllable holds exactly one nucleus; only if that places
+/// no path does a relaxed pass allow syllables without one, which score `unvoiced_syllable_llr`
+/// and are reported `Partial { [Unvoiced] }` (likely misses, ruling R33). A candidate whose
+/// targets cannot all be placed scores `K × unvoiced_syllable_llr` with every syllable at an empty
+/// span where the speech region starts: `NotMeasured { Unvoiced }` when the analysis has no
+/// nucleus (no speech, whisper), `Partial { [Unvoiced] }` otherwise. Posteriors are a softmax over
+/// the candidates' llrs and the null competitor's `null_llr + null_bias`; candidates come back
+/// sorted by llr, highest first (ties keep the caller's order).
 ///
 /// Errors (the candidates and the grading are checked before any audio is scored):
 /// - `Pack { "empty candidate set" }` for no candidates;

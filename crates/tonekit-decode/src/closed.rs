@@ -2,11 +2,18 @@
 //!
 //! A path consumes the candidate's K targets in order. Between boundaries it takes either a
 //! *syllable* edge, scored by the target's LLR against the background plus a log-duration prior,
-//! or a *gap* edge, which charges every speech frame it covers as filler (silent frames are free).
-//! Speech before the first and after the last syllable is filler too, so hesitations, restarts and
-//! extra words cost a little per frame instead of shifting the targets onto the wrong syllables.
-//! Because every syllable's evidence is relative to a background, candidates of different lengths
-//! compete on one scale.
+//! or a *gap* edge, which charges every speech frame it covers as filler (silent frames are free)
+//! and every nucleus it covers as an inserted syllable (`insertion_llr`, ruling R33). Speech before
+//! the first and after the last syllable is charged the same way, so hesitations, restarts and
+//! extra words cost a fixed amount per syllable plus a little per frame instead of shifting the
+//! targets onto the wrong syllables. Because every syllable's evidence is relative to a
+//! background, candidates of different lengths compete on one scale.
+//!
+//! Syllables are anchored on nuclei (ruling R33). The strict pass puts exactly one nucleus in
+//! every syllable, so a target can neither hide on a sliver of a syllable nor straddle two. Only
+//! when no strict path exists (fewer nuclei than targets, or boundaries that do not allow it) and
+//! the analysis has a nucleus, a relaxed pass allows syllables with no nucleus: each is a likely
+//! miss, scored `unvoiced_syllable_llr` and reported `Partial { [Unvoiced] }`.
 
 use tonekit_core::{
     Analysis, AssessError, Candidate, CandidateScore, EnergyTrack, GradingTarget, MeasureIssue,
@@ -15,7 +22,7 @@ use tonekit_core::{
 use tonekit_pack::{LanguagePack, TargetContext};
 use tonekit_segment::{speech_threshold, SegmentParams};
 
-use crate::cache::{unmeasured, Scorer, TargetKey};
+use crate::cache::{missed, unmeasured, Scorer, TargetKey};
 use crate::duration::{log_prior, rate_s, FRAME_S};
 use crate::{clamp_log, count_u32};
 
@@ -33,38 +40,94 @@ pub(crate) fn speech_mask(e: &EnergyTrack) -> Vec<bool> {
         .collect()
 }
 
-/// Filler cost of frame spans: `per_frame` for every speech frame, nothing for silence.
+/// Running counts over the track: `prefix[f]` = marked frames in `[0, f)`, one longer than the
+/// track.
+fn prefix_counts(marked: impl Iterator<Item = bool>) -> Vec<u32> {
+    let mut prefix = vec![0u32];
+    let mut n = 0u32;
+    for m in marked {
+        n += u32::from(m);
+        prefix.push(n);
+    }
+    prefix
+}
+
+/// What frames cost when no syllable covers them: `per_frame` for every speech frame (silence is
+/// free) and `−insertion_llr` for every nucleus, an inserted syllable (ruling R33). Also counts
+/// the nuclei in a span, for the nucleus rule on syllable edges.
 pub(crate) struct Filler {
-    /// `prefix[f]` = speech frames in `[0, f)`; one longer than the track.
-    prefix: Vec<u32>,
+    /// Prefix counts of speech frames.
+    speech: Vec<u32>,
+    /// Prefix counts of nucleus frames (each distinct frame once).
+    nuclei: Vec<u32>,
     per_frame: f64,
+    insertion_llr: f64,
 }
 
 impl Filler {
-    pub(crate) fn new(speech: &[bool], per_frame: f64) -> Filler {
-        let mut prefix = Vec::with_capacity(speech.len() + 1);
-        let mut n = 0u32;
-        prefix.push(0);
-        for &s in speech {
-            n += u32::from(s);
-            prefix.push(n);
+    /// `speech` marks the speech frames; `nuclei` are nucleus frames in any order (repeats count
+    /// once, frames past the track are ignored).
+    pub(crate) fn new(speech: &[bool], nuclei: &[u32], per_frame: f64, insertion_llr: f64) -> Self {
+        let mut is_nucleus = vec![false; speech.len()];
+        for &f in nuclei {
+            if let Some(slot) = is_nucleus.get_mut(f as usize) {
+                *slot = true;
+            }
         }
-        Filler { prefix, per_frame }
+        Filler {
+            speech: prefix_counts(speech.iter().copied()),
+            nuclei: prefix_counts(is_nucleus.into_iter()),
+            per_frame,
+            insertion_llr,
+        }
     }
 
     /// Frames in the track.
     pub(crate) fn frames(&self) -> u32 {
-        count_u32(self.prefix.len() - 1)
+        count_u32(self.speech.len() - 1)
     }
 
-    /// The cost of frames `[from, to)`, clamped to the track (frames past it are silent).
+    /// Marked frames of `prefix` in `[from, to)`, clamped to the track.
+    fn count(prefix: &[u32], from: u32, to: u32) -> u32 {
+        let last = prefix.len() - 1;
+        let at = |f: u32| prefix[(f as usize).min(last)];
+        at(to).saturating_sub(at(from))
+    }
+
+    /// Nuclei in frames `[from, to)`.
+    pub(crate) fn nuclei(&self, from: u32, to: u32) -> u32 {
+        Self::count(&self.nuclei, from, to)
+    }
+
+    /// The cost of leaving frames `[from, to)` to no syllable, clamped to the track (frames past
+    /// it are silent): `per_frame × speech frames − insertion_llr × nuclei`.
     pub(crate) fn cost(&self, from: u32, to: u32) -> f64 {
-        let last = self.prefix.len() - 1;
-        let at = |f: u32| self.prefix[(f as usize).min(last)];
-        let speech = at(to).saturating_sub(at(from));
-        self.per_frame * f64::from(speech)
+        let speech = Self::count(&self.speech, from, to);
+        self.per_frame * f64::from(speech) - self.insertion_llr * f64::from(self.nuclei(from, to))
     }
 }
+
+/// Which syllable edges a DP pass may take (ruling R33).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Pass {
+    /// Every syllable holds exactly one nucleus.
+    Strict,
+    /// Every syllable holds at most one nucleus.
+    Relaxed,
+}
+
+impl Pass {
+    /// The fewest nuclei a syllable edge of this pass holds.
+    fn min_nuclei(self) -> u32 {
+        match self {
+            Pass::Strict => 1,
+            Pass::Relaxed => 0,
+        }
+    }
+}
+
+/// At most this many nuclei in one syllable edge, in either pass.
+const MAX_NUCLEI: u32 = 1;
 
 /// The best path through the boundary candidates.
 #[derive(Clone, Debug, PartialEq)]
@@ -86,19 +149,22 @@ enum Step {
 ///
 /// `best[s][i]` is the best score of a path that has placed `s` syllables and stands at boundary
 /// `i`:
-/// - start: `best[0][i] = −cost(0, B_i)` for every `i` (leading speech is filler);
+/// - start: `best[0][i] = −cost(0, B_i)` for every `i` (leading speech and nuclei are filler
+///   and insertions);
 /// - gap edge `i → i+1`: `best[s][i+1] ≥ best[s][i] − cost(B_i, B_{i+1})`;
-/// - syllable edge `i → j` for every `j > i` whose span is 60–800 ms:
+/// - syllable edge `i → j` for every `j > i` whose span is 60–800 ms and holds the nuclei `pass`
+///   allows (exactly one when strict, at most one when relaxed):
 ///   `best[s+1][j] ≥ best[s][i] + syllable(i, j, s)`;
-/// - end: `max_i best[k][i] − cost(B_i, end of track)` (trailing speech is filler).
+/// - end: `max_i best[k][i] − cost(B_i, end of track)` (trailing speech and nuclei likewise).
 ///
 /// `syllable(i, j, s)` scores target `s` on the span between boundaries `i` and `j`; it is only
-/// called for reachable `(s, i)`. Ties keep the first path found (earlier boundaries, gap before
-/// syllable edges, shorter syllable edges first).
+/// called for reachable `(s, i)` and allowed edges. Ties keep the first path found (earlier
+/// boundaries, gap before syllable edges, shorter syllable edges first).
 pub(crate) fn best_path<E>(
     bounds: &[u32],
     filler: &Filler,
     k: usize,
+    pass: Pass,
     mut syllable: impl FnMut(usize, usize, usize) -> Result<f64, E>,
 ) -> Result<Option<Path>, E> {
     let n = bounds.len();
@@ -132,6 +198,14 @@ pub(crate) fn best_path<E>(
                 }
                 if frames > MAX_SYLLABLE_FRAMES {
                     break;
+                }
+                // Nuclei only accumulate as j grows.
+                let nuclei = filler.nuclei(bounds[i], bounds[j]);
+                if nuclei > MAX_NUCLEI {
+                    break;
+                }
+                if nuclei < pass.min_nuclei() {
+                    continue;
                 }
                 let v = here + syllable(i, j, s)?;
                 if v > best[s + 1][j] {
@@ -194,6 +268,8 @@ pub(crate) struct Decoder<'a> {
     /// The analysis's boundary candidates, sorted and unique.
     bounds: Vec<u32>,
     filler: Filler,
+    /// Whether the analysis has a nucleus on the track.
+    has_nuclei: bool,
     /// The speaking rate `r` in seconds per syllable.
     rate_s: f64,
     dur_sigma: f64,
@@ -206,10 +282,18 @@ impl<'a> Decoder<'a> {
         let mut bounds = a.boundaries.clone();
         bounds.sort_unstable();
         bounds.dedup();
+        let nuclei: Vec<u32> = a.nuclei.iter().map(|n| n.frame).collect();
+        let filler = Filler::new(
+            &speech_mask(&a.energy),
+            &nuclei,
+            f64::from(d.filler_per_frame),
+            f64::from(d.insertion_llr),
+        );
         Decoder {
             speech_start: a.speech.as_ref().map(|r| r.start),
             bounds,
-            filler: Filler::new(&speech_mask(&a.energy), f64::from(d.filler_per_frame)),
+            has_nuclei: filler.nuclei(0, filler.frames()) > 0,
+            filler,
             rate_s: rate_s(&a.nuclei, f64::from(d.default_rate_s)),
             dur_sigma: f64::from(d.dur_sigma),
             scorer: Scorer::new(a, pack, g),
@@ -229,33 +313,35 @@ impl<'a> Decoder<'a> {
 
     /// The candidate's best path, its LLR (the path score) and its syllables, each judged in its
     /// context; `keys` is its [`Decoder::plan`]. `posterior` is left at 0 for the caller to fill.
+    ///
+    /// A syllable with a nucleus is judged on its shape; one without (relaxed pass only) is a
+    /// likely miss: `unvoiced_syllable_llr`, `Partial { [Unvoiced] }`.
     pub(crate) fn score(
         &mut self,
         cand: &Candidate,
         keys: &[TargetKey],
     ) -> Result<CandidateScore, AssessError> {
-        let path = match self.speech_start {
-            Some(_) => {
-                let (bounds, scorer) = (&self.bounds, &mut self.scorer);
-                let (rate, sigma) = (self.rate_s, self.dur_sigma);
-                best_path(bounds, &self.filler, keys.len(), |i, j, s| {
-                    let (from, to) = (bounds[i], bounds[j]);
-                    let d_s = f64::from(to - from) * FRAME_S;
-                    let llr = scorer.llr(from, to, keys[s])?;
-                    Ok(f64::from(llr) + log_prior(d_s, rate, sigma))
-                })?
-            }
-            None => None,
-        };
-        let Some(path) = path else {
+        let Some(path) = self.search(keys)? else {
             return Ok(self.no_path(cand));
         };
 
         let ctxs = contexts(&cand.targets);
+        let unvoiced = self.scorer.unvoiced_llr();
         let mut syllables = Vec::with_capacity(path.syllables.len());
         for ((&(i, j), target), ctx) in path.syllables.iter().zip(&cand.targets).zip(&ctxs) {
             let (from, to) = (self.bounds[i], self.bounds[j]);
-            syllables.push(self.scorer.fit(from, to, target, ctx)?);
+            let fit = if self.filler.nuclei(from, to) == 0 {
+                SyllableFit {
+                    span: TbuSpan {
+                        start_frame: from,
+                        end_frame: to,
+                    },
+                    judgement: missed(target, unvoiced),
+                }
+            } else {
+                self.scorer.fit(from, to, target, ctx)?
+            };
+            syllables.push(fit);
         }
         Ok(CandidateScore {
             id: cand.id.clone(),
@@ -265,9 +351,46 @@ impl<'a> Decoder<'a> {
         })
     }
 
-    /// No speech region, or too few boundaries for every target: each syllable is unmeasured, at
-    /// an empty span where the speech region starts (frame 0 without one), and the candidate
-    /// scores `K × unvoiced_syllable_llr`.
+    /// The best strict path; failing that, the best relaxed one. `None` without a speech region
+    /// or a nucleus (no syllable can be anchored), or when neither pass places every target.
+    fn search(&mut self, keys: &[TargetKey]) -> Result<Option<Path>, AssessError> {
+        if self.speech_start.is_none() || !self.has_nuclei {
+            return Ok(None);
+        }
+        for pass in [Pass::Strict, Pass::Relaxed] {
+            let path = self.best(keys, pass)?;
+            if path.is_some() {
+                return Ok(path);
+            }
+        }
+        Ok(None)
+    }
+
+    /// [`best_path`] for the targets behind `keys` under `pass`: a syllable with a nucleus scores
+    /// its target's LLR, one without scores `unvoiced_syllable_llr`, each plus the duration prior.
+    fn best(&mut self, keys: &[TargetKey], pass: Pass) -> Result<Option<Path>, AssessError> {
+        let (bounds, filler, scorer) = (&self.bounds, &self.filler, &mut self.scorer);
+        let (rate, sigma) = (self.rate_s, self.dur_sigma);
+        let unvoiced = f64::from(scorer.unvoiced_llr());
+        best_path(bounds, filler, keys.len(), pass, |i, j, s| {
+            let (from, to) = (bounds[i], bounds[j]);
+            let d_s = f64::from(to - from) * FRAME_S;
+            let llr = if filler.nuclei(from, to) == 0 {
+                unvoiced
+            } else {
+                f64::from(scorer.llr(from, to, keys[s])?)
+            };
+            Ok(llr + log_prior(d_s, rate, sigma))
+        })
+    }
+
+    /// No complete path: every syllable sits at an empty span where the speech region starts
+    /// (frame 0 without one), and the candidate scores `K × unvoiced_syllable_llr`.
+    ///
+    /// Without a nucleus in the analysis (silence, whisper) nothing could be measured: every
+    /// syllable is `NotMeasured { Unvoiced }` ("tone not checked"). With nuclei the candidate
+    /// just does not fit the syllables that were spoken (too many targets for the boundaries), so
+    /// every syllable is a likely miss, `Partial { [Unvoiced] }` (ruling R33).
     fn no_path(&self, cand: &Candidate) -> CandidateScore {
         let at = self.speech_start.unwrap_or(0);
         let unvoiced = self.scorer.unvoiced_llr();
@@ -279,7 +402,11 @@ impl<'a> Decoder<'a> {
                     start_frame: at,
                     end_frame: at,
                 },
-                judgement: unmeasured(t, MeasureIssue::Unvoiced, unvoiced),
+                judgement: if self.has_nuclei {
+                    missed(t, unvoiced)
+                } else {
+                    unmeasured(t, MeasureIssue::Unvoiced, unvoiced)
+                },
             })
             .collect();
         CandidateScore {
@@ -296,55 +423,79 @@ mod tests {
     use super::*;
     use std::convert::Infallible;
 
-    /// A filler of `frames` frames at 1.0 per speech frame, speech wherever `speech(f)` holds.
-    fn filler(frames: usize, speech: impl Fn(usize) -> bool) -> Filler {
+    /// Cost per uncovered nucleus in these tests (`insertion_llr = −2`).
+    const INSERT: f64 = 2.0;
+
+    /// A filler of `frames` frames at 1.0 per speech frame, speech wherever `speech(f)` holds,
+    /// with `nuclei` at those frames and `insertion_llr = −INSERT`.
+    fn filler(frames: usize, speech: impl Fn(usize) -> bool, nuclei: &[u32]) -> Filler {
         let mask: Vec<bool> = (0..frames).map(speech).collect();
-        Filler::new(&mask, 1.0)
+        Filler::new(&mask, nuclei, 1.0, -INSERT)
     }
 
     fn path(
         bounds: &[u32],
         f: &Filler,
         k: usize,
+        pass: Pass,
         score: impl Fn(usize, usize, usize) -> f64,
     ) -> Option<Path> {
-        best_path::<Infallible>(bounds, f, k, |i, j, s| Ok(score(i, j, s))).unwrap()
+        best_path::<Infallible>(bounds, f, k, pass, |i, j, s| Ok(score(i, j, s))).unwrap()
+    }
+
+    /// The syllable edges `best_path` offers for one target, as boundary-index pairs.
+    fn offered(bounds: &[u32], f: &Filler, pass: Pass) -> Vec<(usize, usize)> {
+        let mut seen = Vec::new();
+        let _ = best_path::<Infallible>(bounds, f, 1, pass, |i, j, _| {
+            seen.push((i, j));
+            Ok(0.0)
+        });
+        seen
     }
 
     #[test]
-    fn filler_counts_speech_frames_only_and_clamps_to_the_track() {
-        let f = filler(10, |i| (2..6).contains(&i));
+    fn filler_counts_speech_frames_and_nuclei_and_clamps_to_the_track() {
+        let f = filler(10, |i| (2..6).contains(&i), &[]);
         assert_eq!(f.frames(), 10);
         assert_eq!(f.cost(0, 10), 4.0);
         assert_eq!(f.cost(3, 5), 2.0);
         assert_eq!(f.cost(6, 10), 0.0);
         assert_eq!(f.cost(0, 400), 4.0);
         assert_eq!(f.cost(5, 3), 0.0);
+        // Nuclei count half-open, once per frame, and only on the track.
+        let f = filler(10, |i| (2..6).contains(&i), &[3, 7, 3, 50]);
+        assert_eq!(f.nuclei(0, 10), 2);
+        assert_eq!((f.nuclei(3, 7), f.nuclei(4, 8), f.nuclei(0, 3)), (1, 1, 0));
+        assert_eq!(f.nuclei(0, 400), 2);
+        // Each uncovered nucleus costs −insertion_llr on top of the speech frames.
+        assert_eq!(f.cost(0, 10), 4.0 + 2.0 * INSERT);
+        assert_eq!(f.cost(6, 10), INSERT);
     }
 
     #[test]
     fn filler_absorbs_extra_speech_around_the_syllable() {
-        // Speech everywhere; boundaries every 10 frames. Only 10 → 20 is a good syllable.
-        let f = filler(40, |_| true);
+        // Speech everywhere; boundaries every 10 frames; one nucleus, at 15. Only 10 → 20 is a
+        // good syllable.
+        let f = filler(40, |_| true, &[15]);
         let bounds = [0, 10, 20, 30, 40];
-        let p = path(
-            &bounds,
-            &f,
-            1,
-            |i, j, _| if (i, j) == (1, 2) { 50.0 } else { -50.0 },
-        );
-        let p = p.unwrap();
+        let good = |i, j, _| if (i, j) == (1, 2) { 50.0 } else { -50.0 };
+        let p = path(&bounds, &f, 1, Pass::Strict, good).unwrap();
         assert_eq!(p.syllables, vec![(1, 2)]);
         // 10 leading and 20 trailing speech frames are charged as filler.
         assert_eq!(p.score, 50.0 - 30.0);
+        // With a nucleus in every span, the three left over are insertions as well.
+        let f = filler(40, |_| true, &[5, 15, 25, 35]);
+        let p = path(&bounds, &f, 1, Pass::Strict, good).unwrap();
+        assert_eq!(p.syllables, vec![(1, 2)]);
+        assert_eq!(p.score, 50.0 - 30.0 - 3.0 * INSERT);
     }
 
     #[test]
     fn silent_frames_between_syllables_are_free() {
         // Two syllables separated by silence 20..30: the gap costs nothing.
-        let f = filler(40, |i| !(20..30).contains(&i));
+        let f = filler(40, |i| !(20..30).contains(&i), &[15, 35]);
         let bounds = [0, 10, 20, 30, 40];
-        let p = path(&bounds, &f, 2, |i, j, s| match (s, i, j) {
+        let p = path(&bounds, &f, 2, Pass::Strict, |i, j, s| match (s, i, j) {
             (0, 1, 2) | (1, 3, 4) => 5.0,
             _ => -100.0,
         })
@@ -355,9 +506,10 @@ mod tests {
 
     #[test]
     fn gap_edge_or_longer_syllable_whichever_scores_better() {
-        // One target over speech 0..20: either the syllable 0 → 10 plus a gap edge charging the
-        // 10 trailing speech frames (1 − 10 = −9), or one syllable over all of 0 → 20.
-        let f = filler(20, |_| true);
+        // One target over speech 0..20 with its nucleus at 5: either the syllable 0 → 10 plus a
+        // gap edge charging the 10 trailing speech frames (1 − 10 = −9), or one syllable over all
+        // of 0 → 20.
+        let f = filler(20, |_| true, &[5]);
         let bounds = [0, 10, 20];
         let score = |whole: f64| {
             move |i: usize, j: usize, _: usize| match (i, j) {
@@ -366,16 +518,17 @@ mod tests {
                 _ => -100.0,
             }
         };
-        let p = path(&bounds, &f, 1, score(-5.0)).unwrap();
+        let p = path(&bounds, &f, 1, Pass::Strict, score(-5.0)).unwrap();
         assert_eq!((p.syllables, p.score), (vec![(0, 2)], -5.0));
-        let p = path(&bounds, &f, 1, score(-15.0)).unwrap();
+        let p = path(&bounds, &f, 1, Pass::Strict, score(-15.0)).unwrap();
         assert_eq!((p.syllables, p.score), (vec![(0, 1)], -9.0));
     }
 
     #[test]
-    fn the_worst_span_is_the_one_left_as_filler() {
-        // Two targets over three 10-frame spans of speech: one span has to be filler (cost 10).
-        let f = filler(30, |_| true);
+    fn the_worst_syllable_is_the_one_left_as_an_insertion() {
+        // Two targets over three 10-frame syllables of speech, one nucleus each: one syllable
+        // has to be left over, costing its 10 frames of filler and an insertion.
+        let f = filler(30, |_| true, &[5, 15, 25]);
         let bounds = [0, 10, 20, 30];
         let spans = |a: f64, b: f64, c: f64| {
             move |i: usize, j: usize, _: usize| match (i, j) {
@@ -385,12 +538,19 @@ mod tests {
                 _ => -100.0,
             }
         };
-        let p = path(&bounds, &f, 2, spans(1.0, -30.0, 2.0)).unwrap();
-        assert_eq!((p.syllables, p.score), (vec![(0, 1), (2, 3)], 3.0 - 10.0));
-        let p = path(&bounds, &f, 2, spans(-30.0, 1.0, 2.0)).unwrap();
-        assert_eq!((p.syllables, p.score), (vec![(1, 2), (2, 3)], 3.0 - 10.0));
-        // Three targets use every span, however poor.
-        let p = path(&bounds, &f, 3, spans(1.0, -30.0, 2.0)).unwrap();
+        let left_over = 10.0 + INSERT;
+        let p = path(&bounds, &f, 2, Pass::Strict, spans(1.0, -30.0, 2.0)).unwrap();
+        assert_eq!(
+            (p.syllables, p.score),
+            (vec![(0, 1), (2, 3)], 3.0 - left_over)
+        );
+        let p = path(&bounds, &f, 2, Pass::Strict, spans(-30.0, 1.0, 2.0)).unwrap();
+        assert_eq!(
+            (p.syllables, p.score),
+            (vec![(1, 2), (2, 3)], 3.0 - left_over)
+        );
+        // Three targets use every syllable, however poor.
+        let p = path(&bounds, &f, 3, Pass::Strict, spans(1.0, -30.0, 2.0)).unwrap();
         assert_eq!(
             (p.syllables, p.score),
             (vec![(0, 1), (1, 2), (2, 3)], -27.0)
@@ -398,33 +558,106 @@ mod tests {
     }
 
     #[test]
+    fn strict_syllables_hold_exactly_one_nucleus_relaxed_at_most_one() {
+        // Nuclei at 15 and 35 between boundaries every 10 frames.
+        let f = filler(40, |_| true, &[15, 35]);
+        let bounds = [0, 10, 20, 30, 40];
+        let strict = offered(&bounds, &f, Pass::Strict);
+        assert_eq!(strict, vec![(0, 2), (0, 3), (1, 2), (1, 3), (2, 4), (3, 4)]);
+        // Relaxed adds the nucleus-less spans, never one with two nuclei (0 → 40, 10 → 40).
+        let relaxed = offered(&bounds, &f, Pass::Relaxed);
+        assert_eq!(
+            relaxed,
+            vec![
+                (0, 1),
+                (0, 2),
+                (0, 3),
+                (1, 2),
+                (1, 3),
+                (2, 3),
+                (2, 4),
+                (3, 4)
+            ]
+        );
+    }
+
+    #[test]
+    fn a_target_cannot_hide_on_a_sliver_without_the_nucleus() {
+        // One syllable 0..30 with its nucleus at 25 and interior boundaries at 10 and 20. The
+        // target fits the slivers 0 → 10 and 10 → 20 far better than the syllable, yet a strict
+        // syllable must hold the nucleus.
+        let f = filler(30, |_| true, &[25]);
+        let bounds = [0, 10, 20, 30];
+        let p = path(&bounds, &f, 1, Pass::Strict, |i, j, _| match (i, j) {
+            (0, 1) | (1, 2) => 5.0,
+            (0, 3) => -8.0,
+            _ => -20.0,
+        })
+        .unwrap();
+        assert_eq!((p.syllables, p.score), (vec![(0, 3)], -8.0));
+    }
+
+    #[test]
+    fn uncovered_nuclei_pay_the_insertion_wherever_they_are() {
+        // Silence everywhere (no per-frame filler), a nucleus in each of three spans.
+        let f = filler(30, |_| false, &[5, 15, 25]);
+        let bounds = [0, 10, 20, 30];
+        // The middle one as the syllable: the leading and trailing nuclei are insertions.
+        let middle = |i, j, _| if (i, j) == (1, 2) { 0.0 } else { -100.0 };
+        let p = path(&bounds, &f, 1, Pass::Strict, middle).unwrap();
+        assert_eq!((p.syllables, p.score), (vec![(1, 2)], -2.0 * INSERT));
+        // The outer two as syllables: the gap edge between them holds an insertion.
+        let outer = |i, j, _| {
+            if (i, j) == (0, 1) || (i, j) == (2, 3) {
+                0.0
+            } else {
+                -100.0
+            }
+        };
+        let p = path(&bounds, &f, 2, Pass::Strict, outer).unwrap();
+        assert_eq!((p.syllables, p.score), (vec![(0, 1), (2, 3)], -INSERT));
+    }
+
+    #[test]
+    fn relaxed_pass_places_more_targets_than_nuclei() {
+        // Two nuclei, three targets: no strict path; the relaxed one puts a target on the
+        // nucleus-less span between them.
+        let f = filler(30, |_| true, &[5, 25]);
+        let bounds = [0, 10, 20, 30];
+        assert!(path(&bounds, &f, 3, Pass::Strict, |_, _, _| 0.0).is_none());
+        let p = path(&bounds, &f, 3, Pass::Relaxed, |_, _, _| 0.0).unwrap();
+        assert_eq!(p.syllables, vec![(0, 1), (1, 2), (2, 3)]);
+    }
+
+    #[test]
     fn syllable_edges_respect_the_duration_window() {
-        let f = filler(200, |_| true);
+        let f = filler(200, |_| true, &[]);
         // Spans of 5 frames (50 ms) and 81 frames are out; 6 (60 ms) and 80 (800 ms) are in.
         let bounds = [0, 5, 6, 86, 87];
-        let mut seen = Vec::new();
-        let _ = best_path::<Infallible>(&bounds, &f, 1, |i, j, _| {
-            seen.push((bounds[i], bounds[j]));
-            Ok(0.0)
-        });
+        let seen: Vec<(u32, u32)> = offered(&bounds, &f, Pass::Relaxed)
+            .into_iter()
+            .map(|(i, j)| (bounds[i], bounds[j]))
+            .collect();
         assert_eq!(seen, vec![(0, 6), (6, 86)]);
     }
 
     #[test]
     fn no_path_when_too_few_boundaries() {
-        let f = filler(40, |_| true);
+        let f = filler(40, |_| true, &[5, 15, 25, 35]);
         // Three boundaries allow at most two syllables.
-        assert!(path(&[0, 10, 20], &f, 3, |_, _, _| 0.0).is_none());
-        assert!(path(&[0, 10, 20], &f, 2, |_, _, _| 0.0).is_some());
+        assert!(path(&[0, 10, 20], &f, 3, Pass::Relaxed, |_, _, _| 0.0).is_none());
+        assert!(path(&[0, 10, 20], &f, 2, Pass::Strict, |_, _, _| 0.0).is_some());
         // Spans shorter than 60 ms are never syllables.
-        assert!(path(&[0, 3], &f, 1, |_, _, _| 0.0).is_none());
-        assert!(path(&[], &f, 1, |_, _, _| 0.0).is_none());
+        assert!(path(&[0, 3], &f, 1, Pass::Relaxed, |_, _, _| 0.0).is_none());
+        assert!(path(&[], &f, 1, Pass::Relaxed, |_, _, _| 0.0).is_none());
     }
 
     #[test]
     fn scorer_errors_propagate() {
-        let f = filler(40, |_| true);
-        let r = best_path(&[0, 10, 20], &f, 1, |_, _, _| Err::<f64, _>("boom"));
+        let f = filler(40, |_| true, &[5]);
+        let r = best_path(&[0, 10, 20], &f, 1, Pass::Strict, |_, _, _| {
+            Err::<f64, _>("boom")
+        });
         assert_eq!(r, Err("boom"));
     }
 
