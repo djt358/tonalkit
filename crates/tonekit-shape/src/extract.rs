@@ -73,7 +73,7 @@ pub struct Extracted {
 ///   part's normalised time (0..1).
 /// - `voiced_fraction` is the share of the span's frames that are voiced; `f0_confidence` is the
 ///   mean `voiced_p` of the voiced frames, the only place `voiced_p` enters.
-/// - `turning_point` follows ruling R4, see [`crate::fit`].
+/// - `turning_point` follows ruling R4 (see the private `fit` module).
 pub fn extract(f0: &F0Track, span: &TbuSpan, r: &Register) -> Result<Extracted, MeasureIssue> {
     let start = span.start_frame as usize;
     let end = (span.end_frame as usize).min(f0.frames.len());
