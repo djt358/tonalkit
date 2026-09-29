@@ -25,24 +25,32 @@ allow = [
 unused-allowed-license = "allow"
 unused-license-exception = "allow"
 # MPL-2.0 is file-level copyleft: accepted only for the UniFFI toolchain (Task 12). cargo-deny
-# matches exception crate names exactly (no globs), so every `uniffi*` crate is listed by name.
-# A `uniffi*` crate missing from this list fails the licenses check, which is the safe direction.
+# matches exception crate names exactly (no globs), so this lists exactly the `uniffi*` crates in
+# the graph (uniffi 0.32.2, all features). A `uniffi*` crate that is not listed fails the licenses
+# check, which is the safe direction; after a uniffi upgrade, re-run `cargo deny check` and
+# `grep -A1 '^name = "uniffi' Cargo.lock` and adjust the list.
 exceptions = [
     { allow = ["MPL-2.0"], crate = "uniffi" },
     { allow = ["MPL-2.0"], crate = "uniffi_bindgen" },
-    { allow = ["MPL-2.0"], crate = "uniffi_build" },
-    { allow = ["MPL-2.0"], crate = "uniffi_checksum_derive" },
     { allow = ["MPL-2.0"], crate = "uniffi_core" },
     { allow = ["MPL-2.0"], crate = "uniffi_internal_macros" },
     { allow = ["MPL-2.0"], crate = "uniffi_macros" },
     { allow = ["MPL-2.0"], crate = "uniffi_meta" },
     { allow = ["MPL-2.0"], crate = "uniffi_pipeline" },
-    { allow = ["MPL-2.0"], crate = "uniffi_testing" },
     { allow = ["MPL-2.0"], crate = "uniffi_udl" },
 ]
 
 [bans]
 multiple-versions = "warn"
+# UniFFI's proc-macros and bindings generator read Cargo.toml with the 1.x `toml` family, while
+# tonekit-pack stays on toml 0.8. Both are build-time only (the iOS library links none of it).
+skip = [
+    { crate = "toml@1", reason = "uniffi_macros and uniffi_bindgen (build-time); tonekit-pack uses toml 0.8" },
+    { crate = "toml_datetime@1", reason = "via toml 1.x, see above" },
+    { crate = "serde_spanned@1", reason = "via toml 1.x, see above" },
+    { crate = "winnow@1", reason = "via toml 1.x and askama_parser (uniffi_bindgen, build-time)" },
+    { crate = "getrandom@0.4", reason = "via tempfile (uniffi_bindgen, build-time)" },
+]
 # tonekit is on-device and offline: no network or TLS stacks, direct or transitive.
 deny = [
     { crate = "reqwest" },
