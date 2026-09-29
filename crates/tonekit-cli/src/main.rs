@@ -72,7 +72,12 @@ fn run_assess(args: &AssessArgs) -> Result<(), CliError> {
     let intended = candidate(INTENDED_ID, "--tones", &args.tones, args.labels.as_deref())?;
     let mut distractors = Vec::with_capacity(args.distractors.len());
     for (n, tones) in args.distractors.iter().enumerate() {
-        distractors.push(candidate(&format!("d{}", n + 1), "--distractor", tones, None)?);
+        distractors.push(candidate(
+            &format!("d{}", n + 1),
+            "--distractor",
+            tones,
+            None,
+        )?);
     }
     let labels: Vec<Option<String>> = intended.targets.iter().map(|t| t.label.clone()).collect();
 
@@ -155,7 +160,9 @@ fn candidate(
 ) -> Result<Candidate, CliError> {
     let tones: Vec<&str> = tones.split_whitespace().collect();
     if tones.is_empty() {
-        return Err(CliError::Usage(format!("{flag} needs at least one tone id")));
+        return Err(CliError::Usage(format!(
+            "{flag} needs at least one tone id"
+        )));
     }
     let labels: Vec<Option<String>> = match labels {
         None => vec![None; tones.len()],
@@ -197,7 +204,13 @@ fn failure(e: impl fmt::Display) -> CliError {
 fn emit(text: &str) -> Result<(), CliError> {
     let mut out = std::io::stdout().lock();
     out.write_all(text.as_bytes())
-        .and_then(|()| if text.ends_with('\n') { Ok(()) } else { out.write_all(b"\n") })
+        .and_then(|()| {
+            if text.ends_with('\n') {
+                Ok(())
+            } else {
+                out.write_all(b"\n")
+            }
+        })
         .and_then(|()| out.flush())
         .map_err(|e| CliError::Failure(format!("stdout: {e}")))
 }

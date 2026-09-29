@@ -67,11 +67,7 @@ pub fn lattice(l: &ToneLattice) -> String {
         };
         let mut cells = vec![
             (i + 1).to_string(),
-            format!(
-                "{}-{}",
-                ms(tbu.span.start_frame),
-                ms(tbu.span.end_frame)
-            ),
+            format!("{}-{}", ms(tbu.span.start_frame), ms(tbu.span.end_frame)),
             best.map_or(NONE.into(), |t| t.0.clone()),
         ];
         cells.extend(tbu.posterior.iter().map(|p| format!("{p:.2}")));
@@ -108,7 +104,7 @@ fn render(rows: &[Vec<String>]) -> String {
             out.push_str(cell);
             if c < last {
                 let pad = widths[c] - cell.chars().count() + 2;
-                out.extend(std::iter::repeat(' ').take(pad));
+                out.push_str(&" ".repeat(pad));
             }
         }
         out.push('\n');

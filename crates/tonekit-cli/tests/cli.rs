@@ -13,7 +13,10 @@ use tonekit::{MeasureIssue, Measured, ToneLattice, UtteranceAssessment};
 use tonekit_testkit::{synth, SynthSpec, SynthSyllable};
 
 const PACK: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../packs/cmn/cmn.toml");
-const CALIB: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../packs/cmn/cmn.calib.json");
+const CALIB: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../packs/cmn/cmn.calib.json"
+);
 const FIXTURES: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../fixtures");
 
 const RESAMPLE_HINT: &str = "resample with `tkh ingest`";
@@ -141,7 +144,11 @@ fn assess_json_grades_the_synthetic_413() {
     assert_eq!(assessment.schema, "tonekit.assessment.v1");
     assert_eq!(assessment.intended.0, "intended");
     assert_eq!(assessment.syllables.len(), 3);
-    let expected: Vec<_> = assessment.syllables.iter().map(|s| &*s.expected.0).collect();
+    let expected: Vec<_> = assessment
+        .syllables
+        .iter()
+        .map(|s| &*s.expected.0)
+        .collect();
     assert_eq!(expected, ["4", "1", "3"]);
     assert!(assessment.overall.is_some());
     assert!(assessment.accent_fit.is_empty());
@@ -193,11 +200,9 @@ fn stereo_and_24_bit_wavs_exit_2_with_the_hint() {
     let dir = TempDir::new().unwrap();
 
     let stereo = dir.path().join("stereo.wav");
-    let mut writer = hound::WavWriter::create(
-        &stereo,
-        wav_spec(2, 16_000, 32, hound::SampleFormat::Float),
-    )
-    .unwrap();
+    let mut writer =
+        hound::WavWriter::create(&stereo, wav_spec(2, 16_000, 32, hound::SampleFormat::Float))
+            .unwrap();
     for x in spoken_413() {
         writer.write_sample(x).unwrap();
         writer.write_sample(x).unwrap();
@@ -276,7 +281,11 @@ fn unreadable_inputs_exit_1_with_the_reason_on_stderr() {
         "4 1 3",
     ]);
     assert_eq!(out.status.code(), Some(1));
-    assert!(stderr(&out).contains("no-such-pack.toml"), "{}", stderr(&out));
+    assert!(
+        stderr(&out).contains("no-such-pack.toml"),
+        "{}",
+        stderr(&out)
+    );
 
     let broken = dir.path().join("broken.toml");
     fs::write(&broken, "[pack\nlect = ").unwrap();
@@ -325,14 +334,7 @@ fn unknown_accents_and_tones_exit_1_naming_the_culprit() {
     assert_eq!(out.status.code(), Some(1));
     assert!(stderr(&out).contains("cmn-ZZ"), "{}", stderr(&out));
 
-    let out = tonekit(&[
-        "assess",
-        path_str(&wav),
-        "--pack",
-        PACK,
-        "--tones",
-        "4 9 3",
-    ]);
+    let out = tonekit(&["assess", path_str(&wav), "--pack", PACK, "--tones", "4 9 3"]);
     assert_eq!(out.status.code(), Some(1));
     assert!(stderr(&out).contains('9'), "{}", stderr(&out));
     assert_eq!(stdout(&out), "");
@@ -375,14 +377,7 @@ fn the_table_has_a_row_per_syllable_and_ends_with_overall_and_margin() {
 #[test]
 fn unlabelled_syllables_are_numbered_in_the_table() {
     let (_dir, wav) = fixture_dir();
-    let out = tonekit(&[
-        "assess",
-        path_str(&wav),
-        "--pack",
-        PACK,
-        "--tones",
-        "4 1 3",
-    ]);
+    let out = tonekit(&["assess", path_str(&wav), "--pack", PACK, "--tones", "4 1 3"]);
     assert_eq!(out.status.code(), Some(0), "stderr: {}", stderr(&out));
     let text = stdout(&out);
     let firsts: Vec<&str> = text
@@ -392,6 +387,34 @@ fn unlabelled_syllables_are_numbered_in_the_table() {
         .map(|l| l.split_whitespace().next().unwrap())
         .collect();
     assert_eq!(firsts, ["s1", "s2", "s3"]);
+}
+
+#[test]
+fn silence_is_reported_as_not_measured_and_not_checked() {
+    let dir = TempDir::new().unwrap();
+    let wav = dir.path().join("silence.wav");
+    write_f32_wav(&wav, 16_000, &[0.0; 16_000]);
+
+    let out = assess(&wav, &[]);
+    assert_eq!(out.status.code(), Some(0), "stderr: {}", stderr(&out));
+    let text = stdout(&out);
+    let lines: Vec<&str> = text.lines().collect();
+    assert_eq!(lines.len(), 1 + 3 + 3 + 1, "{text}");
+    for (line, label) in lines[4..7].iter().zip(["yi", "bei", "shui"]) {
+        assert!(
+            line.starts_with(&format!("{label}: not measured (")),
+            "{line}"
+        );
+    }
+    assert!(lines[7].starts_with("overall not checked "), "{}", lines[7]);
+
+    let out = tonekit(&["lattice", path_str(&wav), "--pack", PACK]);
+    assert_eq!(out.status.code(), Some(0), "stderr: {}", stderr(&out));
+    assert!(
+        stdout(&out).ends_with("no syllable nuclei found\n"),
+        "{}",
+        stdout(&out)
+    );
 }
 
 #[test]
@@ -463,6 +486,10 @@ fn lattice_json_has_one_tbu_per_syllable() {
     assert_eq!(out.status.code(), Some(0), "stderr: {}", stderr(&out));
     assert_eq!(stderr(&out), "");
     let lattice: ToneLattice = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(
+        stdout(&out),
+        format!("{}\n", serde_json::to_string_pretty(&lattice).unwrap())
+    );
     assert_eq!(lattice.schema, "tonekit.lattice.v1");
     assert_eq!(lattice.lect.0, "cmn");
     assert_eq!(lattice.inventory.len(), 5);
@@ -534,7 +561,10 @@ fn a_sibling_calibration_file_is_used_when_calib_is_omitted() {
     assert_eq!(sibling, explicit);
 
     // The shipped pack's own sibling is the shipped calibration.
-    assert_eq!(run(Path::new(PACK), &[]), run(Path::new(PACK), &["--calib", CALIB]));
+    assert_eq!(
+        run(Path::new(PACK), &[]),
+        run(Path::new(PACK), &["--calib", CALIB])
+    );
 
     // An explicit calibration that is missing is an error, not a silent fallback.
     let missing = dir.path().join("missing.json");
@@ -582,8 +612,9 @@ fn checked_in_fixtures_match_a_fresh_run() {
         "fixtures/spoken-413.wav differs from a fresh render; {hint}"
     );
 
-    let old_json = fs::read(checked_in.join("spoken-413.assessment.json"))
-        .unwrap_or_else(|e| panic!("fixtures/spoken-413.assessment.json is unreadable ({e}); {hint}"));
+    let old_json = fs::read(checked_in.join("spoken-413.assessment.json")).unwrap_or_else(|e| {
+        panic!("fixtures/spoken-413.assessment.json is unreadable ({e}); {hint}")
+    });
     let old_value: serde_json::Value = serde_json::from_slice(&old_json).unwrap();
     let new_value: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
     assert!(
