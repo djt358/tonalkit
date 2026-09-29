@@ -118,6 +118,17 @@ impl LogSumExp {
     }
 }
 
+/// `ln Σ exp(v)` over `values` in one numerically stable pass: the accumulator behind every
+/// mixture and background here, so callers that combine this crate's log-likelihoods get the same
+/// numbers bit for bit. `−∞` when there are no values or every value is `−∞`.
+pub fn logsumexp(values: impl IntoIterator<Item = f64>) -> f64 {
+    let mut acc = LogSumExp::EMPTY;
+    for v in values {
+        acc.add(v);
+    }
+    acc.value()
+}
+
 /// The best-scoring component of a mixture and its uncalibrated d².
 struct Best {
     index: usize,
@@ -341,5 +352,26 @@ impl LanguagePack {
             total += w;
         }
         (total > 0.0).then(|| weighted / total)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::logsumexp;
+
+    #[test]
+    fn logsumexp_is_the_stable_log_of_a_sum_of_exponentials() {
+        let want = (1.0f64.exp() + 2.0f64.exp() + 0.5f64.exp()).ln();
+        assert!((logsumexp([1.0, 2.0, 0.5]) - want).abs() < 1e-12);
+        // Stable far outside exp's range, and order does not matter.
+        assert!((logsumexp([-1000.0, -1000.0]) - (-1000.0 + 2.0f64.ln())).abs() < 1e-9);
+        assert!((logsumexp([1000.0, 999.0]) - logsumexp([999.0, 1000.0])).abs() < 1e-9);
+        assert!(
+            (logsumexp([1000.0, 999.0]) - (1000.0 + (1.0 + (-1.0f64).exp()).ln())).abs() < 1e-9
+        );
+        // −∞ terms contribute nothing; no terms at all is −∞.
+        assert_eq!(logsumexp([f64::NEG_INFINITY, 3.0]), 3.0);
+        assert_eq!(logsumexp([f64::NEG_INFINITY]), f64::NEG_INFINITY);
+        assert_eq!(logsumexp(std::iter::empty()), f64::NEG_INFINITY);
     }
 }

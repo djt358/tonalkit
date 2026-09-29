@@ -891,6 +891,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "tonekit-decode"
+version = "0.1.0"
+dependencies = [
+ "approx",
+ "tonekit-core",
+ "tonekit-f0",
+ "tonekit-pack",
+ "tonekit-segment",
+ "tonekit-shape",
+ "tonekit-testkit",
+]
+
+[[package]]
 name = "tonekit-f0"
 version = "0.1.0"
 dependencies = [
