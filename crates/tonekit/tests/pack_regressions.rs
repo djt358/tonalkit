@@ -1,0 +1,110 @@
+//! Regressions in the shipped `packs/cmn` pack data, checked through the facade on synthetic
+//! speech (spec §6, §7).
+//!
+//! R47: in a non-final position a learner's full-dip third tone (Chao 2-1-4) fits the second tone
+//! better than the pack's half-third `[2, 1]`, so a T3-for-T2 error used to be accepted. The
+//! `cmn-standard` non-final T3 is now a mixture that also expects the full dip at low weight.
+
+use tonekit::{
+    analyze, assess, AccentId, AnalyzeOptions, AssessRequest, Candidate, CandidateId,
+    GradingTarget, LanguagePack, ToneId, ToneTarget,
+};
+use tonekit_testkit::{synth, SynthSpec, SynthSyllable};
+
+const CMN_TOML: &str = include_str!("../../../packs/cmn/cmn.toml");
+const CMN_CALIB: &str = include_str!("../../../packs/cmn/cmn.calib.json");
+
+const RATE: u32 = 16_000;
+
+/// The speaker of the harness's synthetic corpus (`tests/support.py`): harmonic voice, floor
+/// 100 Hz / ceiling 200 Hz, 250 ms syllables, 150 ms gaps, 300 ms of silence either side. Unlike
+/// the facade's own tests, every third tone is spoken as the full dip, wherever it stands.
+fn spoken_tones(tones: &[&str]) -> Vec<f32> {
+    let knots = |tone: &str| match tone {
+        "1" => vec![5.0, 5.0],
+        "2" => vec![3.0, 5.0],
+        "3" => vec![2.0, 1.0, 4.0],
+        "4" => vec![5.0, 1.0],
+        other => panic!("no spoken form for tone {other}"),
+    };
+    let last = tones.len() - 1;
+    synth(&SynthSpec {
+        floor_hz: 100.0,
+        ceil_hz: 200.0,
+        lead_ms: 300.0,
+        tail_ms: 300.0,
+        syllables: tones
+            .iter()
+            .enumerate()
+            .map(|(i, t)| SynthSyllable {
+                chao: knots(t),
+                dur_ms: 250.0,
+                gap_after_ms: if i == last { 0.0 } else { 150.0 },
+                unvoiced_onset_ms: 0.0,
+                creak: None,
+            })
+            .collect(),
+        snr_db: None,
+        seed: 0,
+    })
+    .pcm
+}
+
+/// Grades `intended` on the clip speaking `produced`: the real cmn pack, `cmn-standard`, a cold
+/// register (none given), no distractors. Returns `(overall, p_correct per syllable)`.
+fn grade(produced: &[&str], intended: &[&str]) -> (f32, Vec<f32>) {
+    let pack = LanguagePack::from_toml(CMN_TOML, Some(CMN_CALIB)).unwrap();
+    let analysis = analyze(&spoken_tones(produced), RATE, None, &AnalyzeOptions::default()).unwrap();
+    let request = AssessRequest {
+        grading: GradingTarget {
+            accent: AccentId("cmn-standard".into()),
+            style: None,
+            style_weight: 0.0,
+        },
+        intended: Candidate {
+            id: CandidateId("spell".into()),
+            targets: intended
+                .iter()
+                .map(|t| ToneTarget {
+                    tone: ToneId((*t).into()),
+                    lexical_variants: Vec::new(),
+                    label: None,
+                })
+                .collect(),
+        },
+        distractors: Vec::new(),
+        external: Vec::new(),
+        compare_accents: Vec::new(),
+    };
+    let r = assess(&analysis, &pack, &request).unwrap();
+    (
+        r.overall.expect("a clean clip is measured"),
+        r.syllables.iter().map(|s| s.p_correct).collect(),
+    )
+}
+
+#[test]
+fn a_full_dip_third_tone_does_not_pass_for_a_second_tone() {
+    // Gate pair 02: intended 1-2-4.
+    let (correct, correct_p) = grade(&["1", "2", "4"], &["1", "2", "4"]);
+    let (error, error_p) = grade(&["1", "3", "4"], &["1", "2", "4"]);
+    eprintln!("R47 gate-02: correct {correct:.4} {correct_p:.4?}, error {error:.4} {error_p:.4?}");
+    assert!(
+        error <= correct - 0.10,
+        "error overall {error:.4} is not 0.10 below correct overall {correct:.4}"
+    );
+    assert!(
+        error_p[1] < 0.5,
+        "the T3-for-T2 syllable still passes: p_correct {:.4}",
+        error_p[1]
+    );
+}
+
+#[test]
+fn an_intended_third_tone_still_gets_credit_for_the_full_dip() {
+    // The other direction: a learner who is asked for a T3 and over-produces it is not punished
+    // (the mixture keeps the full dip at weight 0.25).
+    let (overall, p) = grade(&["1", "3", "4"], &["1", "3", "4"]);
+    eprintln!("R47 intended 1-3-4, produced 1-3-4: overall {overall:.4} {p:.4?}");
+    assert!(p[1] >= 0.5, "intended T3 middle p_correct {:.4}", p[1]);
+}
