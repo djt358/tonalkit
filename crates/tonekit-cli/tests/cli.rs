@@ -227,6 +227,141 @@ fn stereo_and_24_bit_wavs_exit_2_with_the_hint() {
     }
 }
 
+/// A RIFF/WAVE file made of `chunks` (`(id, body)`), each padded to an even length.
+fn riff(chunks: &[(&str, Vec<u8>)]) -> Vec<u8> {
+    let mut body = b"WAVE".to_vec();
+    for (id, data) in chunks {
+        body.extend_from_slice(id.as_bytes());
+        body.extend_from_slice(&u32::try_from(data.len()).unwrap().to_le_bytes());
+        body.extend_from_slice(data);
+        if data.len() % 2 == 1 {
+            body.push(0);
+        }
+    }
+    let mut file = b"RIFF".to_vec();
+    file.extend_from_slice(&u32::try_from(body.len()).unwrap().to_le_bytes());
+    file.extend(body);
+    file
+}
+
+/// A `fmt ` chunk body: format tag, mono, `rate`, `bits` per sample.
+fn fmt_chunk(tag: u16, rate: u32, bits: u16) -> Vec<u8> {
+    let block_align = bits / 8;
+    let mut fmt = tag.to_le_bytes().to_vec();
+    fmt.extend_from_slice(&1_u16.to_le_bytes());
+    fmt.extend_from_slice(&rate.to_le_bytes());
+    fmt.extend_from_slice(&(rate * u32::from(block_align)).to_le_bytes());
+    fmt.extend_from_slice(&block_align.to_le_bytes());
+    fmt.extend_from_slice(&bits.to_le_bytes());
+    fmt
+}
+
+#[test]
+fn wav_layouts_hound_refuses_to_open_still_exit_2_with_the_hint() {
+    let dir = TempDir::new().unwrap();
+    let pcm = spoken_413();
+
+    // 16 kHz mono 64-bit float, what numpy and scipy write.
+    let float64: Vec<u8> = pcm
+        .iter()
+        .flat_map(|&x| f64::from(x).to_le_bytes())
+        .collect();
+    let float64_wav = riff(&[
+        ("fmt ", fmt_chunk(3, 16_000, 64)),
+        ("data", float64.clone()),
+    ]);
+    // The same behind a LIST chunk (odd length, so padded) ahead of `fmt `.
+    let listed_wav = riff(&[
+        ("LIST", b"INFOx".to_vec()),
+        ("fmt ", fmt_chunk(3, 16_000, 64)),
+        ("data", float64),
+    ]);
+    // The same as WAVE_FORMAT_EXTENSIBLE, whose real format tag hides in the sub-format GUID.
+    let mut extensible_fmt = fmt_chunk(0xFFFE, 16_000, 64);
+    extensible_fmt.extend_from_slice(&22_u16.to_le_bytes()); // size of the extension
+    extensible_fmt.extend_from_slice(&64_u16.to_le_bytes()); // valid bits
+    extensible_fmt.extend_from_slice(&4_u32.to_le_bytes()); // channel mask
+    extensible_fmt.extend_from_slice(&3_u16.to_le_bytes()); // sub-format: IEEE float
+    extensible_fmt.extend_from_slice(&[
+        0x00, 0x00, 0x00, 0x00, 0x10, 0x00, 0x80, 0x00, 0x00, 0xAA, 0x00, 0x38, 0x9B, 0x71,
+    ]);
+    let extensible_wav = riff(&[("fmt ", extensible_fmt), ("data", vec![0; 8_000])]);
+    // 8 kHz mono mu-law, whose `fmt ` chunk carries the extra size field.
+    let mut mulaw_fmt = fmt_chunk(7, 8_000, 8);
+    mulaw_fmt.extend_from_slice(&[0, 0]);
+    let mulaw_wav = riff(&[("fmt ", mulaw_fmt), ("data", vec![0xFF; 8_000])]);
+
+    for (name, bytes, described) in [
+        (
+            "float64.wav",
+            float64_wav,
+            "16000 Hz, 1 channel(s), 64-bit float",
+        ),
+        (
+            "listed.wav",
+            listed_wav,
+            "16000 Hz, 1 channel(s), 64-bit float",
+        ),
+        (
+            "extensible.wav",
+            extensible_wav,
+            "16000 Hz, 1 channel(s), 64-bit float",
+        ),
+        (
+            "mulaw.wav",
+            mulaw_wav,
+            "8000 Hz, 1 channel(s), 8-bit mu-law",
+        ),
+    ] {
+        let wav = dir.path().join(name);
+        fs::write(&wav, bytes).unwrap();
+        for out in [
+            assess(&wav, &["--json"]),
+            tonekit(&["lattice", path_str(&wav), "--pack", PACK]),
+        ] {
+            assert_eq!(out.status.code(), Some(2), "{name}: {}", stderr(&out));
+            assert!(
+                stderr(&out).contains(RESAMPLE_HINT),
+                "{name}: {}",
+                stderr(&out)
+            );
+            assert!(stderr(&out).contains(described), "{name}: {}", stderr(&out));
+            assert_eq!(stdout(&out), "");
+        }
+    }
+}
+
+#[test]
+fn broken_wavs_in_a_supported_layout_or_without_a_layout_exit_1() {
+    let dir = TempDir::new().unwrap();
+    let cases = [
+        // RIFF/WAVE, but nothing follows.
+        ("header-only.wav", riff(&[])),
+        // RIFF/WAVE with no `fmt ` chunk.
+        ("no-fmt.wav", riff(&[("data", vec![0; 64])])),
+        // A layout we accept (16 kHz mono float32), but the audio never arrives.
+        ("no-data.wav", riff(&[("fmt ", fmt_chunk(3, 16_000, 32))])),
+        // The layout is fine and the file stops in the middle of its `fmt ` chunk.
+        ("cut-fmt.wav", {
+            let mut cut = riff(&[("fmt ", fmt_chunk(3, 16_000, 32))]);
+            cut.truncate(28);
+            cut
+        }),
+    ];
+    for (name, bytes) in cases {
+        let wav = dir.path().join(name);
+        fs::write(&wav, bytes).unwrap();
+        let out = assess(&wav, &["--json"]);
+        assert_eq!(out.status.code(), Some(1), "{name}: {}", stderr(&out));
+        assert!(
+            !stderr(&out).contains(RESAMPLE_HINT),
+            "{name}: {}",
+            stderr(&out)
+        );
+        assert!(stderr(&out).contains(name), "{name}: {}", stderr(&out));
+    }
+}
+
 #[test]
 fn labels_that_do_not_match_the_tones_exit_2() {
     let (_dir, wav) = fixture_dir();
