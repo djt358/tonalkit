@@ -179,10 +179,10 @@ fn assessment_reports_the_intended_reading_first() {
     assert_eq!(ok.schema, "tonekit.assessment.v1");
     assert_eq!(ok.intended, CandidateId("spell".into()));
     assert_eq!(ok.intended_rank, 1);
-    // `margin_llr` is measured against the null competitor's raw `null_llr` (the best free choice
-    // of tones), which a caller's reading can at most match, so it sits at or just under 0 even
-    // for a correct reading; only its being finite is guaranteed.
-    assert!(ok.margin_llr.is_finite());
+    // R37: the margin is against the null's biased score (`null_llr + null_bias`), so a correct
+    // reading with no distractors is clearly ahead of "something else was said". Observed 1.97
+    // (the raw-null margin was -0.03).
+    assert!(ok.margin_llr > 0.0, "margin {}", ok.margin_llr);
     let expected: Vec<&str> = ok.syllables.iter().map(|s| s.expected.0.as_str()).collect();
     assert_eq!(expected, ["4", "1", "3"]);
 }
@@ -473,6 +473,46 @@ fn register_update_of_a_cold_start_is_the_cold_register_itself() {
     assert_eq!(r.register_update, a.register);
 }
 
+#[test]
+fn a_whispered_cast_leaves_a_given_register_unchanged() {
+    // R38: nothing was measured, so u = 0 and not even n_syllables moves.
+    let given = Register {
+        n_syllables: 40,
+        ..warm()
+    };
+    let a = analysis_of(&whispered(&["4", "1", "3"]), Some(&given));
+    let r = assess(&a, &cmn(), &req(&["4", "1", "3"])).unwrap();
+    assert!(all_not_measured(&r));
+    assert_eq!(r.register_update, given);
+}
+
+#[test]
+fn a_whispered_cold_start_leaves_nothing_to_persist() {
+    // R38: the fallback register, with n_syllables 0, which consumers do not persist.
+    let a = analysis_of(&whispered(&["4", "1", "3"]), None);
+    let r = assess(&a, &cmn(), &req(&["4", "1", "3"])).unwrap();
+    assert!(all_not_measured(&r));
+    assert_eq!(r.register_update.n_syllables, 0);
+    assert_eq!(r.register_update, a.register);
+}
+
+#[test]
+fn only_measured_syllables_count_toward_the_register_update() {
+    let given = Register {
+        n_syllables: 40,
+        ..warm()
+    };
+    let a = analysis_of(&spoken(&["4", "1", "3"]), Some(&given));
+    let r = assess(&a, &cmn(), &req(&["4", "1", "3"])).unwrap();
+    let measured = r
+        .syllables
+        .iter()
+        .filter(|s| !matches!(s.measured, Measured::NotMeasured { .. }))
+        .count();
+    assert_eq!(measured, 3);
+    assert_eq!(r.register_update.n_syllables, 40 + 3);
+}
+
 // ---- request validation -----------------------------------------------------------------
 
 #[test]
@@ -555,6 +595,26 @@ fn unknown_tones_and_accents_are_errors_not_panics() {
         assess(&a, &pack, &request),
         Err(AssessError::Pack { .. })
     ));
+}
+
+#[test]
+fn an_assess_request_needs_only_grading_and_intended() {
+    // R39: the three lists are optional on the wire.
+    let json = r#"{
+        "grading": {"accent": "cmn-standard", "style": null, "style_weight": 0.0},
+        "intended": {"id": "spell", "targets": [
+            {"tone": "4", "lexical_variants": [], "label": null}
+        ]}
+    }"#;
+    assert_eq!(
+        serde_json::from_str::<AssessRequest>(json).unwrap(),
+        req(&["4"])
+    );
+    // The required fields stay required.
+    assert!(serde_json::from_str::<AssessRequest>(
+        r#"{"grading": {"accent": "cmn-standard", "style": null, "style_weight": 0.0}}"#
+    )
+    .is_err());
 }
 
 #[test]

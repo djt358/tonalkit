@@ -2,8 +2,8 @@
 
 use serde::{Deserialize, Serialize};
 use tonekit_core::{
-    AccentFit, AccentId, Analysis, AssessError, Candidate, Evidence, GradingTarget, Register,
-    RegisterSource, UtteranceAssessment,
+    AccentFit, AccentId, Analysis, AssessError, Candidate, DecodeResult, Evidence, GradingTarget,
+    Measured, Register, RegisterSource, UtteranceAssessment,
 };
 use tonekit_decode::decode;
 use tonekit_fuse::assemble;
@@ -18,11 +18,16 @@ pub struct AssessRequest {
     /// The reading the speaker was aiming for.
     pub intended: Candidate,
     /// Other readings it might be mistaken for; they compete with `intended` for `intended_rank`
-    /// and `margin_llr`.
+    /// and `margin_llr`. Optional in JSON (default: none).
+    #[serde(default)]
     pub distractors: Vec<Candidate>,
-    /// Transcript or neural evidence about `intended`: empty, or one list per syllable.
+    /// Transcript or neural evidence about `intended`: empty, or one list per syllable. Optional
+    /// in JSON (default: none).
+    #[serde(default)]
     pub external: Vec<Vec<Evidence>>,
-    /// Accents to report `accent_fit` for; nothing is reported for any other.
+    /// Accents to report `accent_fit` for; nothing is reported for any other. Optional in JSON
+    /// (default: none).
+    #[serde(default)]
     pub compare_accents: Vec<AccentId>,
 }
 
@@ -32,12 +37,16 @@ pub struct AssessRequest {
 /// 2. Each accent in `req.compare_accents` re-decodes `[intended]` alone under that accent (no
 ///    imprint style) and reports its llr as an [`AccentFit`], in the order listed. There is
 ///    deliberately no way to ask which accent fits best across all of them (spec §11.5).
-/// 3. `register_update` is the register to keep for next time: the analysis's own cold-start
-///    register if it was estimated from this very utterance (merging it back into itself would
-///    count the utterance twice), otherwise the given register merged with this utterance's voiced
-///    semitones and `intended`'s syllable count.
+/// 3. `register_update` is the register to keep for next time, counting only the syllables of
+///    `intended` that were measured (anything but `NotMeasured`; ruling R38). For a given register
+///    it is that register merged with this utterance's voiced semitones and the measured count,
+///    or unchanged (not even `n_syllables` moves) if nothing was measured. For a cold start it is
+///    the analysis's own register (merging it back into itself would count the utterance twice),
+///    with `n_syllables` 0 if nothing was measured. Consumers persist it only if
+///    `n_syllables > 0`.
 /// 4. `tonekit_fuse::assemble` fuses the acoustic judgements with `req.external` under the pack's
-///    fusion weights.
+///    fusion weights. `margin_llr` is against the best rival or the null competitor's biased score
+///    `null_llr + null_bias` (ruling R37), so a correct reading's margin is positive.
 ///
 /// # Errors
 ///
@@ -73,8 +82,9 @@ pub fn assess(
         &req.intended.id,
         &req.external,
         &pack.calibration().fusion,
+        pack.calibration().decode.null_bias,
         accent_fit,
-        register_update(a, req.intended.targets.len()),
+        register_update(a, measured_syllables(&decoded, &req.intended)),
     )
 }
 
@@ -126,10 +136,34 @@ fn fit_for_accent(
     })
 }
 
-fn register_update(a: &Analysis, syllables: usize) -> Register {
-    match a.register_source {
-        RegisterSource::ColdStart => a.register.clone(),
-        RegisterSource::Given => merge_register(&a.register, &a.voiced_st, count(syllables)),
+/// How many syllables of `intended` were measured: those whose judgement is not `NotMeasured`
+/// (the same test `SyllableAssessment::measured` carries into the assessment).
+fn measured_syllables(decoded: &DecodeResult, intended: &Candidate) -> usize {
+    decoded
+        .candidates
+        .iter()
+        .find(|c| c.id == intended.id)
+        .map_or(0, |c| {
+            c.syllables
+                .iter()
+                .filter(|s| !matches!(s.judgement.measured, Measured::NotMeasured { .. }))
+                .count()
+        })
+}
+
+/// The register to keep after an utterance in which `measured` syllables were measured (R38).
+fn register_update(a: &Analysis, measured: usize) -> Register {
+    match (a.register_source, measured) {
+        // Nothing to learn from: a given register stays as it is, and a cold start has no
+        // syllables behind it, whatever its count says.
+        (RegisterSource::Given, 0) => a.register.clone(),
+        (RegisterSource::ColdStart, 0) => Register {
+            n_syllables: 0,
+            ..a.register.clone()
+        },
+        // Never merge a cold register into the utterance it was estimated from.
+        (RegisterSource::ColdStart, _) => a.register.clone(),
+        (RegisterSource::Given, u) => merge_register(&a.register, &a.voiced_st, count(u)),
     }
 }
 
