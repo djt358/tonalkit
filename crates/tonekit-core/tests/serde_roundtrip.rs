@@ -308,7 +308,7 @@ fn assess_error_messages_and_roundtrip() {
     assert_eq!(AssessError::EmptyAudio.to_string(), "audio is empty");
     assert_eq!(
         AssessError::UnsupportedSampleRate { got: 44_100 }.to_string(),
-        "unsupported sample rate 44100 Hz (expected 16000 Hz)"
+        format!("unsupported sample rate 44100 Hz (expected {SAMPLE_RATE} Hz)")
     );
     assert_eq!(
         AssessError::EvidenceLengthMismatch {

@@ -114,6 +114,20 @@ impl Calibration {
                 return invalid(format!("calibration {name} must be finite, got {v}"));
             }
         }
+        // Both are penalties (finite, checked above): a positive value would reward skipped or
+        // unmeasurable syllables.
+        let penalties = [
+            ("decode.unvoiced_syllable_llr", d.unvoiced_syllable_llr),
+            ("decode.insertion_llr", d.insertion_llr),
+        ];
+        for (name, v) in penalties {
+            if v > 0.0 {
+                return invalid(format!(
+                    "calibration {name} must be <= 0 (a positive value would reward skipped or \
+                     unmeasurable syllables), got {v}"
+                ));
+            }
+        }
         let positive = [
             ("temperature", self.temperature),
             ("decode.dur_sigma", d.dur_sigma),
