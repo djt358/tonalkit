@@ -14,7 +14,7 @@ import tonekit_py
 from scipy.io import wavfile
 from support import RATE, gate_corpus, make_clip
 
-from tonekit_harness import evaluate, manifest, metrics
+from tonekit_harness import evaluate, manifest, metrics, report
 from tonekit_harness.evaluate import EvalError, Result
 
 PACKS = Path(__file__).resolve().parents[2] / "packs" / "cmn"
@@ -78,10 +78,22 @@ def test_the_synthetic_correct_clips_are_measured(results):
     assert all(s.measured != "NotMeasured" for r in correct for s in r.syllables)
 
 
-def test_results_feed_the_gate(results):
+def test_results_feed_the_gate_and_the_report(results, tmp_path):
     gate = metrics.loo_gate(results)
     assert set(gate.thresholds) == {"gate-01", "gate-02"}
     assert len(gate.outcomes) == 2
+    theta = gate.median_threshold
+    out = tmp_path / "reports" / "gate.md"
+    report.write(
+        out,
+        gate,
+        metrics.candidate_id_accuracy(results),
+        metrics.count_robustness(results, theta),
+        metrics.failures(results, gate, theta),
+    )
+    text = out.read_text(encoding="utf-8")
+    assert f"S1: {'PASS' if gate.passed else 'FAIL'}" in text
+    assert "gate-01" in text and "gate-02" in text
 
 
 def test_the_request_names_the_accent_and_distractors(corpus, pack_toml, calib_json, tmp_path):

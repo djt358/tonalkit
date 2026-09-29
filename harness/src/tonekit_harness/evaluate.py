@@ -9,10 +9,12 @@ clips is analysed cold, clip by clip.
 
 from __future__ import annotations
 
+import argparse
 import hashlib
 import io
 import json
 import os
+import sys
 import tomllib
 import warnings
 from dataclasses import dataclass, field
@@ -25,7 +27,8 @@ import tonekit_py
 from scipy.io import wavfile
 
 from .ingest import TARGET_SR, _to_float32
-from .manifest import Clip, to_candidate_json
+from . import manifest, metrics, report
+from .manifest import Clip, ManifestError, to_candidate_json
 
 # harness/.cache/analysis, next to src/ (the directory is gitignored)
 DEFAULT_CACHE_DIR = Path(__file__).resolve().parents[2] / ".cache" / "analysis"
@@ -171,9 +174,11 @@ class _Grader:
 
     def analysis(self, clip: Clip, register_json: str | None) -> str:
         wav, pcm = _read_wav(clip, self.root)
-        entry = None if self.cache_dir is None else self.cache_dir / f"{_cache_key(wav, register_json)}.json"
-        if entry is not None and (text := _read_cached(entry)) is not None:
-            return text
+        entry = None
+        if self.cache_dir is not None:
+            entry = self.cache_dir / f"{_cache_key(wav, register_json)}.json"
+            if (text := _read_cached(entry)) is not None:
+                return text
         try:
             text = tonekit_py.analyze(pcm, TARGET_SR, register_json)
         except ValueError as e:
@@ -234,14 +239,14 @@ def run(
     accent: str | None,
     *,
     root: str | Path = ".",
-    cache_dir: str | Path | None = DEFAULT_CACHE_DIR,
+    cache_dir: str | Path | None = None,
     use_cache: bool = True,
 ) -> list[Result]:
     """Grade `clips`, returning one `Result` per clip in the same order.
 
     `accent` defaults to the pack's `base_accent`. Each clip's `path` is relative to `root`.
-    Analyses are cached under `cache_dir` unless `use_cache` is false. Raises `EvalError` (naming
-    the clip) if a clip cannot be read or graded.
+    Analyses are cached under `cache_dir` (default `DEFAULT_CACHE_DIR`) unless `use_cache` is
+    false. Raises `EvalError` (naming the clip) if a clip cannot be read or graded.
     """
     seen: set[str] = set()
     for clip in clips:
@@ -254,7 +259,7 @@ def run(
         calib_json=calib_json,
         accent=accent or _base_accent(pack_toml),
         root=Path(root),
-        cache_dir=Path(cache_dir) if use_cache and cache_dir is not None else None,
+        cache_dir=Path(cache_dir or DEFAULT_CACHE_DIR) if use_cache else None,
     )
 
     by_id: dict[str, Result] = {}
@@ -273,3 +278,68 @@ def run(
         if clip.id not in by_id:
             by_id[clip.id] = grader.grade(clip, registers[clip.speaker])[0]
     return [by_id[c.id] for c in clips]
+
+
+# ---- tkh eval ---------------------------------------------------------------------------------
+
+
+def _run(args: argparse.Namespace) -> int:
+    manifest_path = Path(args.manifest)
+    try:
+        clips = manifest.load(manifest_path)
+        pack_toml = Path(args.pack).read_text(encoding="utf-8")
+        calib_json = Path(args.calib).read_text(encoding="utf-8") if args.calib else None
+        results = run(
+            clips,
+            pack_toml,
+            calib_json,
+            args.accent,
+            root=manifest_path.parent,  # clip paths are relative to the manifest's directory
+            use_cache=not args.no_cache,
+        )
+        gate = metrics.loo_gate(results)
+    except (ManifestError, EvalError, metrics.MetricsError, OSError) as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 1
+
+    theta = gate.median_threshold
+    n_minimal = sum(c.set == "diag_minimal" for c in clips)
+    n_count = sum(c.set == "diag_count" for c in clips)
+    per_set = {name: sum(c.set == name for c in clips) for name in dict.fromkeys(c.set for c in clips)}
+    try:
+        version = metadata.version("tonekit-py")
+    except metadata.PackageNotFoundError:
+        version = "unknown"
+    report.write(
+        args.report,
+        gate,
+        metrics.candidate_id_accuracy(results),
+        metrics.count_robustness(results, theta),
+        metrics.failures(results, gate, theta),
+        n_minimal=n_minimal,
+        n_count=n_count,
+        context={
+            "manifest": str(args.manifest),
+            "pack": str(args.pack),
+            "calibration": str(args.calib) if args.calib else "the pack's own",
+            "accent": args.accent or "the pack's base accent",
+            "clips": ", ".join(f"{name} {n}" for name, n in per_set.items()),
+            "tonekit-py": version,
+        },
+    )
+    verdict = "PASS" if gate.passed else "FAIL"
+    print(f"S1: {verdict} (CA {gate.ca:.3f}, WA {gate.wa:.3f}); report written to {args.report}")
+    return 0
+
+
+def register(subparsers) -> None:
+    p = subparsers.add_parser(
+        "eval", help="grade the corpus, compute the leave-one-pair-out gate and write a report"
+    )
+    p.add_argument("--manifest", required=True, help="corpus manifest (JSONL)")
+    p.add_argument("--pack", required=True, help="language pack TOML (e.g. packs/cmn/cmn.toml)")
+    p.add_argument("--calib", help="calibration JSON (default: the pack's own)")
+    p.add_argument("--accent", help="accent to grade against (default: the pack's base accent)")
+    p.add_argument("--report", required=True, help="markdown report to write")
+    p.add_argument("--no-cache", action="store_true", help="neither read nor write the analysis cache")
+    p.set_defaults(func=_run)
