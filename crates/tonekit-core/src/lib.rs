@@ -2,6 +2,11 @@
 
 #![forbid(unsafe_code)]
 
+// With the `ffi` feature the exported types derive UniFFI's traits (Swift bindings, Task 12).
+// `crate::UniFfiTag` is what those derives are generic over, so the crate needs its own scaffolding.
+#[cfg(feature = "ffi")]
+uniffi::setup_scaffolding!();
+
 mod analysis;
 mod decode;
 mod error;

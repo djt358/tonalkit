@@ -12,6 +12,7 @@ use tonekit_shape::merge_register;
 
 /// What to grade. Owned and serialisable, so it crosses the FFI and JSON boundaries as it is.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ffi", derive(uniffi::Record))]
 pub struct AssessRequest {
     /// The accent (and optional imprint style) the speaker is graded against.
     pub grading: GradingTarget,
@@ -20,14 +21,17 @@ pub struct AssessRequest {
     /// Other readings it might be mistaken for; they compete with `intended` for `intended_rank`
     /// and `margin_llr`. Optional in JSON (default: none).
     #[serde(default)]
+    #[cfg_attr(feature = "ffi", uniffi(default = []))]
     pub distractors: Vec<Candidate>,
     /// Transcript or neural evidence about `intended`: empty, or one list per syllable. Optional
     /// in JSON (default: none).
     #[serde(default)]
+    #[cfg_attr(feature = "ffi", uniffi(default = []))]
     pub external: Vec<Vec<Evidence>>,
     /// Accents to report `accent_fit` for; nothing is reported for any other. Optional in JSON
     /// (default: none).
     #[serde(default)]
+    #[cfg_attr(feature = "ffi", uniffi(default = []))]
     pub compare_accents: Vec<AccentId>,
 }
 

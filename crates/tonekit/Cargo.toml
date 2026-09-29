@@ -6,6 +6,12 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 
+[features]
+# UniFFI derive on `AssessRequest` and the `ffi` feature of tonekit-core, for the Swift bindings in
+# `tonekit-ffi`. Off by default: the CLI, the Python module and plain library users compile no
+# UniFFI code.
+ffi = ["tonekit-core/ffi", "dep:uniffi"]
+
 [dependencies]
 tonekit-core = { path = "../tonekit-core" }
 tonekit-decode = { path = "../tonekit-decode" }
@@ -15,6 +21,7 @@ tonekit-pack = { path = "../tonekit-pack" }
 tonekit-segment = { path = "../tonekit-segment" }
 tonekit-shape = { path = "../tonekit-shape" }
 serde = { workspace = true }
+uniffi = { version = "0.32", default-features = false, optional = true }
 
 [dev-dependencies]
 tonekit-testkit = { path = "../tonekit-testkit" }

@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use crate::ids::ToneId;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ffi", derive(uniffi::Enum))]
 pub enum MeasureIssue {
     Unvoiced,
     LowSnr,
@@ -14,6 +15,7 @@ pub enum MeasureIssue {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ffi", derive(uniffi::Enum))]
 pub enum Measured {
     Full,
     Partial { issues: Vec<MeasureIssue> },
@@ -22,6 +24,7 @@ pub enum Measured {
 
 /// Advice direction ("start higher"). `amount` is in Chao units, or ms for `Turn*`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ffi", derive(uniffi::Enum))]
 pub enum DeltaKind {
     StartHigher,
     StartLower,
@@ -34,12 +37,14 @@ pub enum DeltaKind {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ffi", derive(uniffi::Record))]
 pub struct ShapeDelta {
     pub kind: DeltaKind,
     pub amount: f32,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ffi", derive(uniffi::Record))]
 pub struct ToneJudgement {
     pub expected: ToneId,
     /// Calibrated, per inventory tone, in context.
