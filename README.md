@@ -9,8 +9,9 @@ and the plan is in [`docs/superpowers/plans/`](docs/superpowers/plans/2026-09-28
 
 ## Scope
 
-- Input is 16 kHz mono PCM. Everything runs locally: there is no network access, and PCM is
-  discarded after analysis.
+- Input is 16 kHz mono PCM. Everything runs locally: there is no network access. tonekit keeps no
+  audio: it returns results and drops the samples; apps should discard recordings unless the user
+  explicitly saves a clip (spec §11.3).
 - The output is a distance and a likelihood, not a classification, plus advice such as "start
   higher".
 - Languages, accents and speaker styles are data (packs), not code.
