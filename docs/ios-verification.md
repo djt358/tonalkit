@@ -76,7 +76,7 @@ Test Suite 'SmokeTests' passed at ...
 
 `testSpokenFixtureMatchesCli` is the one that matters: it decodes the fixture WAV with
 `AVAudioFile`, runs `analyze` and `assess` through the generated Swift on the Simulator, and
-requires `overall` (0.728), every syllable's `pCorrect` (0.728, 0.734, 0.770) and `intendedRank`
+requires `overall` (0.730), every syllable's `pCorrect` (0.730, 0.734, 0.770) and `intendedRank`
 (1) to match the CLI's JSON within 1e-4.
 
 ## The number to report back

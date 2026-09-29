@@ -2,11 +2,11 @@
   "schema": "tonekit.assessment.v1",
   "intended": "intended",
   "intended_rank": 1,
-  "margin_llr": 1.9614017,
+  "margin_llr": 1.957206,
   "syllables": [
     {
       "expected": "4",
-      "p_correct": 0.7279736,
+      "p_correct": 0.73032373,
       "distance": 0.6191196,
       "heard": "4",
       "heard_as": null,
@@ -30,7 +30,7 @@
     },
     {
       "expected": "1",
-      "p_correct": 0.7342802,
+      "p_correct": 0.7338126,
       "distance": 0.6612639,
       "heard": "1",
       "heard_as": null,
@@ -67,7 +67,7 @@
       ]
     }
   ],
-  "overall": 0.7279736,
+  "overall": 0.73032373,
   "accent_fit": [],
   "register_update": {
     "floor_st": 9.039957,
