@@ -50,7 +50,9 @@ def json_max_diff(want, got, tol: float = TOLERANCE, path: str = "$") -> float:
 
 def grade_fixture(pcm, pack_toml, calib_json) -> dict:
     analysis_json = tonekit_py.analyze(pcm, RATE)
-    assessment_json = tonekit_py.assess(analysis_json, pack_toml, calib_json, json.dumps(request_413()))
+    assessment_json = tonekit_py.assess(
+        analysis_json, pack_toml, calib_json, json.dumps(request_413())
+    )
     return json.loads(assessment_json)
 
 

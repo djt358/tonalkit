@@ -129,6 +129,23 @@ def test_analyze_refuses_a_buffer_in_the_other_byte_order(pcm):
         tonekit_py.analyze(swapped64, RATE)
 
 
+@pytest.mark.parametrize(
+    "samples",
+    [
+        pytest.param(np.zeros(16_000, dtype=np.float32), id="silence"),
+        pytest.param(np.full(16_000, np.nan, dtype=np.float32), id="NaN samples"),
+        pytest.param(np.full(16_000, np.inf, dtype=np.float32), id="infinite samples"),
+        pytest.param(np.array([0.5], dtype=np.float32), id="a single sample"),
+    ],
+)
+def test_audio_with_no_speech_is_analysed_not_rejected(samples, pack_toml, calib_json):
+    """Nothing to measure is not an error: every syllable of the assessment is NotMeasured."""
+    analysis_json = tonekit_py.analyze(samples, RATE)
+    got = assess_413(analysis_json, pack_toml, calib_json)
+    assert got["overall"] is None
+    assert all("NotMeasured" in s["measured"] for s in got["syllables"])
+
+
 # ---- errors are ValueError ------------------------------------------------------------------
 
 
@@ -149,10 +166,16 @@ def test_a_bad_pack_is_a_value_error(analysis_json, calib_json):
     with pytest.raises(ValueError, match="pack"):
         tonekit_py.assess(analysis_json, "this is [not toml", calib_json, request)
     with pytest.raises(ValueError, match="pack"):
-        tonekit_py.lattice(analysis_json, "this is [not toml", calib_json, json.dumps(standard_grading()))
+        tonekit_py.lattice(
+            analysis_json, "this is [not toml", calib_json, json.dumps(standard_grading())
+        )
     with pytest.raises(ValueError, match="pack"):
         tonekit_py.decode(
-            analysis_json, "", None, json.dumps(standard_grading()), json.dumps([candidate("a", ["1"])])
+            analysis_json,
+            "",
+            None,
+            json.dumps(standard_grading()),
+            json.dumps([candidate("a", ["1"])]),
         )
 
 
@@ -183,7 +206,9 @@ def test_assess_errors_carry_the_assess_error_text(analysis_json, pack_toml, cal
         tonekit_py.assess(analysis_json, pack_toml, calib_json, json.dumps(accent))
 
 
-def test_malformed_json_is_a_value_error_that_names_the_argument(pcm, analysis_json, pack_toml, calib_json):
+def test_malformed_json_is_a_value_error_that_names_the_argument(
+    pcm, analysis_json, pack_toml, calib_json
+):
     request = json.dumps(request_413())
     grading = json.dumps(standard_grading())
     with pytest.raises(ValueError, match="analysis_json"):
@@ -209,7 +234,11 @@ def test_decode_ranks_the_candidates(analysis_json, pack_toml, calib_json):
     candidates = [candidate("wrong", ["1", "4", "2"]), candidate("right", ["4", "1", "3"])]
     decoded = json.loads(
         tonekit_py.decode(
-            analysis_json, pack_toml, calib_json, json.dumps(standard_grading()), json.dumps(candidates)
+            analysis_json,
+            pack_toml,
+            calib_json,
+            json.dumps(standard_grading()),
+            json.dumps(candidates),
         )
     )
     ranked = decoded["candidates"]
@@ -238,7 +267,9 @@ def test_the_calibration_is_optional(analysis_json, pack_toml):
     lattice = json.loads(tonekit_py.lattice(analysis_json, pack_toml, None, grading))
     assert lattice["schema"] == "tonekit.lattice.v1"
     decoded = json.loads(
-        tonekit_py.decode(analysis_json, pack_toml, None, grading, json.dumps([candidate("a", ["4", "1", "3"])]))
+        tonekit_py.decode(
+            analysis_json, pack_toml, None, grading, json.dumps([candidate("a", ["4", "1", "3"])])
+        )
     )
     assert decoded["candidates"][0]["id"] == "a"
     assessed = assess_413(analysis_json, pack_toml, None)

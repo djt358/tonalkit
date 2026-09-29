@@ -10,7 +10,9 @@
 //! - The language pack goes in as its TOML text and, optionally, its calibration JSON.
 //! - Failures (an `AssessError`, a pack the library rejects, JSON that does not parse) raise
 //!   `ValueError` with the error's message; a container that is not audio raises `TypeError`.
-//!   Nothing panics across the boundary.
+//!   The facade reports bad input as errors, not panics (silence, NaN samples and inconsistent
+//!   analyses included); a panic it did make would reach Python as an exception, never abort the
+//!   interpreter.
 //! - The GIL is released while Rust computes, so Python threads can run alongside.
 
 // No unsafe code of our own. (`forbid` is not possible: PyO3's macros expand to unsafe.)
