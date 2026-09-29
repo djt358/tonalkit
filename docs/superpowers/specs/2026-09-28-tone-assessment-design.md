@@ -262,7 +262,7 @@ pub struct SyllableAssessment { pub expected: ToneId, pub p_correct: f32, pub di
     pub component: Option<String>, pub measured: Measured, pub basis: Vec<EvidenceKind> }
 pub struct AccentFit { pub accent: AccentId, pub llr: f32 }
 pub struct UtteranceAssessment { pub schema: String, pub intended: CandidateId, pub intended_rank: u32,
-    pub margin_llr: f32,   // intended llr − max(best other candidate llr, null_llr)
+    pub margin_llr: f32,   // intended llr − max(best other candidate llr, null_llr + null_bias)
     pub syllables: Vec<SyllableAssessment>,
     pub overall: Option<f32>,          // None when no syllable has tone evidence ("tone not checked")
     pub accent_fit: Vec<AccentFit>, pub register_update: Register }
@@ -620,7 +620,9 @@ to a literal GAN.
     `w = min(0.5, u/(n+u))`, where u = syllables this utterance and n = syllables so far.
   - Cold start (no register given): use utterance percentiles widened by ±2 st, and flag
     `ColdStartRegister` until n ≥ 30.
-  - Bendy persists it per user; an optional 妈麻马骂 onboarding utterance seeds it.
+  - Bendy persists it per user; an optional 妈麻马骂 onboarding utterance seeds it. Only syllables
+    that were measured count as u, so a whispered or silent cast leaves a given register
+    unchanged; consumers persist `register_update` only if `n_syllables > 0`.
   - It's never inferred from anything but the user's own f0.
 
 ---

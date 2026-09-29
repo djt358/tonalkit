@@ -108,12 +108,30 @@ fn register() -> Register {
     }
 }
 
+/// [`run_biased`] with a null bias of 0, so the null competitor's score is its raw `null_llr`.
 fn run(
     r: &DecodeResult,
     intended: &str,
     external: &[Vec<Evidence>],
 ) -> Result<tonekit_core::UtteranceAssessment, AssessError> {
-    assemble(r, &id(intended), external, &seed(), vec![], register())
+    run_biased(r, intended, external, 0.0)
+}
+
+fn run_biased(
+    r: &DecodeResult,
+    intended: &str,
+    external: &[Vec<Evidence>],
+    null_bias: f32,
+) -> Result<tonekit_core::UtteranceAssessment, AssessError> {
+    assemble(
+        r,
+        &id(intended),
+        external,
+        &seed(),
+        null_bias,
+        vec![],
+        register(),
+    )
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -203,10 +221,14 @@ fn rank_and_margin() {
         ],
         0.5,
     );
-    let out = run(&r, "mine", &[]).unwrap();
+    let out = run_biased(&r, "mine", &[], -2.0).unwrap();
     assert_eq!(out.intended_rank, 2);
+    // Best rival is "other" (3.0); the null scores 0.5 - 2.0 = -1.5 and does not matter.
     assert_abs_diff_eq!(out.margin_llr, -2.0, epsilon = 1e-6);
     assert_eq!(out.intended, id("mine"));
+    // A bias that lifts the null above "other" (0.5 + 3.0 = 3.5) takes over as the rival.
+    let out = run_biased(&r, "mine", &[], 3.0).unwrap();
+    assert_abs_diff_eq!(out.margin_llr, -2.5, epsilon = 1e-6);
 }
 
 #[test]
@@ -515,7 +537,16 @@ fn assemble_fills_the_envelope() {
             llr: -0.5,
         },
     ];
-    let out = assemble(&r, &id("a"), &[], &seed(), accents.clone(), register()).unwrap();
+    let out = assemble(
+        &r,
+        &id("a"),
+        &[],
+        &seed(),
+        -2.0,
+        accents.clone(),
+        register(),
+    )
+    .unwrap();
     assert_eq!(out.schema, "tonekit.assessment.v1");
     assert_eq!(out.intended, id("a"));
     assert_eq!(out.accent_fit, accents);
@@ -546,6 +577,12 @@ fn margin_is_against_the_best_other_candidate_or_null() {
     // The null competitor wins over a weaker rival ...
     let r = decoded(vec![mk("a", 4.0), mk("b", 1.0)], 2.5);
     assert_abs_diff_eq!(run(&r, "a", &[]).unwrap().margin_llr, 1.5, epsilon = 1e-6);
+    // ... by its biased score: 2.5 - 2.0 = 0.5 is below "b" (1.0), which is then the rival.
+    assert_abs_diff_eq!(
+        run_biased(&r, "a", &[], -2.0).unwrap().margin_llr,
+        3.0,
+        epsilon = 1e-6
+    );
     // ... and a negative null_llr does not lift a below-null margin.
     let r = decoded(vec![mk("a", 4.0), mk("b", 3.0)], -10.0);
     assert_abs_diff_eq!(run(&r, "a", &[]).unwrap().margin_llr, 1.0, epsilon = 1e-6);
@@ -557,6 +594,26 @@ fn margin_with_no_other_candidates_is_against_null() {
     let out = run(&r, "a", &[]).unwrap();
     assert_eq!(out.intended_rank, 1);
     assert_abs_diff_eq!(out.margin_llr, 1.5, epsilon = 1e-6);
+    // With the seed bias the null scores 0.5 - 2.0 = -1.5.
+    let out = run_biased(&r, "a", &[], -2.0).unwrap();
+    assert_abs_diff_eq!(out.margin_llr, 3.5, epsilon = 1e-6);
+}
+
+#[test]
+fn a_correct_single_candidate_reading_has_a_positive_margin() {
+    // R37. The null is the best free choice of tones, so an intended reading that is right can
+    // only come within a whisker of `null_llr` (here 0.03 under it); against the raw null its
+    // margin is negative, against the biased null (`null_llr + null_bias`) it is clearly positive.
+    let r = decoded(vec![cand("a", 4.29, vec![fit(1.0, Measured::Full)])], 4.32);
+    let raw = run(&r, "a", &[]).unwrap();
+    assert!(raw.margin_llr < 0.0, "raw-null margin {}", raw.margin_llr);
+    let biased = run_biased(&r, "a", &[], -2.0).unwrap();
+    assert!(
+        biased.margin_llr > 0.0,
+        "biased margin {}",
+        biased.margin_llr
+    );
+    assert_abs_diff_eq!(biased.margin_llr, 4.29 - (4.32 - 2.0), epsilon = 1e-5);
 }
 
 #[test]

@@ -68,7 +68,7 @@ pub struct UtteranceAssessment {
     pub schema: String,
     pub intended: CandidateId,
     pub intended_rank: u32,
-    /// Intended llr − max(best other candidate llr, null_llr).
+    /// Intended llr − max(best other candidate llr, null_llr + null_bias).
     pub margin_llr: f32,
     pub syllables: Vec<SyllableAssessment>,
     /// `None` when no syllable was measured ("tone not checked").

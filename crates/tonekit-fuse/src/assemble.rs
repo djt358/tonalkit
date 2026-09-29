@@ -20,8 +20,11 @@ fn as_u32(n: usize) -> u32 {
 ///   syllable of the intended candidate; anything else is [`AssessError::EvidenceLengthMismatch`].
 /// - `intended` must be one of `r.candidates`, otherwise [`AssessError::Pack`].
 /// - `intended_rank` is the 1-based position in `r.candidates`, which is sorted by llr descending.
-/// - `margin_llr` is the intended llr minus the larger of the best other candidate's llr and
-///   `r.null_llr`; with no other candidates it is the intended llr minus `r.null_llr`.
+/// - `margin_llr` is the intended llr minus the larger of the best other candidate's llr and the
+///   null competitor's score `r.null_llr + null_bias` (the same biased score the decode's posterior
+///   softmax gives the null, ruling R37); with no other candidates it is the intended llr minus
+///   that null score. Against the raw `null_llr` a reading could at most tie (the null is the
+///   best free choice of tones), so a correct reading's margin would sit at or below 0.
 /// - `overall` is the minimum `p_correct` over the syllables that count: those that were measured
 ///   (`Full` or `Partial`) and those that carry a confusion hit (`heard_as` is `Some`), even if
 ///   unmeasured, because a hit is a specific miss and the veto has already capped its `p_correct`.
@@ -31,6 +34,7 @@ pub fn assemble(
     intended: &CandidateId,
     external: &[Vec<Evidence>],
     w: &FusionWeights,
+    null_bias: f32,
     accent_fit: Vec<AccentFit>,
     register_update: Register,
 ) -> Result<UtteranceAssessment, AssessError> {
@@ -63,7 +67,7 @@ pub fn assemble(
         .enumerate()
         .filter(|&(i, _)| i != idx)
         .map(|(_, c)| c.llr)
-        .fold(r.null_llr, f32::max);
+        .fold(r.null_llr + null_bias, f32::max);
 
     let overall = syllables
         .iter()
