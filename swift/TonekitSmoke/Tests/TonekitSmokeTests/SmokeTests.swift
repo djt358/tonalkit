@@ -6,8 +6,10 @@
 // Comparisons are within 1e-4 (ruling R41): another platform's libm may move the last bits.
 //
 // The fixture pair and the pack are test resources that scripts/build-xcframework.sh copies from
-// fixtures/ and packs/cmn/. If a resource is missing from the bundle, the tests fall back to the
-// repository copy next to this source file.
+// fixtures/ and packs/cmn/. The package needs the Resources/ directory to exist to compile
+// (`resources: [.copy("Resources")]`), so it only exists after that script has run. The
+// `#filePath` fallback below helps only when that directory exists but a single file is missing
+// from the bundle: the tests then read the repository copy next to this source file.
 
 import AVFoundation
 import Foundation

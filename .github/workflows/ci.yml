@@ -62,6 +62,7 @@ jobs:
   # the Swift tests in swift/TonekitSmoke against it.
   ios:
     runs-on: macos-14
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -73,15 +74,23 @@ jobs:
         working-directory: swift/TonekitSmoke
         run: |
           set -o pipefail
+          destination='platform=iOS Simulator,name=iPhone 15'
+          log=../../build/xcodebuild-test.log
           # SwiftPM names the scheme after the library product; if this Xcode only offers the
           # package-wide scheme, use that.
           scheme=TonekitSmoke
           schemes=$(xcodebuild -list)
           grep -Eq '^[[:space:]]+TonekitSmoke$' <<<"$schemes" || scheme=TonekitSmoke-Package
           echo "scheme: $scheme"
-          xcodebuild test -scheme "$scheme" \
-            -destination 'platform=iOS Simulator,name=iPhone 15' \
-            | tee ../../build/xcodebuild-test.log
+          if ! xcodebuild test -scheme "$scheme" -destination "$destination" | tee "$log"; then
+            # The library scheme can be listed yet not testable ("not configured for the test
+            # action"); the package-wide scheme then still runs the tests. Both attempts stay in
+            # the log.
+            [ "$scheme" = TonekitSmoke ] || exit 1
+            echo "::warning::xcodebuild test -scheme TonekitSmoke failed; retrying with TonekitSmoke-Package"
+            echo "=== retry: -scheme TonekitSmoke-Package ===" | tee -a "$log"
+            xcodebuild test -scheme TonekitSmoke-Package -destination "$destination" | tee -a "$log"
+          fi
       - name: Latency on the Simulator (informational)
         if: always()
         run: grep -E 'measured \[Time|TONEKIT_LATENCY' build/xcodebuild-test.log || true
