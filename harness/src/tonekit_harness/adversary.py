@@ -62,6 +62,8 @@ def search(
     deterministic in `seed`. A trial in which tonekit raises is counted as failed and skipped."""
     if not sources:
         raise SynthError("no sources to search")
+    if n_trials < 0:
+        raise SynthError(f"n_trials must not be negative, not {n_trials}")
     pool = families.searched(("tone_error", "correct"))
     resolved = families.resolve_pool_bounds(pool, bounds)
     rng = np.random.default_rng(seed)

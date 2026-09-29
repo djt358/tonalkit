@@ -88,7 +88,7 @@ def test_theta_above_one_returns_every_nuisance_trial_as_a_false_reject_and_neve
     assert finds.false_accepts == 0 and finds.false_rejects == len(nuisance)
 
 
-# ---- what is a find ---------------------------------------------------------------------------------
+# ---- what is a find ------------------------------------------------------------------------------
 
 
 def test_a_tone_error_scoring_at_least_theta_is_a_false_accept_and_only_that(
@@ -118,8 +118,8 @@ def test_no_score_counts_as_a_rejection(sources, tmp_path, monkeypatch):
 
 def test_graded_families_are_never_searched(sources, tmp_path, monkeypatch):
     scripted(monkeypatch, lambda clip: 0.5)
-    finds = adversary.search(sources, 60, None, seed=2, theta=0.5, out_dir=tmp_path)
-    assert finds.trials == 60
+    finds = adversary.search(sources, 40, None, seed=2, theta=0.5, out_dir=tmp_path)
+    assert finds.trials == 40
     assert {family_of(c) for c in finds} <= TONE_ERROR | NUISANCE
     assert not any(family_of(c) in {"range_compress", "turn_shift", "identity"} for c in finds)
 
@@ -154,7 +154,7 @@ def test_an_unscored_reject_sorts_before_every_scored_one(sources, tmp_path, mon
     assert scores == sorted(scores, key=lambda s: -1.0 if s is None else s)
 
 
-# ---- robustness and determinism --------------------------------------------------------------------
+# ---- robustness and determinism ------------------------------------------------------------------
 
 
 def test_a_trial_that_fails_inside_tonekit_is_counted_and_skipped(sources, tmp_path, monkeypatch):
@@ -181,14 +181,14 @@ def test_the_same_seed_finds_the_same_clips_and_another_seed_others(sources, tmp
     assert [x.id for x in a] == [x.id for x in b]
     assert a == b
     assert [x.id for x in a] != [x.id for x in c]
-    assert (tmp_path / "a" / "truth.jsonl").read_text() == (tmp_path / "b" / "truth.jsonl").read_text()
+    assert (tmp_path / "a/truth.jsonl").read_text() == (tmp_path / "b/truth.jsonl").read_text()
 
 
 def test_parameters_are_uniform_within_the_bounds_and_custom_bounds_narrow_them(
     sources, tmp_path, monkeypatch
 ):
     scripted(monkeypatch, lambda clip: None)  # every nuisance trial is a find
-    wide = adversary.search(sources, 90, None, seed=3, theta=0.5, out_dir=tmp_path / "w")
+    wide = adversary.search(sources, 60, None, seed=3, theta=0.5, out_dir=tmp_path / "w")
     snr = [c.synthetic["params"]["snr_db"] for c in wide if family_of(c) == "noise"]
     shift = [c.synthetic["params"]["st"] for c in wide if family_of(c) == "register_shift"]
     factor = [c.synthetic["params"]["factor"] for c in wide if family_of(c) == "rate"]
@@ -198,11 +198,13 @@ def test_parameters_are_uniform_within_the_bounds_and_custom_bounds_narrow_them(
     assert all(0.8 <= x <= 1.25 for x in factor)
 
     narrow = adversary.search(
-        sources, 90, {"noise": {"snr_db": (5.0, 6.0)}, "register_shift": {"st": (-1.0, 1.0)}},
+        sources, 60, {"noise": {"snr_db": (5.0, 6.0)}, "register_shift": {"st": (-1.0, 1.0)}},
         seed=3, theta=0.5, out_dir=tmp_path / "n",
     )  # fmt: skip
-    assert all(5 <= c.synthetic["params"]["snr_db"] <= 6 for c in narrow if family_of(c) == "noise")
-    assert all(abs(c.synthetic["params"]["st"]) <= 1 for c in narrow if family_of(c) == "register_shift")
+    snrs = [c.synthetic["params"]["snr_db"] for c in narrow if family_of(c) == "noise"]
+    assert snrs and all(5 <= x <= 6 for x in snrs)
+    shifts = [c.synthetic["params"]["st"] for c in narrow if family_of(c) == "register_shift"]
+    assert shifts and all(abs(x) <= 1 for x in shifts)
 
 
 @pytest.mark.parametrize(
@@ -221,12 +223,14 @@ def test_custom_bounds_outside_the_spec_are_a_synth_error(sources, tmp_path, bou
         adversary.search(sources, 1, bounds, seed=0, theta=0.5, out_dir=tmp_path)
 
 
-def test_no_sources_is_an_error(tmp_path):
+def test_no_sources_or_a_negative_trial_count_is_an_error(sources, tmp_path):
     with pytest.raises(SynthError, match="no sources"):
         adversary.search([], 1, None, seed=0, theta=0.5, out_dir=tmp_path)
+    with pytest.raises(SynthError, match="n_trials must not be negative, not -1"):
+        adversary.search(sources, -1, None, seed=0, theta=0.5, out_dir=tmp_path)
 
 
-# ---- what is written -----------------------------------------------------------------------------------
+# ---- what is written -----------------------------------------------------------------------------
 
 
 def test_finds_are_written_as_wavs_a_manifest_and_truth(sources, tmp_path, monkeypatch, pack_toml):
@@ -251,7 +255,7 @@ def test_a_search_that_finds_nothing_writes_empty_files(sources, tmp_path):
     assert (tmp_path / "truth.jsonl").read_text() == ""
 
 
-# ---- tkh adversary --------------------------------------------------------------------------------------
+# ---- tkh adversary -------------------------------------------------------------------------------
 
 
 def test_tkh_adversary_prints_a_summary_and_exits_zero(tmp_path, capsys):

@@ -23,9 +23,9 @@ import numpy as np
 HOP_MS = 10.0
 
 # The neutral tone has no citation contour of its own (cmn.toml gives it `chao = "context"`), but
-# to perturb one the harness has to draw one: a short fall, as in tests/support.py. Keyed by the
-# pack's language and tone id. It is only ever rendered as the perturbed syllable's *source*
-# contour; no family uses a context tone as its target.
+# to shift the onset or offset of a neutral syllable the harness has to draw one: a short fall, as
+# in tests/support.py. Keyed by the pack's language and tone id. It is only a syllable's own
+# contour; no family uses a context tone as the target `to` of a swap.
 CONTEXT_FALLBACK: dict[tuple[str, str], tuple[float, ...]] = {("cmn", "5"): (3.0, 2.0)}
 
 # A dipping tone produced without its dip: (language, tone) -> (the tone it is heard as, Chao
@@ -155,7 +155,7 @@ def render(
 
 
 def pink_noise(n: int, rng: np.random.Generator) -> np.ndarray:
-    """Unit-RMS pink (1/f power) noise of `n` samples: white noise shaped in the frequency domain."""
+    """Unit-RMS pink (1/f power) noise of `n` samples: white noise shaped in frequency."""
     spectrum = np.fft.rfft(rng.standard_normal(n))
     f = np.arange(len(spectrum), dtype=float)
     f[0] = 1.0
@@ -424,7 +424,8 @@ class TurnShift(_KnotShift):
     bounds = {"ms": Bound(40.0, 120.0, signed=True)}
 
     def syllables(self, voice: Voice) -> list[int]:
-        return [i for i in super().syllables(voice) if len(self.knots(voice, {"index": i})) >= 3]
+        drawable = super().syllables(voice)
+        return [i for i in drawable if len(voice.pack.contour(voice.tones[i])) >= 3]
 
     def contour(self, voice: Voice, p: Mapping) -> np.ndarray:
         knots = self.knots(voice, p)
@@ -476,11 +477,11 @@ class Noise(Family):
         if bed is None:
             noise = pink_noise(len(y), rng)
         else:
-            noise = np.resize(np.roll(bed, -int(rng.integers(len(bed)))), len(y)).astype(np.float64)
-            rms = np.sqrt(np.mean(noise**2))
-            if rms == 0.0:
+            if not np.any(bed):
                 raise self._fail("the noise recording is silent")
-            noise = noise / rms
+            start = int(rng.integers(len(bed)))
+            noise = np.resize(np.roll(bed, -start), len(y)).astype(np.float64)
+            noise = noise / np.sqrt(np.mean(noise**2))
         speech = y[voiced] if voiced.any() else y
         speech_rms = np.sqrt(np.mean(speech.astype(np.float64) ** 2))
         return (y + speech_rms / 10.0 ** (p["snr_db"] / 20.0) * noise).astype(np.float32)

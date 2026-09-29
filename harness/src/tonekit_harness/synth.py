@@ -26,8 +26,6 @@ from .families import PackTones, SynthError, Voice
 from .ingest import TARGET_SR
 from .manifest import Clip, ManifestError
 
-__all__ = ["SynthError", "Source", "prepare", "perturb", "load_sources", "register"]
-
 MIN_VOICED_FRAMES = 5  # a syllable needs this many voiced frames to be redrawn (50 ms)
 MIN_REGISTER_ST = 4.0  # tonekit's minimum register width, expanded symmetrically
 PEAK = 0.99  # tonekit flags a clip with more than 1% of samples at or above this
@@ -93,8 +91,10 @@ def _extents(
         raise evaluate.EvalError(f"{clip.id}: {e}") from e
     syllables = json.loads(decoded)["candidates"][0]["syllables"]
     if len(syllables) != len(clip.intended.tones):
-        raise SynthError(f"{clip.id}: tonekit found {len(syllables)} syllables, not the intended "
-                         f"{len(clip.intended.tones)}")  # fmt: skip
+        raise SynthError(
+            f"{clip.id}: tonekit found {len(syllables)} syllables, "
+            f"not the intended {len(clip.intended.tones)}"
+        )
     extents: list[tuple[int, int] | None] = []
     for syllable in syllables:
         start, end = syllable["span"]["start_frame"], syllable["span"]["end_frame"]
@@ -121,8 +121,9 @@ def prepare(
     if clip.set == "synthetic":
         raise SynthError(f"{clip.id}: a synthetic clip cannot be perturbed again")
     if clip.label != "correct":
-        raise SynthError(f"{clip.id}: labelled {clip.label!r}; only clips labelled 'correct' "
-                         "can be perturbed")  # fmt: skip
+        raise SynthError(
+            f"{clip.id}: labelled {clip.label!r}; only clips labelled 'correct' can be perturbed"
+        )
     if Path(clip.id).name != clip.id or clip.id in {"", ".", ".."}:
         raise SynthError(f"{clip.id!r}: the id must be usable as a file name")
     pack = PackTones.parse(pack_toml)
@@ -136,15 +137,20 @@ def prepare(
     voiced = analysed.f0 > 0
     extents = _extents(clip, pcm, voiced, pack_toml, calib_json, accent) if voiced.any() else []
     if not any(extents):
-        raise SynthError(f"{clip.id}: no syllable with at least {MIN_VOICED_FRAMES} voiced frames "
-                         "to perturb")  # fmt: skip
+        raise SynthError(
+            f"{clip.id}: no syllable with at least {MIN_VOICED_FRAMES} voiced frames to perturb"
+        )
 
     st = _semitones(analysed.f0)
     floor, ceil = register_bounds(st[voiced])
     voice = Voice(
-        tones=tuple(clip.intended.tones), extents=tuple(extents), st=st, floor=floor, ceil=ceil,
+        tones=tuple(clip.intended.tones),
+        extents=tuple(extents),
+        st=st,
+        floor=floor,
+        ceil=ceil,
         pack=pack,
-    )  # fmt: skip
+    )
     return Source(clip, pcm, analysed, voice, pack_toml, calib_json, accent)
 
 
@@ -205,9 +211,8 @@ def perturb(src: Source, family: str, params: dict, seed: int) -> Made:
     st = _resample_f0(st, pos)
     # WORLD is only defined over its own search range, so a large shift or a wide onset is
     # clipped to it (that also keeps the ground truth honest: it is what was synthesised).
-    hz = np.where(
-        np.isnan(st), 0.0, np.clip(55.0 * 2.0 ** (np.nan_to_num(st) / 12.0), world.F0_FLOOR, world.F0_CEIL)
-    )
+    hz = np.clip(55.0 * 2.0 ** (np.nan_to_num(st) / 12.0), world.F0_FLOOR, world.F0_CEIL)
+    hz[np.isnan(st)] = 0.0
     resynth = world.World(
         f0=hz, sp=_resample_rows(src.world.sp, pos), ap=_resample_rows(src.world.ap, pos)
     )
@@ -225,8 +230,11 @@ def perturb(src: Source, family: str, params: dict, seed: int) -> Made:
 def _row(src: Source, fam: families.Family, p: dict, seed: int) -> Clip:
     key = json.dumps({"params": p, "seed": seed}, sort_keys=True, separators=(",", ":"))
     cid = f"{src.clip.id}~{fam.name}~{hashlib.sha256(key.encode()).hexdigest()[:8]}"
-    noise = fam.condition_noise(p)
     produced = fam.produced(src.voice, p)
+    noise = fam.condition_noise(p)
+    condition = src.clip.condition
+    if noise is not None:
+        condition = condition.model_copy(update={"noise": noise})
     return Clip(
         id=cid,
         path=f"wav/{cid}.wav",
@@ -237,8 +245,7 @@ def _row(src: Source, fam: families.Family, p: dict, seed: int) -> Clip:
         intended=src.clip.intended.model_copy(deep=True),
         distractors=[d.model_copy(deep=True) for d in src.clip.distractors],
         produced_tones=src.clip.produced_tones if produced is None else produced,
-        condition=(src.clip.condition if noise is None
-                   else src.clip.condition.model_copy(update={"noise": noise})),  # fmt: skip
+        condition=condition,
         source="synthetic-world",
         synthetic={"from": src.clip.id, "family": fam.name, "params": p, "seed": seed},
     )
@@ -255,10 +262,12 @@ def write_wav(out_dir: str | Path, clip: Clip, audio: np.ndarray) -> None:
 
 
 def write_index(out_dir: str | Path, clips: Sequence[Clip], truths: Sequence[list[float | None]]):
-    """Write `manifest.jsonl` and `truth.jsonl` (`{"id", "f0_hz"}` per clip; null where unvoiced)."""
+    """Write `manifest.jsonl` and `truth.jsonl` (`{"id", "f0_hz"}` per clip, null if unvoiced)."""
     out = Path(out_dir)
     manifest.write(out / "manifest.jsonl", list(clips))
-    lines = (json.dumps({"id": c.id, "f0_hz": f0}) + "\n" for c, f0 in zip(clips, truths))
+    lines = (
+        json.dumps({"id": c.id, "f0_hz": f0}) + "\n" for c, f0 in zip(clips, truths, strict=True)
+    )
     (out / "truth.jsonl").write_text("".join(lines), encoding="utf-8")
 
 
@@ -290,8 +299,13 @@ def load_sources(
     for clip in candidates:
         try:
             sources.append(
-                prepare(clip, root=manifest_path.parent, pack_toml=pack_toml,
-                        calib_json=calib_json, accent=accent)  # fmt: skip
+                prepare(
+                    clip,
+                    root=manifest_path.parent,
+                    pack_toml=pack_toml,
+                    calib_json=calib_json,
+                    accent=accent,
+                )
             )
         except SynthError as e:
             print(f"warning: skipping {e}", file=sys.stderr)
@@ -302,16 +316,20 @@ def load_sources(
 
 def add_source_args(p: argparse.ArgumentParser) -> None:
     """The arguments `tkh synth` and `tkh adversary` share."""
-    p.add_argument("--manifest", required=True, help="corpus manifest (JSONL); its correct clips are the sources")
+    p.add_argument(
+        "--manifest", required=True, help="corpus manifest (JSONL); its correct clips are sources"
+    )
     p.add_argument("--pack", required=True, help="language pack TOML (e.g. packs/cmn/cmn.toml)")
     p.add_argument("--calib", help="calibration JSON (default: the pack's own)")
     p.add_argument("--accent", help="accent to grade against (default: the pack's base accent)")
-    p.add_argument("--out", required=True, help="directory to write the WAVs, manifest and truth to")
+    p.add_argument("--out", required=True, help="directory for the WAVs, manifest and truth")
     p.add_argument("--seed", type=int, default=0, help="random seed (default 0)")
 
 
 def _run(args: argparse.Namespace) -> int:
     try:
+        if args.per_clip < 1:
+            raise SynthError(f"--per-clip must be at least 1, not {args.per_clip}")
         sources = load_sources(args.manifest, args.pack, args.calib, args.accent)
         pool = families.searched(("tone_error", "graded", "correct"))
         bounds = families.resolve_pool_bounds(pool, None)
@@ -325,8 +343,10 @@ def _run(args: argparse.Namespace) -> int:
     except (ManifestError, evaluate.EvalError, SynthError, OSError) as e:
         print(f"error: {e}", file=sys.stderr)
         return 1
-    print(f"synthesised {_plural(len(made), 'clip')} from {_plural(len(sources), 'source')}; "
-          f"written to {args.out}")  # fmt: skip
+    print(
+        f"synthesised {_plural(len(made), 'clip')} from {_plural(len(sources), 'source')}; "
+        f"written to {args.out}"
+    )
     return 0
 
 
