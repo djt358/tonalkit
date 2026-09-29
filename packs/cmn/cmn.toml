@@ -50,10 +50,14 @@ pairs = [["2", "3"], ["1", "4"], ["1", "2"]]
 id = "cmn-standard"
 name = "普通话 (standard)"
 
+# Non-final T3 is usually the half-third (low, falling). The full dip (Chao 2-1-4) is the classic
+# learner over-production in this position, so it stays expected at lower weight (R47): an
+# intended T3 keeps its credit, and a full dip no longer fits T2 better than T3. The weights are
+# not fitted; absolute sharpness is the P1 calibration's job (R48).
 [[accent.realize]]
 label = "t3-half"
 when = { tone = "3", phrase_final = false }
-chao = [2, 1]
+mixture = [ { chao = [2, 1], weight = 0.75 }, { chao = [2, 1, 4], weight = 0.25 } ]
 
 [[accent.realize]]
 label = "t5-after-1"

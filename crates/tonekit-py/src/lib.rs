@@ -21,7 +21,7 @@
 use std::ffi::CStr;
 
 use pyo3::buffer::{ElementType, PyUntypedBuffer};
-use pyo3::exceptions::{PyTypeError, PyValueError};
+use pyo3::exceptions::{PyOverflowError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use tonekit::{
     Analysis, AnalyzeOptions, AssessRequest, Candidate, F0Choice, F0Track, GradingTarget,
@@ -113,6 +113,32 @@ fn extract_pcm(pcm: &Bound<'_, PyAny>) -> PyResult<Vec<f32>> {
         .map_err(|e| PyTypeError::new_err(format!("{EXPECTED} ({e})")))
 }
 
+/// The `sample_rate` argument as an `i64`.
+///
+/// An integer too large for `i64` is as unsupported as any other wrong rate, so it is a
+/// `ValueError` naming the valid range, not the `OverflowError` PyO3's own conversion would raise.
+/// A value that is not an integer at all (a string, a float) stays a `TypeError`.
+fn extract_sample_rate(rate: &Bound<'_, PyAny>) -> PyResult<i64> {
+    rate.extract::<i64>().map_err(|e| {
+        let py = rate.py();
+        if e.is_instance_of::<PyOverflowError>(py) {
+            let shown = rate.str().map_or_else(
+                |_| "(unprintable)".to_owned(),
+                |s| s.to_string_lossy().into_owned(),
+            );
+            PyValueError::new_err(format!(
+                "unsupported sample rate {shown} Hz (expected {SAMPLE_RATE} Hz; \
+                 sample_rate must be an integer from 0 to {})",
+                u32::MAX
+            ))
+        } else if e.is_instance_of::<PyTypeError>(py) {
+            PyTypeError::new_err(format!("sample_rate must be an integer ({e})"))
+        } else {
+            e
+        }
+    })
+}
+
 fn analyze_json(
     pcm: &[f32],
     sample_rate: i64,
@@ -190,18 +216,20 @@ fn assess_json(
 ///
 /// Returns the `Analysis` as JSON.
 ///
-/// Raises `ValueError` for empty audio, a sample rate other than 16000 or JSON that does not
-/// parse, and `TypeError` if `pcm` is not a sequence or buffer of floats.
+/// Raises `ValueError` for empty audio, a sample rate other than 16000 (including one too large
+/// for a 64-bit integer) or JSON that does not parse, and `TypeError` if `pcm` is not a sequence
+/// or buffer of floats or `sample_rate` is not an integer.
 #[pyfunction]
 #[pyo3(signature = (pcm, sample_rate, register_json=None, f0_json=None))]
 fn analyze(
     py: Python<'_>,
     pcm: &Bound<'_, PyAny>,
-    sample_rate: i64,
+    sample_rate: &Bound<'_, PyAny>,
     register_json: Option<&str>,
     f0_json: Option<&str>,
 ) -> PyResult<String> {
     let pcm = extract_pcm(pcm)?;
+    let sample_rate = extract_sample_rate(sample_rate)?;
     py.detach(|| analyze_json(&pcm, sample_rate, register_json, f0_json))
         .map_err(value_error)
 }

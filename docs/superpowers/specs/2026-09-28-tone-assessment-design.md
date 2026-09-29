@@ -351,10 +351,11 @@ pairs = [["2", "3"], ["1", "4"], ["1", "2"]]
 id = "cmn-standard"
 name = "普通话 (standard)"
 
+# (R47) the half-third plus the learner's full dip at low weight
 [[accent.realize]]
 label = "t3-half"
 when = { tone = "3", phrase_final = false }
-chao = [2, 1]
+mixture = [ { chao = [2, 1], weight = 0.75 }, { chao = [2, 1, 4], weight = 0.25 } ]
 
 [[accent.realize]]
 label = "t5-after-1"

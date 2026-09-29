@@ -17,9 +17,10 @@ trap 'rm -rf "$tmp"' EXIT
 
 # Function declarations look like `uint64_t uniffi_tonekit_ffi_fn_func_analyze(RustBuffer pcm, ...`.
 cat "$headers"/*.h | grep -Eo '\b(uniffi|ffi)_tonekit[A-Za-z0-9_]*\(' | tr -d '(' | sort -u >"$tmp/declared"
-# Defined, global text symbols (`T`), minus Apple's leading underscore. `nm` runs on its own, not
-# in a pipeline, so that a failure (no `nm`, an unreadable archive) is reported instead of turning
-# into an empty symbol list that pipefail would not catch.
+# Defined, global text symbols (`T`), minus Apple's leading underscore. `nm` writes to a file
+# instead of feeding the awk pipeline, and its exit status is checked: without that capture, a
+# failing `nm` (missing, or an unreadable archive) made the script exit silently, with no message
+# saying that `nm` was the problem.
 if ! nm -g "$lib" >"$tmp/nm.out" 2>"$tmp/nm.err"; then
     echo "check-ffi-symbols: \`nm -g $lib\` failed:" >&2
     sed 's/^/  /' "$tmp/nm.err" >&2

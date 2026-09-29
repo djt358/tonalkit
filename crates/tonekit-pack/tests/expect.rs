@@ -121,8 +121,17 @@ fn half_third_nonfinal() {
     let e = cmn()
         .expect_tone(&std_g(), &tone("3"), &ctx(Some("1"), false))
         .unwrap();
-    assert_eq!(e.components.len(), 1);
-    assert!(e.components[0].label.ends_with("t3-half"));
+    // R47: the half-third, plus the learner's full dip at low weight.
+    assert_eq!(e.components.len(), 2);
+    approx::assert_abs_diff_eq!(weight_sum(&e), 1.0, epsilon = 1e-4);
+    assert_eq!(e.components[0].label, "cmn-standard/t3-half#0");
+    assert_eq!(e.components[1].label, "cmn-standard/t3-half#1");
+    approx::assert_abs_diff_eq!(e.components[0].weight, 0.75, epsilon = 1e-6);
+    approx::assert_abs_diff_eq!(e.components[1].weight, 0.25, epsilon = 1e-6);
+    // [2,1] ends at 1; [2,1,4] ends at 4.
+    approx::assert_abs_diff_eq!(e.components[0].offset, 1.0, epsilon = 1e-6);
+    approx::assert_abs_diff_eq!(e.components[1].offset, 4.0, epsilon = 1e-6);
+    assert!(e.components.iter().all(|c| c.tone == tone("3")));
 }
 
 #[test]

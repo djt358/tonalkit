@@ -12,6 +12,7 @@ import pytest
 import tonekit_py
 
 from support import RATE, candidate, request_413, standard_grading
+from test_parity import TOLERANCE, json_max_diff
 
 CMN_TONES = ["1", "2", "3", "4", "5"]
 
@@ -66,14 +67,11 @@ def test_analyze_accepts_an_external_f0_track(pcm, analysis_json, pack_toml, cal
     assert again["f0"]["provider"] == "external"
     assert len(again["f0"]["frames"]) == len(own["f0"]["frames"])
 
+    # The whole assessment, not a hand-picked subset: every number within 1e-4, everything else
+    # (heard tones, deltas, components, register update, ...) identical.
     want = assess_413(analysis_json, pack_toml, calib_json)
     got = assess_413(again_json, pack_toml, calib_json)
-    assert got["intended_rank"] == want["intended_rank"]
-    assert got["margin_llr"] == pytest.approx(want["margin_llr"], abs=1e-4)
-    assert got["overall"] == pytest.approx(want["overall"], abs=1e-4)
-    for g, w in zip(got["syllables"], want["syllables"]):
-        assert g["p_correct"] == pytest.approx(w["p_correct"], abs=1e-4)
-        assert g["heard"] == w["heard"]
+    json_max_diff(want, got, TOLERANCE)
 
 
 def test_an_external_f0_track_is_padded_to_the_frame_count(pcm):
@@ -152,6 +150,16 @@ def test_audio_with_no_speech_is_analysed_not_rejected(samples, pack_toml, calib
 def test_a_wrong_sample_rate_is_a_value_error(pcm):
     with pytest.raises(ValueError, match=r"unsupported sample rate 44100 Hz \(expected 16000 Hz\)"):
         tonekit_py.analyze(pcm, 44_100)
+
+
+@pytest.mark.parametrize("rate", [2**70, -(2**70), 2**63, -(2**63) - 1, 2**32, -1])
+def test_an_out_of_range_sample_rate_is_a_value_error(pcm, rate):
+    """Including integers too large for 64 bits, which PyO3's own conversion would raise as
+    OverflowError; the message names the valid range."""
+    with pytest.raises(ValueError, match=rf"unsupported sample rate {rate} Hz \(expected 16000 Hz"):
+        tonekit_py.analyze(pcm, rate)
+    with pytest.raises(TypeError, match="sample_rate must be an integer"):
+        tonekit_py.analyze(pcm, "16000")
 
 
 def test_empty_audio_is_a_value_error():
@@ -298,12 +306,35 @@ def test_assess_with_distractors_and_compared_accents(analysis_json, pack_toml, 
 # ---- the GIL --------------------------------------------------------------------------------
 
 
+# One `analyze` call must take at least this long for the GIL test to mean anything: a held GIL
+# then lets the counting thread advance by at most one switch interval (5 ms), 5% of the call.
+MIN_CALL_S = 0.1
+MAX_COPIES = 64
+
+
+def audio_for_a_measurable_call(pcm):
+    """`pcm` repeated (doubling the copies) until one `analyze` call takes at least MIN_CALL_S.
+
+    How long a call takes depends on the machine, so the workload is scaled to it instead of being
+    fixed. Gives up (skipping the test) at MAX_COPIES, about 85 s of audio."""
+    copies = 1
+    while True:
+        audio = np.tile(pcm, copies)
+        start = time.perf_counter()
+        tonekit_py.analyze(audio, RATE)
+        if time.perf_counter() - start >= MIN_CALL_S:
+            return audio
+        if copies >= MAX_COPIES:
+            pytest.skip(f"analyze of {copies} copies of the fixture takes under {MIN_CALL_S} s")
+        copies *= 2
+
+
 def test_the_gil_is_released_while_rust_computes(pcm):
     """A Python thread keeps counting while another thread is inside `analyze`. Measured against
     its own rate when idle: if the extension held the GIL for the whole call, the counter could
-    advance only by the one switch interval (5 ms) after the call, a few percent of the call's
-    duration at most; released, it keeps roughly its full rate."""
-    audio = np.tile(pcm, 4)  # ~10 s of audio: about a second of Rust
+    advance only by the one switch interval (5 ms) after the call, at most 5% of a call of
+    MIN_CALL_S; released, it keeps roughly its full rate."""
+    audio = audio_for_a_measurable_call(pcm)
     counter = 0
     stop = threading.Event()
 
@@ -328,7 +359,11 @@ def test_the_gil_is_released_while_rust_computes(pcm):
     finally:
         stop.set()
         thread.join()
-    assert duration > 0.25, "the call is too short for this test to mean anything"
+    if duration <= MIN_CALL_S / 2:  # a faster machine or a warm cache: too short to judge
+        pytest.skip(
+            f"the measured analyze call took {duration:.3f} s (need > {MIN_CALL_S / 2:.3f} s); "
+            f"the counter gained {gained} against an idle rate of {idle_rate:.0f}/s"
+        )
     share = gained / (idle_rate * duration)
     assert share > 0.25, (
         f"the counting thread ran at {share:.1%} of its idle rate during analyze; "
