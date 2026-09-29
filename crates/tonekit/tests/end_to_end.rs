@@ -408,6 +408,71 @@ fn an_external_octave_error_is_repaired() {
     assert_abs_diff_eq!(a.f0.frames[at].hz.unwrap(), good, epsilon = 0.01);
 }
 
+/// An external track is untrusted input at the FFI boundary (ruling R43): a hostile or buggy
+/// pitch model may report NaN, negative or infinite Hz and a NaN confidence. `analyze` cleans it
+/// before anything reads it, so nothing downstream sees a non-finite number or panics.
+#[test]
+fn a_hostile_external_track_is_sanitised() {
+    let s = spoken(&["4", "1", "3"]);
+    let mut track = truth_track(&s);
+    let voiced: Vec<usize> = track
+        .frames
+        .iter()
+        .enumerate()
+        .filter_map(|(i, f)| f.hz.map(|_| i))
+        .collect();
+    let (nan_hz, negative_hz, infinite_hz, nan_p, big_p, negative_p) = (
+        voiced[3], voiced[8], voiced[14], voiced[20], voiced[26], voiced[32],
+    );
+    track.frames[nan_hz].hz = Some(f32::NAN);
+    track.frames[negative_hz].hz = Some(-5.0);
+    track.frames[infinite_hz].hz = Some(f32::INFINITY);
+    track.frames[nan_p].voiced_p = f32::NAN;
+    track.frames[big_p].voiced_p = 7.0;
+    track.frames[negative_p].voiced_p = f32::NEG_INFINITY;
+    // A zero and a negative infinity in unvoiced-looking frames too.
+    let unvoiced = track.frames.iter().position(|f| f.hz.is_none()).unwrap();
+    track.frames[unvoiced].hz = Some(0.0);
+    track.frames[unvoiced + 1].hz = Some(f32::NEG_INFINITY);
+
+    let a = analyze(&s.pcm, RATE, Some(&warm()), &external(track)).unwrap();
+
+    // The offending frames become unvoiced; confidences are finite and inside [0, 1].
+    for i in [nan_hz, negative_hz, infinite_hz, unvoiced, unvoiced + 1] {
+        assert_eq!(a.f0.frames[i].hz, None, "frame {i}");
+    }
+    assert_eq!(a.f0.frames[nan_p].voiced_p, 0.0);
+    assert_eq!(a.f0.frames[big_p].voiced_p, 1.0);
+    assert_eq!(a.f0.frames[negative_p].voiced_p, 0.0);
+    assert!(a.f0.frames.iter().all(|f| {
+        f.hz.is_none_or(|hz| hz.is_finite() && hz > 0.0)
+            && f.voiced_p.is_finite()
+            && (0.0..=1.0).contains(&f.voiced_p)
+    }));
+    assert!(a.voiced_st.iter().all(|st| st.is_finite()));
+
+    // R12 through the whole pipeline: every number that comes out is finite.
+    let request = AssessRequest {
+        compare_accents: vec![accent("cmn-standard"), accent("cmn-TW")],
+        ..req(&["4", "1", "3"])
+    };
+    let r = assess(&a, &cmn(), &request).unwrap();
+    assert!(r.overall.is_some_and(f32::is_finite));
+    assert!(r.margin_llr.is_finite());
+    for syllable in &r.syllables {
+        assert!(syllable.p_correct.is_finite() && (0.0..=1.0).contains(&syllable.p_correct));
+        assert!(syllable.distance.is_none_or(f32::is_finite));
+        assert!(syllable.deltas.iter().all(|d| d.amount.is_finite()));
+    }
+    assert!(r.accent_fit.iter().all(|f| f.llr.is_finite()));
+    let reg = &r.register_update;
+    assert!([reg.floor_st, reg.median_st, reg.ceil_st]
+        .iter()
+        .all(|x| x.is_finite()));
+    // The clean frames around the damage still carry the utterance: it is graded, not dropped.
+    assert!(!all_not_measured(&r));
+}
+
 // ---- accent fit -------------------------------------------------------------------------
 
 #[test]

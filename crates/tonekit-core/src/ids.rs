@@ -21,3 +21,15 @@ pub struct ToneId(pub String);
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct CandidateId(pub String);
+
+// Swift sees each id as a plain `String` (a typealias), so callers write `ToneId` values as
+// string literals; the wrapper types stay Rust-side.
+#[cfg(feature = "ffi")]
+mod ffi {
+    use super::{AccentId, CandidateId, Lect, ToneId};
+
+    uniffi::custom_newtype!(Lect, String);
+    uniffi::custom_newtype!(AccentId, String);
+    uniffi::custom_newtype!(ToneId, String);
+    uniffi::custom_newtype!(CandidateId, String);
+}

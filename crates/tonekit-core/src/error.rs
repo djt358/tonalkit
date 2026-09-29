@@ -6,6 +6,7 @@ use thiserror::Error;
 use crate::ids::{CandidateId, ToneId};
 
 #[derive(Clone, Debug, PartialEq, Error, Serialize, Deserialize)]
+#[cfg_attr(feature = "ffi", derive(uniffi::Error))]
 pub enum AssessError {
     #[error("audio is empty")]
     EmptyAudio,

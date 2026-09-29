@@ -7,12 +7,14 @@ pub const CONTOUR_POINTS: usize = 10;
 
 /// Half-open frame interval `[start, end)`.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ffi", derive(uniffi::Record))]
 pub struct TbuSpan {
     pub start_frame: u32,
     pub end_frame: u32,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ffi", derive(uniffi::Record))]
 pub struct ToneShape {
     pub span: TbuSpan,
     /// Chao scale: 1 + 4·(st − floor)/(ceil − floor), unclamped; `CONTOUR_POINTS` long.
@@ -34,6 +36,7 @@ pub struct ToneShape {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ffi", derive(uniffi::Record))]
 pub struct Phonation {
     pub creak_ratio: f32,
     pub cpp_db: f32,

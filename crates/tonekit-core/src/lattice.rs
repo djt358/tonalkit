@@ -7,6 +7,7 @@ use crate::judgement::Measured;
 use crate::shape::{TbuSpan, ToneShape};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ffi", derive(uniffi::Record))]
 pub struct LatticeTbu {
     pub span: TbuSpan,
     pub loglik: Vec<f32>,
@@ -16,6 +17,7 @@ pub struct LatticeTbu {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ffi", derive(uniffi::Record))]
 pub struct ToneLattice {
     pub schema: String,
     pub lect: Lect,

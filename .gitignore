@@ -5,3 +5,9 @@ __pycache__/
 *.pyc
 /harness/.cache/
 /build/
+# Swift package (Task 12): the SwiftPM build, and everything scripts/build-xcframework.sh writes
+/swift/TonekitSmoke/.build/
+/swift/TonekitSmoke/.swiftpm/
+/swift/TonekitSmoke/Frameworks/
+/swift/TonekitSmoke/Sources/Tonekit/Generated/
+/swift/TonekitSmoke/Tests/TonekitSmokeTests/Resources/

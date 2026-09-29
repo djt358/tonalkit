@@ -6,9 +6,15 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 
+[features]
+# UniFFI derives on every exported type, for the Swift bindings in `tonekit-ffi`. Off by default:
+# nothing UniFFI-related is compiled unless a consumer asks for it.
+ffi = ["dep:uniffi"]
+
 [dependencies]
 serde = { workspace = true }
 thiserror = { workspace = true }
+uniffi = { version = "0.32", default-features = false, optional = true }
 
 [dev-dependencies]
 serde_json = { workspace = true }

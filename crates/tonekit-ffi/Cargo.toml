@@ -1,0 +1,39 @@
+[package]
+name = "tonekit-ffi"
+version = "0.1.0"
+description = "UniFFI Swift bindings for tonekit: the same compiled library the tests exercise, callable from iOS."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[lib]
+# `staticlib` is the iOS artifact (XCFramework); `cdylib` is what the bindings generator reads on
+# a development host; `lib` lets the Rust tests call the exported functions directly.
+crate-type = ["staticlib", "cdylib", "lib"]
+
+[features]
+# The bindings generator (`uniffi-bindgen`, `uniffi-bindgen-swift`). Off by default so that none
+# of its dependencies (clap, askama, cargo_metadata, ...) is compiled into, or archived with, the
+# iOS static library; `scripts/build-xcframework.sh` builds it for the host only.
+cli = ["uniffi/cli"]
+
+[[bin]]
+name = "uniffi-bindgen"
+path = "src/bin/uniffi-bindgen.rs"
+required-features = ["cli"]
+doc = false
+
+[[bin]]
+name = "uniffi-bindgen-swift"
+path = "src/bin/uniffi-bindgen-swift.rs"
+required-features = ["cli"]
+doc = false
+
+[dependencies]
+tonekit = { path = "../tonekit", features = ["ffi"] }
+uniffi = { version = "0.32", default-features = false }
+
+[dev-dependencies]
+hound = "3"
+serde_json = { workspace = true }

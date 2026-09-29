@@ -7,12 +7,14 @@ use crate::judgement::{Measured, ShapeDelta, ToneJudgement};
 use crate::register::Register;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ffi", derive(uniffi::Record))]
 pub struct ConfusionHit {
     pub tone: ToneId,
     pub text: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ffi", derive(uniffi::Enum))]
 pub enum Evidence {
     Acoustic {
         judgement: ToneJudgement,
@@ -29,6 +31,7 @@ pub enum Evidence {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ffi", derive(uniffi::Enum))]
 pub enum EvidenceKind {
     Acoustic,
     Transcript,
@@ -36,6 +39,7 @@ pub enum EvidenceKind {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ffi", derive(uniffi::Record))]
 pub struct FusionWeights {
     pub beta0: f32,
     pub beta_acoustic: f32,
@@ -45,6 +49,7 @@ pub struct FusionWeights {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ffi", derive(uniffi::Record))]
 pub struct SyllableAssessment {
     pub expected: ToneId,
     pub p_correct: f32,
@@ -58,12 +63,14 @@ pub struct SyllableAssessment {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ffi", derive(uniffi::Record))]
 pub struct AccentFit {
     pub accent: AccentId,
     pub llr: f32,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ffi", derive(uniffi::Record))]
 pub struct UtteranceAssessment {
     pub schema: String,
     pub intended: CandidateId,

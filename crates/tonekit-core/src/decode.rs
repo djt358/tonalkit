@@ -7,12 +7,14 @@ use crate::judgement::ToneJudgement;
 use crate::shape::TbuSpan;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ffi", derive(uniffi::Record))]
 pub struct SyllableFit {
     pub span: TbuSpan,
     pub judgement: ToneJudgement,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ffi", derive(uniffi::Record))]
 pub struct CandidateScore {
     pub id: CandidateId,
     pub llr: f32,
@@ -23,6 +25,7 @@ pub struct CandidateScore {
 /// `candidates` sorted by llr desc; posteriors are shares of a softmax that also includes the
 /// null competitor (`null_llr + null_bias`), whose share is `null_posterior`.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ffi", derive(uniffi::Record))]
 pub struct DecodeResult {
     pub candidates: Vec<CandidateScore>,
     pub null_llr: f32,

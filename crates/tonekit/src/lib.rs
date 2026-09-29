@@ -30,6 +30,11 @@
 
 #![forbid(unsafe_code)]
 
+// With the `ffi` feature `AssessRequest` derives UniFFI's traits, which are generic over this
+// crate's own `UniFfiTag`; that needs the crate's scaffolding (Task 12).
+#[cfg(feature = "ffi")]
+uniffi::setup_scaffolding!();
+
 mod analyze;
 mod assess;
 
