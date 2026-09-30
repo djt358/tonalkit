@@ -72,3 +72,19 @@ def test_read_truth_reports_a_bad_line_with_its_position(tmp_path, text, message
 def test_read_truth_of_a_directory_without_one_is_an_error_naming_it(tmp_path):
     with pytest.raises(SynthError, match=r"no truth\.jsonl in"):
         corpus.read_truth(tmp_path)
+
+
+@pytest.mark.parametrize(
+    "element", ["-3.0", "0", "0.0", '"100"', "true", "NaN", "Infinity", "-Infinity", "[100.0]"]
+)
+def test_read_truth_wants_every_frame_null_or_a_positive_finite_number(tmp_path, element):
+    line = '{"id": "a", "f0_hz": [100.0, ' + element + ", null]}\n"
+    (tmp_path / "truth.jsonl").write_text(line, encoding="utf-8")
+    message = r"truth\.jsonl:1: f0_hz\[1\] is .*expected null or a positive"
+    with pytest.raises(SynthError, match=message):
+        corpus.read_truth(tmp_path)
+
+
+def test_read_truth_accepts_integers_and_nulls(tmp_path):
+    (tmp_path / "truth.jsonl").write_text('{"id": "a", "f0_hz": [100, null, 220.5]}\n')
+    assert corpus.read_truth(tmp_path) == {"a": [100, None, 220.5]}

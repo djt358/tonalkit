@@ -7,23 +7,24 @@ from __future__ import annotations
 import json
 
 import pytest
-from support import candidate, gate_corpus, make_clip, write_manifest
+import tonekit_py
+from support import RATE, gate_corpus, make_clip, write_manifest
 
-from tonekit_harness import bakeoff, cli, corpus, manifest, pitch_metrics, pitch_tracks, synth
-from tonekit_harness.manifest import Clip, Condition
+from tonekit_harness import (
+    bakeoff,
+    cli,
+    conditions,
+    corpus,
+    manifest,
+    pitch_metrics,
+    pitch_tracks,
+    synth,
+)
 
-PROVIDERS = ["pyin", "swift-f0"]
+GATE_PROVIDERS = ["pyin", "swift-f0"]  # what the gate grades: the whole pipeline with each
+# what the synthetic section measures: swift-f0 as handed to tonekit and as tonekit ends up with it
+MEASURES = ["pyin", "swift-f0", "swift-f0 (after tonekit's octave repair)"]
 CONDITIONS = ["clean", "noise ~5 dB", "noise ~10 dB", "noise ~20 dB"]
-
-
-def row(family: str | None, params: dict | None = None, noise: str = "none") -> Clip:
-    """A manifest row with only what `bakeoff.condition` looks at."""
-    synthetic = None if family is None else {"family": family, "params": params or {}}
-    return Clip(
-        id="c", path="c.wav", speaker="s", set="synthetic", label="correct",
-        intended=candidate(["1"]), condition=Condition(noise=noise, distance="synthetic"),
-        source="synthetic-world", synthetic=synthetic,
-    )  # fmt: skip
 
 
 def test_the_briefs_names_are_importable_from_bakeoff():
@@ -32,34 +33,6 @@ def test_the_briefs_names_are_importable_from_bakeoff():
     assert bakeoff.swiftf0_track is pitch_tracks.swiftf0_track
     assert bakeoff.gpe([120.0, 100.0, None], [100.0, 130.0, 100.0]) == 0.5
     assert bakeoff.vde([120.0, 100.0, None], [100.0, 130.0, 100.0]) == pytest.approx(1 / 3)
-
-
-# ---- conditions --------------------------------------------------------------------------------
-
-
-@pytest.mark.parametrize(
-    ("clip", "want"),
-    [
-        (row("identity"), "clean"),
-        (row("tone_swap", {"index": 1, "to": "4"}), "clean"),
-        (row("rate", {"factor": 1.1}), "clean"),
-        (row(None), "clean"),
-        (row("noise", {"snr_db": 5.0}), "noise ~5 dB"),
-        (row("noise", {"snr_db": 7.5}), "noise ~5 dB"),  # halfway between two buckets: the lower
-        (row("noise", {"snr_db": 7.6}), "noise ~10 dB"),
-        (row("noise", {"snr_db": 10.0}), "noise ~10 dB"),
-        (row("noise", {"snr_db": 15.0}), "noise ~10 dB"),
-        (row("noise", {"snr_db": 15.1}), "noise ~20 dB"),
-        (row("noise", {"snr_db": 20}), "noise ~20 dB"),
-        (row("noise", {"snr_db": 2.0}), "noise ~5 dB"),  # beyond the buckets: the nearest
-        (
-            row("noise", {}, noise="cafe 12 dB"),
-            "cafe 12 dB",
-        ),  # no SNR to bucket: the row's own words
-    ],
-)
-def test_a_clip_is_clean_or_a_noise_clip_in_its_nearest_snr_bucket(clip, want):
-    assert bakeoff.condition(clip) == want
 
 
 # ---- run ---------------------------------------------------------------------------------------
@@ -85,8 +58,9 @@ def expected_frames(directory) -> dict[str, tuple[int, int]]:
     truth = corpus.read_truth(directory)
     out: dict[str, tuple[int, int]] = {}
     for clip in manifest.load(directory / "manifest.jsonl"):
-        clips, frames = out.get(bakeoff.condition(clip), (0, 0))
-        out[bakeoff.condition(clip)] = (clips + 1, frames + len(truth[clip.id]))
+        name = conditions.condition(clip)
+        clips, frames = out.get(name, (0, 0))
+        out[name] = (clips + 1, frames + len(truth[clip.id]))
     return out
 
 
@@ -101,24 +75,41 @@ def test_run_pools_frames_per_condition_and_provider(
     want = expected_frames(synthetic_dir)
     for name, group in result.synthetic.items():
         assert group.clips == want[name][0]
-        assert list(group.counts) == PROVIDERS
-        for provider in PROVIDERS:
-            assert group.counts[provider].frames == want[name][1]
+        assert list(group.counts) == MEASURES
+        for measure in MEASURES:
+            assert group.counts[measure].frames == want[name][1]
     assert result.synthetic["clean"].clips == 2
 
 
-def test_both_providers_track_clean_resynthesised_speech_closely(
+def test_every_measurement_tracks_clean_resynthesised_speech_closely(
     synthetic_dir, pack_toml, calib_json, tmp_path
 ):
     """A wiring check: tracks compared with the wrong truth (or a shifted one) would be far off."""
     clean = bakeoff.run(
         synthetic=synthetic_dir, pack_toml=pack_toml, calib_json=calib_json, cache_dir=tmp_path
     ).synthetic["clean"]
-    for provider in PROVIDERS:
-        counts = clean.counts[provider]
+    for measure in MEASURES:
+        counts = clean.counts[measure]
         assert counts.both_voiced > 0.25 * counts.frames  # a good part of each clip is speech
-        assert counts.gpe is not None and counts.gpe < 0.05, provider
-        assert counts.vde is not None and counts.vde < 0.3, provider
+        assert counts.gpe is not None and counts.gpe < 0.05, measure
+        assert counts.vde is not None and counts.vde < 0.3, measure
+
+
+def test_the_swiftf0_rows_are_its_track_as_handed_to_tonekit_and_the_f0_tonekit_ends_up_with(
+    src, tmp_path, pack_toml, calib_json
+):
+    audio, truth, _ = made = synth.perturb(src, "noise", {"snr_db": 10.0}, 0)
+    corpus.write_corpus(tmp_path, [made])
+    got = bakeoff.run(
+        synthetic=tmp_path, pack_toml=pack_toml, calib_json=calib_json, use_cache=False
+    ).synthetic["noise ~10 dB"]
+    f0_json = pitch_tracks.swiftf0_track(audio)
+    repaired = tonekit_py.analyze(audio, RATE, None, f0_json)
+    assert got.counts["pyin"] == pitch_metrics.count(
+        pitch_tracks.pyin_track(tonekit_py.analyze(audio, RATE)), truth
+    )
+    assert got.counts["swift-f0"] == pitch_metrics.count(pitch_tracks.track_hz(f0_json), truth)
+    assert got.counts[MEASURES[2]] == pitch_metrics.count(pitch_tracks.pyin_track(repaired), truth)
 
 
 def test_run_grades_the_gate_with_each_provider(tmp_path, pack_toml, calib_json):
@@ -129,14 +120,10 @@ def test_run_grades_the_gate_with_each_provider(tmp_path, pack_toml, calib_json)
         cache_dir=tmp_path / "cache",
     )  # fmt: skip
     assert result.synthetic is None
-    assert list(result.gate) == PROVIDERS
+    assert list(result.gate) == GATE_PROVIDERS
     for scores in result.gate.values():
         assert len(scores.metrics.thresholds) == 2
         assert scores.candidate_id is None and scores.n_minimal == 0  # no diag_minimal clips
-
-
-def test_the_noise_buckets_are_the_ones_the_report_describes():
-    assert bakeoff.NOISE_BUCKETS_DB == (5.0, 10.0, 20.0)  # bakeoff_report's text says so
 
 
 def test_a_synthetic_directory_without_clips_is_an_error(tmp_path, pack_toml):
@@ -210,7 +197,8 @@ def test_tkh_bakeoff_writes_a_report_with_both_sections(cli_run, capsys):
     for section in (synthetic, gate):
         assert "pyin" in section and "swift-f0" in section
     assert "S1 (leave-one-pair-out): pyin " in gate and "swift-f0 " in gate
-    assert "Lower GPE, by condition:" in synthetic
+    assert "Lower GPE, by condition:" in synthetic and "Lower VDE, by condition:" in synthetic
+    assert "swift-f0 (after tonekit's octave repair)" in synthetic
 
 
 def test_the_synthetic_table_accounts_for_every_frame_of_every_clip(cli_run):
@@ -219,16 +207,16 @@ def test_the_synthetic_table_accounts_for_every_frame_of_every_clip(cli_run):
     section = report.read_text(encoding="utf-8").split("## Synthetic f0 accuracy")[1]
     section = section.split("## Gate S1")[0]
     total = sum(len(f0) for f0 in corpus.read_truth(root / "synth").values())
-    for provider in PROVIDERS:
-        cells = [
-            [c.strip() for c in line.strip("|").split("|")]
-            for line in section.splitlines()
-            if line.startswith("|")
-        ]
+    cells = [
+        [c.strip() for c in line.strip("|").split("|")]
+        for line in section.splitlines()
+        if line.startswith("|")
+    ]
+    for measure in MEASURES:
         frames = [
-            int(c[3]) for c in cells if c[2] == provider
+            int(c[3]) for c in cells if c[2] == measure
         ]  # Condition | Clips | Provider | Frames
-        assert sum(frames) == total, provider
+        assert sum(frames) == total, measure
 
 
 def test_the_report_is_the_same_on_a_rerun(cli_run):
@@ -239,21 +227,44 @@ def test_the_report_is_the_same_on_a_rerun(cli_run):
     assert report.read_text(encoding="utf-8") == first
 
 
+def without(argv: list[str], flag: str, report: str) -> list[str]:
+    """`argv` minus `flag` and its value, writing to `report` instead."""
+    i = argv.index(flag)
+    rest = argv[:i] + argv[i + 2 :]
+    rest[rest.index("--report") + 1] = report
+    return rest
+
+
 def test_synthetic_only_and_gate_only_runs_write_only_their_section(cli_run, tmp_path):
     root, argv, _ = cli_run
-
-    def run_without(flag: str) -> str:
-        i = argv.index(flag)
-        rest = argv[:i] + argv[i + 2 :]
+    for flag in ("--gate", "--synthetic"):
         out = tmp_path / f"without{flag}.md"
-        rest[rest.index("--report") + 1] = str(out)
-        assert cli.main(rest) == 0
-        return out.read_text(encoding="utf-8")
-
-    no_gate = run_without("--gate")
+        assert cli.main(without(argv, flag, str(out))) == 0
+    no_gate = (tmp_path / "without--gate.md").read_text(encoding="utf-8")
     assert "## Synthetic f0 accuracy" in no_gate and "## Gate S1" not in no_gate
-    no_synthetic = run_without("--synthetic")
+    no_synthetic = (tmp_path / "without--synthetic.md").read_text(encoding="utf-8")
     assert "## Gate S1" in no_synthetic and "## Synthetic f0 accuracy" not in no_synthetic
+
+
+class BrokenDetector:
+    """What onnxruntime does when it fails: an error that is not a ValueError."""
+
+    def detect(self, *args, **kwargs):
+        raise RuntimeError("onnx exploded")
+
+
+@pytest.mark.parametrize("dropped", ["--gate", "--synthetic"])
+def test_a_detector_failure_is_an_error_naming_the_clip_not_a_traceback(
+    cli_run, monkeypatch, capsys, tmp_path, dropped
+):
+    root, argv, _ = cli_run
+    monkeypatch.setattr(pitch_tracks, "_detector", lambda: BrokenDetector())
+    out = tmp_path / "r.md"
+    assert cli.main(without(argv, dropped, str(out))) == 1
+    err = capsys.readouterr().err
+    assert err.startswith("error: ") and "RuntimeError: onnx exploded" in err
+    assert "gate-0" in err  # the clip's id: gate clips and the synthetic clips made from them
+    assert not out.exists()
 
 
 def test_a_gate_that_fails_s1_is_still_exit_zero(tmp_path, pack_toml):

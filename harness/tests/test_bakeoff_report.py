@@ -3,7 +3,7 @@ what the numbers show and never decide anything."""
 
 from __future__ import annotations
 
-from tonekit_harness import bakeoff_report, metrics
+from tonekit_harness import bakeoff_report, conditions, metrics
 from tonekit_harness.bakeoff import Bakeoff, GateScores, Group
 from tonekit_harness.evaluate import Result
 from tonekit_harness.pitch_metrics import Counts
@@ -27,18 +27,31 @@ PASSING = gate_scores([0.9, 0.8, 0.85], [0.1, 0.2, 0.15])  # every pair separate
 FAILING = gate_scores([0.5, 0.5, 0.5], [0.5, 0.5, 0.5])  # nothing separates them
 
 
+REPAIRED = "swift-f0 (after tonekit's octave repair)"
+
+
+def measured(pyin: Counts, swift: Counts, repaired: Counts) -> dict[str, Counts]:
+    return {"pyin": pyin, "swift-f0": swift, REPAIRED: repaired}
+
+
 def synthetic_result() -> Bakeoff:
     return Bakeoff(
         synthetic={
-            "clean": Group(2, {"pyin": Counts(100, 80, 8, 5), "swift-f0": Counts(100, 90, 1, 2)}),
+            "clean": Group(
+                2,
+                measured(Counts(100, 80, 8, 5), Counts(100, 90, 1, 2), Counts(100, 88, 1, 2)),
+            ),
             "noise ~5 dB": Group(
-                1, {"pyin": Counts(50, 10, 1, 20), "swift-f0": Counts(50, 20, 5, 30)}
+                1,
+                measured(Counts(50, 10, 1, 20), Counts(50, 20, 5, 30), Counts(50, 20, 2, 30)),
             ),
             "noise ~10 dB": Group(
-                1, {"pyin": Counts(50, 10, 5, 20), "swift-f0": Counts(50, 20, 10, 30)}
+                1,
+                measured(Counts(50, 10, 5, 20), Counts(50, 20, 10, 30), Counts(50, 20, 10, 30)),
             ),
             "noise ~20 dB": Group(
-                1, {"pyin": Counts(10, 0, 0, 10), "swift-f0": Counts(10, 0, 0, 10)}
+                1,
+                measured(Counts(10, 0, 0, 10), Counts(10, 0, 0, 10), Counts(10, 0, 0, 10)),
             ),
         },
         gate=None,
@@ -57,24 +70,43 @@ def test_the_synthetic_table_has_a_row_per_condition_and_provider(tmp_path):
     assert "| Condition | Clips | Provider | Frames | Voiced in both | GPE | VDE |" in text
     assert "| clean | 2 | pyin | 100 | 80 | 0.100 (8/80) | 0.050 (5/100) |" in text
     assert "| clean | 2 | swift-f0 | 100 | 90 | 0.011 (1/90) | 0.020 (2/100) |" in text
+    assert f"| clean | 2 | {REPAIRED} | 100 | 88 | 0.011 (1/88) | 0.020 (2/100) |" in text
     assert "| noise ~20 dB | 1 | pyin | 10 | 0 | n/a | 1.000 (10/10) |" in text
     assert "## Gate S1" not in text  # no gate run: no gate section
 
 
 def test_the_observation_names_the_lower_gpe_per_condition_with_ties_and_gaps(tmp_path):
     text = render(tmp_path, synthetic_result())
-    # clean: 0.100 against 0.011; noise 5 dB: 0.100 against 0.250; noise 10 dB: 0.5 both;
+    # clean: 0.100, 0.0111, 0.0114; noise 5 dB: 0.100, 0.250, 0.100; noise 10 dB: 0.5 all three;
     # noise 20 dB: no frame voiced in both
     assert (
-        "Lower GPE, by condition: clean swift-f0; noise ~5 dB pyin; noise ~10 dB tie; "
-        "noise ~20 dB n/a." in text
+        f"Lower GPE, by condition: clean swift-f0; noise ~5 dB pyin and {REPAIRED}; "
+        "noise ~10 dB tie; noise ~20 dB n/a." in text
+    )
+
+
+def test_the_observation_names_the_lower_vde_too(tmp_path):
+    text = render(tmp_path, synthetic_result())
+    # clean: 0.05, 0.02, 0.02; noise 5 dB: 0.4, 0.6, 0.6; noise 10 dB: 0.4, 0.6, 0.6; 20 dB: 1.0 all
+    assert (
+        f"Lower VDE, by condition: clean swift-f0 and {REPAIRED}; noise ~5 dB pyin; "
+        "noise ~10 dB pyin; noise ~20 dB tie." in text
     )
 
 
 def test_the_report_says_how_the_tracks_were_measured(tmp_path):
     text = render(tmp_path, synthetic_result())
-    for phrase in ("octave repair", "10 ms grid", "20%", "pooled", "nearest of 5, 10 and 20 dB"):
+    for phrase in ("octave repair", "10 ms grid", "20%", "pooled"):
         assert phrase in text
+    assert "GPE is conditional on each provider's own voicing" in text
+    assert "Voiced in both" in text.split("conditional on")[1]  # and says where to read the counts
+    assert "below -35 dBFS is scaled up to a peak of 0.5 before SwiftF0 sees it" in text
+
+
+def test_the_snr_buckets_in_the_text_come_from_the_bucket_constant(tmp_path, monkeypatch):
+    assert "nearest of 5, 10 and 20 dB" in render(tmp_path, synthetic_result())
+    monkeypatch.setattr(conditions, "NOISE_BUCKETS_DB", (3.0, 6.0))
+    assert "nearest of 3 and 6 dB" in render(tmp_path, synthetic_result())
 
 
 def test_the_gate_table_and_verdict(tmp_path):

@@ -197,6 +197,26 @@ def test_tonekit_takes_the_swiftf0_track_as_its_f0():
     assert len(analysis["nuclei"]) == 3  # one per syllable: the track is good enough to segment
 
 
+def test_a_failure_inside_the_detector_is_a_value_error_saying_what_failed(monkeypatch):
+    class Broken:
+        def detect(self, *args, **kwargs):
+            raise RuntimeError("onnx exploded")
+
+    monkeypatch.setattr(pitch_tracks, "_detector", lambda: Broken())
+    with pytest.raises(ValueError, match=r"SwiftF0 failed: RuntimeError: onnx exploded"):
+        swiftf0_track(np.zeros(1600, dtype=np.float32))
+
+
+def test_a_value_error_from_the_detector_is_passed_on_as_it_is(monkeypatch):
+    class Refuses:
+        def detect(self, *args, **kwargs):
+            raise ValueError("audio must not be empty")
+
+    monkeypatch.setattr(pitch_tracks, "_detector", lambda: Refuses())
+    with pytest.raises(ValueError, match="^audio must not be empty$"):
+        swiftf0_track(np.zeros(1600, dtype=np.float32))
+
+
 # ---- named providers ---------------------------------------------------------------------------
 
 

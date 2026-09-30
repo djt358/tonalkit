@@ -3,7 +3,7 @@
 Two questions, each answered per provider:
 
 - **f0 accuracy under noise**, on the clips of a `tkh synth` directory, against the exact f0 truth
-  WORLD was given (`pitch_metrics`: GPE and VDE, frames pooled per condition, `condition`).
+  WORLD was given (`pitch_metrics`: GPE and VDE, frames pooled per condition, see `conditions`).
 - **the S1 gate**, on a corpus manifest with gate pairs: `evaluate.run` with each provider's f0,
   then `metrics.loo_gate`.
 
@@ -15,11 +15,13 @@ from __future__ import annotations
 
 import argparse
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from importlib import metadata
 from pathlib import Path
 
-from . import bakeoff_report, corpus, evaluate, manifest, metrics, pitch_tracks
+import numpy as np
+
+from . import bakeoff_report, conditions, corpus, evaluate, manifest, metrics, pitch_tracks
 from .family import SynthError
 from .manifest import Clip, ManifestError
 from .metrics import GateMetrics
@@ -27,10 +29,19 @@ from .pitch_metrics import Counts, count
 from .pitch_metrics import gpe, vde  # noqa: F401  (re-exported: `bakeoff.gpe`, `bakeoff.vde`)
 from .pitch_tracks import swiftf0_track  # noqa: F401  (re-exported: `bakeoff.swiftf0_track`)
 
-# report name -> the `f0` argument of `evaluate.run` (None: tonekit's own pYIN)
+# The providers the gate grades, report name -> the `f0` argument of `evaluate.run` (None: tonekit's
+# own pYIN): each one's f0 goes through the whole pipeline.
 PROVIDERS: dict[str, str | None] = {"pyin": None, "swift-f0": "swift-f0"}
 
-NOISE_BUCKETS_DB = (5.0, 10.0, 20.0)  # a noise clip is grouped under the nearest of these SNRs
+SWIFT_REPAIRED = "swift-f0 (after tonekit's octave repair)"
+# What the synthetic section measures, in report order: report name -> (f0 provider, where the track
+# is read). "analysis" is the f0 tonekit ends up with, from the Analysis it made with that provider
+# (after octave repair); "handed" is the provider's own track as it is handed to tonekit.
+MEASURES: dict[str, tuple[str | None, str]] = {
+    "pyin": (None, "analysis"),
+    "swift-f0": ("swift-f0", "handed"),
+    SWIFT_REPAIRED: ("swift-f0", "analysis"),
+}
 
 
 class BakeoffError(ValueError):
@@ -39,7 +50,7 @@ class BakeoffError(ValueError):
 
 @dataclass(frozen=True)
 class Group:
-    """The clips of one condition: how many, and each provider's pooled error counts."""
+    """The clips of one condition: how many, and each measurement's pooled error counts."""
 
     clips: int
     counts: dict[str, Counts]
@@ -64,30 +75,6 @@ class Bakeoff:
     gate: dict[str, GateScores] | None
 
 
-# ---- conditions --------------------------------------------------------------------------------
-
-CLEAN = "clean"
-
-
-def condition(clip: Clip) -> str:
-    """`"clean"` for every clip but the `noise` family's, which is `"noise ~N dB"` for the nearest
-    SNR bucket N (the lower on a tie). A noise row with no `snr_db` is grouped under its own
-    `condition.noise`."""
-    synthetic = clip.synthetic or {}
-    if synthetic.get("family") != "noise":
-        return CLEAN
-    snr = (synthetic.get("params") or {}).get("snr_db")
-    if not isinstance(snr, int | float):
-        return clip.condition.noise
-    nearest = min(NOISE_BUCKETS_DB, key=lambda bucket: abs(snr - bucket))
-    return f"noise ~{nearest:g} dB"
-
-
-def _order(name: str) -> tuple[int, str]:
-    known = [CLEAN, *(f"noise ~{b:g} dB" for b in NOISE_BUCKETS_DB)]
-    return (known.index(name), "") if name in known else (len(known), name)
-
-
 # ---- running -----------------------------------------------------------------------------------
 
 
@@ -96,12 +83,18 @@ def require_input(synthetic: object, gate: object) -> None:
         raise BakeoffError("give --synthetic and/or --gate")
 
 
-def _track(f0: str | None, grader: evaluate.Grader, clip: Clip, pcm) -> list[float | None]:
-    """The provider's f0 for a clip: tonekit's own from its Analysis, or the provider's track."""
-    if f0 is None:
-        return pitch_tracks.pyin_track(grader.analysis(clip, None))
+def _track(
+    measure: tuple[str | None, str],
+    graders: dict[str | None, evaluate.Grader],
+    clip: Clip,
+    audio: tuple[bytes, np.ndarray],
+) -> list[float | None]:
+    """One measurement's f0 for a clip (see `MEASURES`); `audio` is the clip's `read_wav`."""
+    f0, where = measure
+    if where == "analysis":
+        return pitch_tracks.pyin_track(graders[f0].analysis(clip, None, audio))
     try:
-        return pitch_tracks.track_hz(pitch_tracks.provider_track(f0, pcm))
+        return pitch_tracks.track_hz(pitch_tracks.provider_track(f0, audio[1]))
     except ValueError as e:
         raise evaluate.EvalError(f"{clip.id}: {e}") from e
 
@@ -116,22 +109,23 @@ def _synthetic(
     grader = evaluate.Grader(
         pack_toml, calib_json, accent or evaluate.base_accent(pack_toml), directory, cache_dir
     )
+    graders = {f0: replace(grader, f0=f0) for f0, _ in MEASURES.values()}
     sizes: dict[str, int] = {}
     pooled: dict[str, dict[str, Counts]] = {}
     for clip in clips:
         if clip.id not in truth:
             raise BakeoffError(f"{clip.id}: no f0 truth in {directory / 'truth.jsonl'}")
-        _, pcm = evaluate.read_wav(directory / clip.path, clip.id)
-        name = condition(clip)
+        audio = evaluate.read_wav(directory / clip.path, clip.id)
+        name = conditions.condition(clip)
         sizes[name] = sizes.get(name, 0) + 1
-        totals = pooled.setdefault(name, {provider: Counts() for provider in PROVIDERS})
-        for provider, f0 in PROVIDERS.items():
-            est = _track(f0, grader, clip, pcm)
+        totals = pooled.setdefault(name, {measure: Counts() for measure in MEASURES})
+        for measure, how in MEASURES.items():
+            est = _track(how, graders, clip, audio)
             try:
-                totals[provider] += count(est, truth[clip.id])
+                totals[measure] += count(est, truth[clip.id])
             except ValueError as e:  # the truth has another length
                 raise BakeoffError(f"{clip.id}: {e}") from e
-    return {name: Group(sizes[name], pooled[name]) for name in sorted(pooled, key=_order)}
+    return {name: Group(sizes[name], pooled[name]) for name in sorted(pooled, key=conditions.order)}
 
 
 def _gate(

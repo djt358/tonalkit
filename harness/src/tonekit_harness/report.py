@@ -29,10 +29,10 @@ def _cell(text: object) -> str:
     return str(text).replace("|", "\\|")
 
 
-def rate(value: float | None, n: int | None) -> str:
-    """A rate as `0.750 (3/4)` for `n` clips; `n/a (no clips)` for None."""
+def rate(value: float | None, n: int | None, *, missing: str = "n/a (no clips)") -> str:
+    """A rate as `0.750 (3/4)` out of `n`; `missing` for None."""
     if value is None:
-        return "n/a (no clips)"
+        return missing
     return f"{value:.3f} ({round(value * n)}/{n})" if n else f"{value:.3f}"
 
 

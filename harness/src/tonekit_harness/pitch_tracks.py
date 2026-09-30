@@ -153,7 +153,12 @@ def swiftf0_track(pcm: np.ndarray) -> str:
     """SwiftF0's f0 for 16 kHz mono `pcm`, on tonekit's grid, as `F0Track` JSON whose provider is
     the provider identity (`"swift-f0 <version>; ..."`; see `resample`, `swiftf0_input`)."""
     pcm = np.asarray(pcm, dtype=np.float32)
-    found = _detector().detect(swiftf0_input(pcm), SAMPLE_RATE, fmin=F0_MIN_HZ, fmax=F0_MAX_HZ)
+    try:
+        found = _detector().detect(swiftf0_input(pcm), SAMPLE_RATE, fmin=F0_MIN_HZ, fmax=F0_MAX_HZ)
+    except ValueError:
+        raise
+    except Exception as e:  # onnxruntime raises its own error types
+        raise ValueError(f"SwiftF0 failed: {type(e).__name__}: {e}") from e
     frames = resample(found.timestamps, found.pitch_hz, found.confidence, len(pcm) // HOP + 1)
     return json.dumps({"frames": frames, "provider": _swiftf0_identity()})
 

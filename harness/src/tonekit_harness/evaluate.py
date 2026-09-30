@@ -206,8 +206,15 @@ class Grader:
     cache_dir: Path | None  # None: no cache
     f0: str | None = None  # a name in `pitch_tracks.EXTERNAL_PROVIDERS`; None: tonekit's own pYIN
 
-    def analysis(self, clip: Clip, register_json: str | None) -> str:
-        wav, pcm = read_wav(self.root / clip.path, clip.id)
+    def analysis(
+        self,
+        clip: Clip,
+        register_json: str | None,
+        audio: tuple[bytes, np.ndarray] | None = None,
+    ) -> str:
+        """The clip's Analysis JSON, from the cache if it is there. `audio` is the clip's
+        `read_wav` if the caller has already read it."""
+        wav, pcm = audio if audio is not None else read_wav(self.root / clip.path, clip.id)
         entry = None
         if self.cache_dir is not None:
             identity = None if self.f0 is None else pitch_tracks.provider_identity(self.f0)

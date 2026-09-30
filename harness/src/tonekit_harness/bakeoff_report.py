@@ -7,46 +7,51 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from . import pitch_metrics, pitch_tracks, report
+from . import conditions, pitch_metrics, pitch_tracks, report
 from .metrics import CA_MIN, WA_MAX
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Callable, Mapping
 
     from .bakeoff import Bakeoff, GateScores, Group
-
-_METHOD = (
-    "Each clip's f0 is compared frame by frame, on tonekit's 10 ms grid, with the exact f0 that "
-    "WORLD was given. **pyin** is tonekit's own track as its Analysis holds it, after octave "
-    "repair (the raw pYIN track is not exposed to Python). **swift-f0** is SwiftF0's track "
-    f"searched over {pitch_tracks.F0_MIN_HZ:g}-{pitch_tracks.F0_MAX_HZ:g} Hz and resampled onto "
-    "the grid as tonekit receives it, before octave repair: a grid frame is voiced where the "
-    f"interpolated confidence is at least {pitch_tracks.GRID_VOICED:g}. GPE is the fraction of "
-    f"frames voiced in both whose pitch is more than {pitch_metrics.GROSS_ERROR:.0%} off; "
-    "VDE is the fraction of all frames whose voicing differs. Frames are pooled over the clips "
-    "of a condition. A noise clip is in the bucket of its SNR (`noise ~N dB`, the nearest of 5, "
-    "10 and 20 dB); every other clip is clean."
-)
+    from .pitch_metrics import Counts
 
 
-def _rate(rate: float | None, numerator: int, denominator: int) -> str:
-    return "n/a" if rate is None else f"{rate:.3f} ({numerator}/{denominator})"
+def _method() -> str:
+    return (
+        "Each clip's f0 is compared frame by frame, on tonekit's 10 ms grid, with the exact f0 "
+        "that WORLD was given. **pyin** is tonekit's own track as its Analysis holds it, after "
+        "octave repair (the raw pYIN track is not exposed to Python). **swift-f0** is SwiftF0's "
+        f"track searched over {pitch_tracks.F0_MIN_HZ:g}-{pitch_tracks.F0_MAX_HZ:g} Hz and "
+        "resampled onto the grid as tonekit receives it, before octave repair: a grid frame is "
+        f"voiced where the interpolated confidence is at least {pitch_tracks.GRID_VOICED:g}. "
+        f"A clip peaking below {pitch_tracks.QUIET_PEAK_DBFS:g} dBFS is scaled up to a peak of "
+        f"{pitch_tracks.QUIET_TARGET_PEAK:g} before SwiftF0 sees it (its README's rule); tonekit "
+        "always gets the original samples. **swift-f0 (after tonekit's octave repair)** is the "
+        "f0 tonekit ends up with when it is handed that track, so it compares with pyin like for "
+        "like. GPE is the fraction of frames voiced in both whose pitch is more than "
+        f"{pitch_metrics.GROSS_ERROR:.0%} off; VDE is the fraction of all frames whose voicing "
+        "differs. GPE is conditional on each provider's own voicing: a provider that is voiced "
+        "on fewer frames is judged on fewer, so read it with the Voiced in both column. Frames "
+        "are pooled over the clips of a condition. A noise clip is in the bucket of its SNR "
+        f"(`noise ~N dB`, the nearest of {conditions.buckets_text()}); every other clip is clean."
+    )
 
 
-def _lower_gpe(synthetic: Mapping[str, Group]) -> str:
-    """Which provider has the lower GPE in each condition: its name, `tie`, or `n/a` when a
-    provider has no frame voiced in both."""
+def _lower(synthetic: Mapping[str, Group], metric: str, rate: Callable[[Counts], float | None]):
+    """Which measurement has the lower `metric` in each condition: its name (`a and b` when they
+    share the lowest), `tie` when all do, or `n/a` when one has no frames to judge."""
     parts = []
     for name, group in synthetic.items():
-        rates = {provider: counts.gpe for provider, counts in group.counts.items()}
-        if any(rate is None for rate in rates.values()):
+        rates = {measure: rate(counts) for measure, counts in group.counts.items()}
+        if any(r is None for r in rates.values()):
             verdict = "n/a"
         else:
             best = min(rates.values())
-            winners = [provider for provider, rate in rates.items() if rate == best]
-            verdict = winners[0] if len(winners) == 1 else "tie"
+            winners = [measure for measure, r in rates.items() if r == best]
+            verdict = "tie" if len(winners) == len(rates) else " and ".join(winners)
         parts.append(f"{name} {verdict}")
-    return "Lower GPE, by condition: " + "; ".join(parts) + "."
+    return f"Lower {metric}, by condition: " + "; ".join(parts) + "."
 
 
 def _synthetic_section(synthetic: Mapping[str, Group]) -> list[str]:
@@ -60,19 +65,21 @@ def _synthetic_section(synthetic: Mapping[str, Group]) -> list[str]:
                     provider,
                     c.frames,
                     c.both_voiced,
-                    _rate(c.gpe, c.gross_errors, c.both_voiced),
-                    _rate(c.vde, c.voicing_errors, c.frames),
+                    report.rate(c.gpe, c.both_voiced, missing="n/a"),
+                    report.rate(c.vde, c.frames, missing="n/a"),
                 ]
             )
     header = ["Condition", "Clips", "Provider", "Frames", "Voiced in both", "GPE", "VDE"]
     return [
         "## Synthetic f0 accuracy",
         "",
-        _METHOD,
+        _method(),
         "",
         *report.table(header, rows),
         "",
-        _lower_gpe(synthetic),
+        _lower(synthetic, "GPE", lambda c: c.gpe),
+        "",
+        _lower(synthetic, "VDE", lambda c: c.vde),
         "",
     ]
 
