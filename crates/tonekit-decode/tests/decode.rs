@@ -12,7 +12,7 @@ use tonekit_core::{
 use tonekit_decode::{decode, lattice};
 use tonekit_f0::{energy, repair_octaves, F0Provider, Pyin};
 use tonekit_pack::LanguagePack;
-use tonekit_segment::{boundaries, nuclei, speech_region, speech_threshold, SegmentParams};
+use tonekit_segment::{boundaries, nuclei, speech_frames, speech_region, SegmentParams};
 use tonekit_shape::voiced_semitones;
 use tonekit_testkit::{register_for, synth, SynthSpec, SynthSyllable};
 
@@ -472,12 +472,8 @@ fn candidate_llr_is_the_sum_of_its_path() {
     ];
     let r = decode(&a, &pack, &std_g(), &cands).unwrap();
 
-    let threshold = speech_threshold(&a.energy, &SegmentParams::default());
-    let speech = |from: u32, to: u32| {
-        (from..to)
-            .filter(|&f| a.energy.db[f as usize] >= threshold)
-            .count() as f64
-    };
+    let is_speech = speech_frames(&a.energy, &SegmentParams::default());
+    let speech = |from: u32, to: u32| (from..to).filter(|&f| is_speech[f as usize]).count() as f64;
     let mut frames: Vec<u32> = a.nuclei.iter().map(|n| n.frame).collect();
     frames.sort_unstable();
     let mut gaps: Vec<u32> = frames.windows(2).map(|w| w[1] - w[0]).collect();

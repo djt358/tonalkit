@@ -21,4 +21,4 @@ mod smooth;
 
 pub use boundaries::{boundaries, boundaries_with};
 pub use nuclei::nuclei;
-pub use region::{speech_region, speech_threshold, SegmentParams};
+pub use region::{speech_frames, speech_region, speech_threshold, SegmentParams};

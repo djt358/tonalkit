@@ -3,7 +3,8 @@ use proptest::prelude::*;
 use tonekit_core::{EnergyTrack, F0Frame, F0Track, FrameRange, Nucleus};
 use tonekit_f0::{energy, F0Provider, Pyin};
 use tonekit_segment::{
-    boundaries, boundaries_with, nuclei, speech_region, speech_threshold, SegmentParams,
+    boundaries, boundaries_with, nuclei, speech_frames, speech_region, speech_threshold,
+    SegmentParams,
 };
 use tonekit_testkit::{synth, Synth, SynthSpec, SynthSyllable};
 
@@ -320,6 +321,42 @@ fn region_spans_first_to_last_loud_frame_half_open() {
     assert_eq!(
         speech_region(&EnergyTrack { db }, &Default::default()),
         Some(range(20, 67))
+    );
+}
+
+#[test]
+fn a_frame_exactly_at_the_threshold_is_not_speech_anywhere() {
+    // M8: one test for speech, strictly above the threshold, shared by the speech region, the
+    // pause edges and the decoder's filler. The quiet level is −60 dB (threshold −50); two bursts
+    // at −20 dB, frames 20..30 and 60..70, each with a neighbour sitting exactly on −50.
+    let mut db = vec![-60.0; 100];
+    for f in (20..30).chain(60..70) {
+        db[f] = -20.0;
+    }
+    db[30] = -50.0;
+    db[59] = -50.0;
+    let e = EnergyTrack { db };
+    assert_eq!(speech_threshold(&e, &Default::default()), -50.0);
+    let speech = speech_frames(&e, &Default::default());
+    let loud: Vec<usize> = (0..100).filter(|&i| speech[i]).collect();
+    assert_eq!(loud, (20..30).chain(60..70).collect::<Vec<_>>());
+    assert_eq!(speech_region(&e, &Default::default()), Some(range(20, 70)));
+    // The pause edges are the last loud frame leaving (29) and the first entering (60).
+    let b = boundaries(
+        &e,
+        &voicing(&[0.0; 100]),
+        &range(20, 70),
+        &[nuc(25), nuc(65)],
+    );
+    assert!(b.contains(&29) && b.contains(&60), "{b:?}");
+    assert!(!b.contains(&30) && !b.contains(&59), "{b:?}");
+    // Non-finite frames are never speech; a track with no finite frame has none.
+    let e = EnergyTrack {
+        db: vec![f32::NAN, -20.0, f32::INFINITY],
+    };
+    assert_eq!(
+        speech_frames(&e, &Default::default()),
+        [false, false, false]
     );
 }
 

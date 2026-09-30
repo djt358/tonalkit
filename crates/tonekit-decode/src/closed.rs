@@ -24,7 +24,7 @@ use tonekit_core::{
     SyllableFit, TbuSpan, ToneTarget,
 };
 use tonekit_pack::{LanguagePack, TargetContext};
-use tonekit_segment::{speech_threshold, SegmentParams};
+use tonekit_segment::{speech_frames, SegmentParams};
 
 use crate::cache::{missed, unmeasured, Scorer, TargetKey};
 use crate::duration::{log_prior, rate_s, FRAME_S};
@@ -36,13 +36,10 @@ pub(crate) const MIN_SYLLABLE_FRAMES: u32 = 6;
 /// Longest syllable edge, in frames (800 ms).
 pub(crate) const MAX_SYLLABLE_FRAMES: u32 = 80;
 
-/// Which frames are speech: finite energy at or above the speech threshold of the default
-/// segmentation parameters (the ones the analysis was segmented with).
+/// Which frames are speech under the default segmentation parameters (the ones the analysis was
+/// segmented with): the same test as the speech region and the pause edges.
 pub(crate) fn speech_mask(e: &EnergyTrack) -> Vec<bool> {
-    let threshold = speech_threshold(e, &SegmentParams::default());
-    e.db.iter()
-        .map(|&d| d.is_finite() && d >= threshold)
-        .collect()
+    speech_frames(e, &SegmentParams::default())
 }
 
 /// Running counts over the track: `prefix[f]` = marked frames in `[0, f)`, one longer than the
@@ -470,6 +467,16 @@ mod tests {
             Ok(0.0)
         });
         seen
+    }
+
+    #[test]
+    fn a_frame_at_the_speech_threshold_is_not_charged_as_speech() {
+        // 20 frames at −100 dB put the quiet level there and the threshold at −90: a frame exactly
+        // on it is not speech, as for the speech region and the pause edges (M8).
+        let mut db = vec![-100.0; 20];
+        db.extend([-90.0, -89.9, -20.0]);
+        let mask = speech_mask(&EnergyTrack { db });
+        assert_eq!(mask[20..], [false, true, true]);
     }
 
     #[test]
