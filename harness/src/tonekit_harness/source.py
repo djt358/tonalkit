@@ -1,6 +1,10 @@
 """Source clips for the synthetic corpus: a correct recording analysed once with WORLD and
 tonekit, ready to be perturbed many times (`prepare`), and the loader that prepares every correct
-clip of a manifest with its speaker's register (`load_sources`)."""
+clip of a manifest with its speaker's register, one at a time (`load_sources`).
+
+A syllable's extent is its voiced core (`voiced_core`): within the span tonekit decoded for it, the
+longest run of frames that WORLD and tonekit's pitch tracker both call voiced, so a stray voiced
+frame at the edge of a span does not stretch it."""
 
 from __future__ import annotations
 

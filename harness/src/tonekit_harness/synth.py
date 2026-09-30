@@ -1,7 +1,13 @@
 """Controlled resynthesis (spec §9): resynthesise a real, correct recording with its f0 replaced by
 a perturbed target contour. The timbre stays real, and the tone and f0 ground truth are exact.
 
-`perturb` makes one perturbed clip from a prepared `source.Source`; `tkh synth` samples many.
+`perturb` makes one perturbed clip from a prepared `source.Source`; `tkh synth` samples many
+(one source at a time, a class first and then a family within it, see `families.draw`). The pieces
+are `world` (analysis and resynthesis), `source` (a clip analysed once), `voice` and `family` with
+`tone_errors`, `graded` and `nuisance` (what a family does to the f0 track), `families` (their
+registry and sampling) and `corpus` (the files written). `--out` must be empty or new, and
+`--noise-wav` gives the `noise` family a recording to add instead of pink noise.
+
 Synthetic audio is for tests and diagnostics, never for fitting shipped calibration: every row's
 `source` is `synthetic-world`.
 """

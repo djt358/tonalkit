@@ -1,10 +1,11 @@
 """Random-search adversary (spec §9, P0): perturb real clips at random within the spec's bounds and
 keep the cases where tonekit is wrong.
 
-A trial perturbs one source with a random tone-error or nuisance family and asks tonekit to grade
-the result against the source's intended reading, the way `tkh eval` grades a clip: analysed with
-the speaker's register (from their register clips, if the manifest has any; cold otherwise) and
-scored by the same `assess`. That keeps θ, typically fitted on `tkh eval` scores, comparable.
+A trial perturbs one source with a random tone-error or nuisance family (the class first, each
+equally likely, then a family within it) and asks tonekit to grade the result against the source's
+intended reading, the way `tkh eval` grades a clip: analysed with the speaker's register (from
+their register clips, if the manifest has any; cold otherwise) and scored by the same `assess`.
+That keeps θ, typically fitted on `tkh eval` scores, comparable.
 
 The overall score is accepted at or above θ (no score, "tone not checked", is a rejection). A find
 is a false accept (a tone error tonekit accepts) or a false reject (a nuisance-only clip, which a
