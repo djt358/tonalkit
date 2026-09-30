@@ -48,6 +48,30 @@ def write_index(out_dir: str | Path, clips: Sequence[Clip], truths: Sequence[lis
     (out / "truth.jsonl").write_text("".join(lines), encoding="utf-8")
 
 
+def read_truth(out_dir: str | Path) -> dict[str, list[float | None]]:
+    """The f0 truth `write_index` wrote: clip id to Hz per 10 ms frame (None where unvoiced), in
+    file order. Raises `SynthError` naming the file and line for a line that is not
+    `{"id", "f0_hz"}` or repeats an id, and if `out_dir` has no `truth.jsonl`."""
+    path = Path(out_dir) / "truth.jsonl"
+    if not path.is_file():
+        raise SynthError(f"no truth.jsonl in {out_dir}")
+    truth: dict[str, list[float | None]] = {}
+    for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+        if not line.strip():
+            continue
+        where = f"{path}:{lineno}"
+        try:
+            obj = json.loads(line)
+        except json.JSONDecodeError as e:
+            raise SynthError(f"{where}: invalid JSON: {e}") from e
+        if not (isinstance(obj, dict) and isinstance(obj.get("id"), str) and isinstance(obj.get("f0_hz"), list)):
+            raise SynthError(f"{where}: expected an id and f0_hz")
+        if obj["id"] in truth:
+            raise SynthError(f"{where}: duplicate id {obj['id']!r}")
+        truth[obj["id"]] = obj["f0_hz"]
+    return truth
+
+
 def write_corpus(out_dir: str | Path, made: Sequence[Made]) -> None:
     """Write perturbed clips (WAVs under `wav/`, the manifest and the truth) to `out_dir`."""
     for audio, _, clip in made:
