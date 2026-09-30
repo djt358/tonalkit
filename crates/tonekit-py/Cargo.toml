@@ -1,0 +1,28 @@
+[package]
+name = "tonekit-py"
+version = "0.1.0"
+description = "Python bindings for tonekit: JSON in, JSON out, the same numbers as the CLI and the Swift package."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[lib]
+name = "tonekit_py"
+crate-type = ["cdylib"]
+# A Python extension module cannot be linked into a Rust test binary (no libpython), and it has
+# no Rust doctests; its tests are pytest, in tests/.
+test = false
+doctest = false
+
+[dependencies]
+# Only the facade: analyze, decode, lattice and assess, with no `ffi` feature (no UniFFI code in
+# this module). `abi3-py311` builds one wheel for every CPython from 3.11 on, and is what makes
+# the buffer protocol (numpy arrays as pcm) available through the stable ABI.
+tonekit = { path = "../tonekit" }
+serde_json = { workspace = true }
+pyo3 = { version = "0.29", features = ["extension-module", "abi3-py311"] }
+
+[build-dependencies]
+# For the macOS link arguments in build.rs (see there).
+pyo3-build-config = "0.29"

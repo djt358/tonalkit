@@ -1,0 +1,49 @@
+[project]
+name = "tonekit-harness"
+version = "0.1.0"
+description = "Evaluation harness for tonekit: corpus manifest, ingest, provenance check."
+requires-python = ">=3.11"
+license = "MIT OR Apache-2.0"
+dependencies = [
+    "numpy",
+    "scipy",
+    "pydantic>=2",
+    # The Rust tonekit library, for evaluation, synthetic tests and calibration (JSON in, JSON
+    # out). `uv sync` builds it with maturin, so a Rust toolchain must be on the PATH.
+    "tonekit-py",
+    # WORLD vocoder for the synthetic perturbation corpus (`tkh synth`, `tkh adversary`).
+    # pyworld 0.3.5 ships wheels for Windows only: on Linux and macOS `uv sync` builds it from
+    # source, so it needs a C++ compiler and Cython at that point. If it cannot be imported, only
+    # `tkh synth` and `tkh adversary` are disabled (the other commands work; see cli.py).
+    "pyworld>=0.3.5",
+    # pyworld 0.3.5 imports `pkg_resources` (only to read its own version) but does not declare
+    # setuptools; setuptools 81 and later no longer ship `pkg_resources`.
+    "setuptools<81",
+    # SwiftF0 (MIT) and ONNX Runtime (MIT) for `tkh bakeoff`, the pYIN against SwiftF0 comparison.
+    # The SwiftF0 model ships inside the swift-f0 wheel: nothing is downloaded at run time.
+    "swift-f0>=0.3.0",
+    "onnxruntime>=1.30.0",
+]
+
+[project.scripts]
+tkh = "tonekit_harness.cli:main"
+
+[tool.uv.sources]
+tonekit-py = { path = "../crates/tonekit-py" }
+
+[dependency-groups]
+dev = [
+    "pytest",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/tonekit_harness"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+filterwarnings = ["error"]

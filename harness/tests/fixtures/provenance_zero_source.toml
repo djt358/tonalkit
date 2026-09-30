@@ -1,0 +1,3 @@
+# Stand-in for packs/cmn/PROVENANCE.toml: seed values, no data sources.
+artifact = "fixtures/cmn.calib.json"
+note = "seed values from published tone letters; not fitted"

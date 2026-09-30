@@ -1,0 +1,26 @@
+[workspace]
+members = ["crates/*"]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+rust-version = "1.85"
+license = "MIT OR Apache-2.0"
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = { version = "0.8", default-features = false, features = ["parse"] }
+thiserror = "2"
+approx = "0.5"
+proptest = "1"
+insta = { version = "1", features = ["json"] }
+
+# Dependencies are compiled once and reused across test runs; optimise them even in dev builds.
+[profile.dev.package."*"]
+opt-level = 3
+
+# tonekit-f0 instantiates pyin's generic PYINExecutor itself, so that code is compiled here rather
+# than in the (already optimised) pyin crate; without this, pYIN is ~10x slower in dev builds.
+[profile.dev.package.tonekit-f0]
+opt-level = 3

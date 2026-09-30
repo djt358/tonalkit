@@ -1,0 +1,6 @@
+artifact = "fixtures/bad.calib.json"
+note = "lists a deny source"
+
+[[source]]
+id = "magicdata-read"
+use = "calibration fit"

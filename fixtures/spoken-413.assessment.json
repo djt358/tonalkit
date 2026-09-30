@@ -1,0 +1,78 @@
+{
+  "schema": "tonekit.assessment.v1",
+  "intended": "intended",
+  "intended_rank": 1,
+  "margin_llr": 1.9830225,
+  "syllables": [
+    {
+      "expected": "4",
+      "p_correct": 0.73032373,
+      "distance": 0.6191196,
+      "heard": "4",
+      "heard_as": null,
+      "deltas": [
+        {
+          "kind": "WiderRange",
+          "amount": 1.2305684
+        }
+      ],
+      "component": "cmn-standard/citation",
+      "measured": {
+        "Partial": {
+          "issues": [
+            "ColdStartRegister"
+          ]
+        }
+      },
+      "basis": [
+        "Acoustic"
+      ]
+    },
+    {
+      "expected": "1",
+      "p_correct": 0.7338126,
+      "distance": 0.6612639,
+      "heard": "1",
+      "heard_as": null,
+      "deltas": [],
+      "component": "cmn-standard/citation",
+      "measured": {
+        "Partial": {
+          "issues": [
+            "ColdStartRegister"
+          ]
+        }
+      },
+      "basis": [
+        "Acoustic"
+      ]
+    },
+    {
+      "expected": "3",
+      "p_correct": 0.77021223,
+      "distance": 0.42448077,
+      "heard": null,
+      "heard_as": null,
+      "deltas": [],
+      "component": "cmn-standard/t3-final-dip#0",
+      "measured": {
+        "Partial": {
+          "issues": [
+            "ColdStartRegister"
+          ]
+        }
+      },
+      "basis": [
+        "Acoustic"
+      ]
+    }
+  ],
+  "overall": 0.73032373,
+  "accent_fit": [],
+  "register_update": {
+    "floor_st": 9.039957,
+    "median_st": 17.549957,
+    "ceil_st": 24.349958,
+    "n_syllables": 3
+  }
+}

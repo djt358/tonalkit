@@ -1,0 +1,146 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Nothing here writes to the repository, its issues or its packages.
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  fmt:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - run: cargo fmt --all --check
+
+  clippy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo test --workspace --locked
+
+  # The declared rust-version (workspace Cargo.toml) is a promise: build the workspace on exactly
+  # that toolchain. `+1.85` beats rust-toolchain.toml (which asks for stable). Keep in step with
+  # `rust-version` there.
+  msrv:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.85
+      - run: cargo +1.85 build --workspace --locked
+
+  # cargo-deny reads Cargo.lock itself and brings its own binary: no Rust toolchain needed.
+  deny:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check
+
+  # The default builds stay free of UniFFI, and the Swift bindings generate with the expected API.
+  # (`cargo test --workspace` compiles with the `ffi` feature on, because the workspace includes
+  # tonekit-ffi; this job builds the crates alone, as their other consumers do.)
+  ffi:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Default builds have no UniFFI
+        run: |
+          cargo check -p tonekit-core -p tonekit -p tonekit-cli --locked
+          test "$(cargo tree -p tonekit-cli -e normal,build --locked | grep -c uniffi)" = 0
+      - name: Swift bindings generate and have the expected API
+        run: scripts/check-swift-bindings.sh
+
+  # Task 12: the iOS build, proven on the Simulator (spec 4.3). Builds the XCFramework, then runs
+  # the Swift tests in swift/TonekitSmoke against it.
+  ios:
+    runs-on: macos-14
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios,aarch64-apple-ios-sim
+      - name: Build the XCFramework
+        run: scripts/build-xcframework.sh
+      - name: Swift tests on the iOS Simulator
+        working-directory: swift/TonekitSmoke
+        run: |
+          set -o pipefail
+          destination='platform=iOS Simulator,name=iPhone 15'
+          log=../../build/xcodebuild-test.log
+          # SwiftPM names the scheme after the library product; if this Xcode only offers the
+          # package-wide scheme, use that.
+          scheme=TonekitSmoke
+          schemes=$(xcodebuild -list)
+          grep -Eq '^[[:space:]]+TonekitSmoke$' <<<"$schemes" || scheme=TonekitSmoke-Package
+          echo "scheme: $scheme"
+          if ! xcodebuild test -scheme "$scheme" -destination "$destination" | tee "$log"; then
+            # The library scheme can be listed yet not testable ("not configured for the test
+            # action"); the package-wide scheme then still runs the tests. Both attempts stay in
+            # the log.
+            [ "$scheme" = TonekitSmoke ] || exit 1
+            echo "::warning::xcodebuild test -scheme TonekitSmoke failed; retrying with TonekitSmoke-Package"
+            echo "=== retry: -scheme TonekitSmoke-Package ===" | tee -a "$log"
+            xcodebuild test -scheme TonekitSmoke-Package -destination "$destination" | tee -a "$log"
+          fi
+      - name: Latency on the Simulator (informational)
+        if: always()
+        run: grep -E 'measured \[Time|TONEKIT_LATENCY' build/xcodebuild-test.log || true
+      - name: Keep the logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-logs
+          path: build/*.log
+
+  harness:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: harness
+    steps:
+      - uses: actions/checkout@v4
+      # `uv sync` builds tonekit-py (a path dependency) with maturin, which needs cargo.
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: astral-sh/setup-uv@v9.0.0
+      - run: uv sync --locked
+      - run: uv run pytest
+      - run: uv run tkh provenance --register ../data-register.csv --packs-root ../packs
+
+  # Task 13: the Python module (crates/tonekit-py). The harness depends on it, so `uv sync` builds
+  # it with maturin (against the locked Cargo.lock), and its tests then check that Python gives the
+  # CLI's numbers on the shared fixture (fixtures/spoken-413.*).
+  python-bindings:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: harness
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: astral-sh/setup-uv@v9.0.0
+      - run: uv sync --locked
+      - run: uv run pytest ../crates/tonekit-py/tests

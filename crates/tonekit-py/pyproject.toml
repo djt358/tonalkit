@@ -1,0 +1,46 @@
+[build-system]
+requires = ["maturin>=1.9.2,<2"]  # 1.9.2 is the first to write `License-Expression` (PEP 639)
+build-backend = "maturin"
+
+[project]
+name = "tonekit-py"
+description = "Python bindings for tonekit (lexical-tone assessment): JSON in, JSON out, the same numbers as the CLI and the Swift package."
+requires-python = ">=3.11"
+# Only the version comes from Cargo.toml (maturin fills just the fields listed in `dynamic`). The
+# license is set here as a PEP 639 SPDX expression, so the wheel's METADATA carries
+# `License-Expression: MIT OR Apache-2.0` (maturin >= 1.9.2, the build requirement above, is the
+# first to write that field; the crate itself is `MIT OR Apache-2.0` and `publish = false`).
+# No `license-files`: the license texts live at the repository root, outside this crate.
+license = "MIT OR Apache-2.0"
+dynamic = ["version"]
+classifiers = [
+    "Programming Language :: Rust",
+    "Programming Language :: Python :: Implementation :: CPython",
+]
+
+[tool.maturin]
+module-name = "tonekit_py"
+manifest-path = "Cargo.toml"
+# One abi3 wheel serves every CPython >= 3.11 (Cargo.toml: abi3-py311).
+strip = true
+# Build against the workspace's Cargo.lock exactly: the numbers must not move with a dependency.
+locked = true
+
+[tool.uv]
+# uv rebuilds a path dependency only when these change; the default watches pyproject.toml alone,
+# which would leave a stale extension installed after a Rust edit here or in any tonekit crate.
+cache-keys = [
+    { file = "pyproject.toml" },
+    { file = "Cargo.toml" },
+    { file = "build.rs" },
+    { file = "src/**/*.rs" },
+    { file = "../*/Cargo.toml" },
+    { file = "../*/src/**/*.rs" },
+    { file = "../../Cargo.toml" },
+    { file = "../../Cargo.lock" },
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+filterwarnings = ["error"]

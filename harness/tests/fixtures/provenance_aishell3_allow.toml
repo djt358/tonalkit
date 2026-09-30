@@ -1,0 +1,6 @@
+artifact = "fixtures/native.calib.json"
+note = "lists an allow source"
+
+[[source]]
+id = "aishell-3"
+use = "native calibration"

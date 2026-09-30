@@ -1,8 +1,9 @@
 # Tone assessment (`tonekit`): design spec
 
 **Status:** v2.1. DJ approved v1 with changes, then approved v2 with three clarifications
-(2026-09-28): iOS-native first with no wasm target, AISHELL outreach deferred, imprint = the
-user's own voice. P0 plan approved for subagent-driven execution.
+(2026-09-28): iOS-native first with no wasm target, and imprint = the user's own voice. P0 plan
+approved for subagent-driven execution. v2.2: DJ confirmed AISHELL-1/3 and THCHS-30 are now plain
+Apache-2.0 (the academic-use caveat was rescinded), so they're back in.
 **Date:** 2026-09-28
 **Superpowers path:** Architectural (new subsystem with a new cross-project interface)
 **Research:** `docs/research/2026-09-28-tone-assessment-prior-art.md`, `docs/research/tone-assessment-license-register.csv`
@@ -14,7 +15,7 @@ user's own voice. P0 plan approved for subagent-driven execution.
 | DJ change | Where it landed |
 |---|---|
 | Rust is fine; iOS-first, on-device without issue (v2.1: wasm dropped as a target) | §4.3: native `staticlib` on iOS via UniFFI; P0 verifies it on the iOS Simulator; device latency is a P1 gate |
-| "Free for academic use" ≠ Bendy, and OSS doesn't launder it | §11.2: AISHELL and THCHS are **denied** for shipped calibration until the rights holders confirm in writing. Calibration moves to Common Voice (CC0) and owned data |
+| "Free for academic use" ≠ Bendy, and OSS doesn't launder it | §11.2: the principle stands for any academic-only source. **v2.2:** AISHELL-1/3 and THCHS-30 dropped the caveat and are plain Apache-2.0, so they're allowed. AISHELL-3 is the primary native calibration source |
 | Name stays `tonekit`; public after P0; Tencent offline | §16, recorded |
 | T1. Role in an ensemble; consumers that self-correct misleading transcripts | §8: a likelihood lattice plus candidate rescoring, with separate priors. Plug-in points named |
 | T2. Test TTS models in a GAN framework | §9: adversarial *search* over controlled resynthesis instead of a literal GAN; tonekit also works as a TTS tone critic |
@@ -176,6 +177,8 @@ pub struct CandidateId(pub String);
 // signal.rs
 pub const SAMPLE_RATE: u32 = 16_000;
 pub const HOP: usize = 160;                           // 10 ms
+/// Voiced ⇔ `hz.is_some()`: the provider's own voicing decision (pYIN's HMM), everywhere (R32).
+/// `voiced_p` is only a confidence weight (`ToneShape::f0_confidence`).
 pub struct F0Frame { pub hz: Option<f32>, pub voiced_p: f32 }
 pub struct F0Track { pub frames: Vec<F0Frame>, pub provider: String }   // frame i at i*10 ms
 pub struct EnergyTrack { pub db: Vec<f32> }
@@ -210,13 +213,22 @@ pub struct ToneShape {
     pub voiced_weights: Vec<f32>,
     pub onset: f32, pub offset: f32, pub mean: f32,
     pub slope: f32, pub curvature: f32, pub turning_point: Option<f32>, pub range: f32,
-    pub duration_ms: f32, pub voiced_fraction: f32, pub f0_confidence: f32,
+    pub duration_ms: f32, pub voiced_fraction: f32,
+    pub f0_confidence: f32,                    // mean voiced_p over the voiced frames
     pub phonation: Option<Phonation>,          // reserved; None until a pack declares it
 }
 pub struct Phonation { pub creak_ratio: f32, pub cpp_db: f32 }
 
 // judgement.rs
-pub enum MeasureIssue { Unvoiced, LowSnr, Clipped, TooShort, ColdStartRegister }
+pub enum MeasureIssue {
+    Unvoiced, LowSnr, Clipped, TooShort, ColdStartRegister,
+    /// The given register was not usable (non-finite or implausible levels, a median outside the
+    /// floor-to-ceiling range, an inverted range, or an impossible syllable count), so the
+    /// utterance was graded from a cold start instead.
+    InvalidRegister,
+    /// Evidence that is not a number (a non-finite shape or neural probability) was ignored.
+    InvalidEvidence,
+}
 pub enum Measured { Full, Partial { issues: Vec<MeasureIssue> }, NotMeasured { issue: MeasureIssue } }
 /// Advice direction ("start higher"). `amount` is in Chao units, or ms for Turn*.
 pub enum DeltaKind { StartHigher, StartLower, EndHigher, EndLower, TurnEarlier, TurnLater, WiderRange, NarrowerRange }
@@ -258,9 +270,9 @@ pub struct SyllableAssessment { pub expected: ToneId, pub p_correct: f32, pub di
     pub component: Option<String>, pub measured: Measured, pub basis: Vec<EvidenceKind> }
 pub struct AccentFit { pub accent: AccentId, pub llr: f32 }
 pub struct UtteranceAssessment { pub schema: String, pub intended: CandidateId, pub intended_rank: u32,
-    pub margin_llr: f32,   // intended llr − max(best other candidate llr, null_llr)
+    pub margin_llr: f32,   // intended llr − max(best other candidate llr, null_llr + null_bias)
     pub syllables: Vec<SyllableAssessment>,
-    pub overall: Option<f32>,          // None when no syllable was measured ("tone not checked")
+    pub overall: Option<f32>,          // None when no syllable has tone evidence ("tone not checked")
     pub accent_fit: Vec<AccentFit>, pub register_update: Register }
 
 // analysis.rs
@@ -268,6 +280,23 @@ pub enum RegisterSource { Given, ColdStart }
 pub struct Analysis { pub f0: F0Track, pub energy: EnergyTrack, pub nuclei: Vec<Nucleus>,
     pub boundaries: Vec<u32>, pub speech: Option<FrameRange>, pub register: Register,
     pub register_source: RegisterSource, pub voiced_st: Vec<f32>, pub issues: Vec<MeasureIssue> }
+
+// error.rs
+pub enum AssessError {
+    EmptyAudio,
+    UnsupportedSampleRate { got: u32 },
+    UnknownTone { tone: ToneId },
+    DuplicateCandidate { id: CandidateId },
+    EvidenceLengthMismatch { expected: u32, got: u32 },
+    /// A pack that cannot be loaded or used as asked (an unknown accent, bad variant weights, a
+    /// malformed pack or calibration).
+    Pack { message: String },
+    /// A request that cannot be graded whatever the audio: no candidates, a candidate with no
+    /// targets, an intended candidate the decode does not hold.
+    InvalidRequest { message: String },
+    /// Audio longer than `max` seconds (R52: the dense pYIN is unbounded in memory).
+    TooLong { seconds: f32, max: f32 },
+}
 ```
 
 **Bendy adapter mapping (P1, in Bendy):** `SyllableAssessment` → `SyllableScore` (`expected`
@@ -297,7 +326,7 @@ reserved now so the FFI stays stable.
 ```toml
 [pack]
 lect = "cmn"
-version = "0.2.0"
+version = "0.3.0"
 tbu = "syllable"
 capabilities = ["register"]
 base_accent = "cmn-standard"
@@ -347,10 +376,11 @@ pairs = [["2", "3"], ["1", "4"], ["1", "2"]]
 id = "cmn-standard"
 name = "普通话 (standard)"
 
+# (R47) the half-third plus the learner's full dip at low weight
 [[accent.realize]]
 label = "t3-half"
 when = { tone = "3", phrase_final = false }
-chao = [2, 1]
+mixture = [ { chao = [2, 1], weight = 0.75 }, { chao = [2, 1, 4], weight = 0.25 } ]
 
 [[accent.realize]]
 label = "t5-after-1"
@@ -455,30 +485,47 @@ w_k = max(x.voiced_weights[k], 0.25), except inside the pack's unvoiced_ok regio
 - `heard` = argmax of the posterior (prior × calibrated likelihood) if it's ≥ `heard_threshold`.
 - `distance` = √d² to the best target component; `component` names it.
 - Deltas: onset, offset, turning-point time and range differences to the best component. Emit
-  the two largest above 1σ.
+  the two largest above 1σ. Under `TooShort` only onset/offset deltas are emitted, and under
+  `LowSnr` none are, so advice never comes from a contour the scorer distrusts.
 
 ### 7.2 Closed-set decoding (any syllable count)
 
 Inputs: boundary candidates B (sorted frames), speech region, candidates of any lengths.
 
-- **Segment cache:** a ToneShape for each boundary pair (b_i, b_j) spanning 60–800 ms (a
-  `MeasureIssue` if unvoiced or too short).
+- **Syllable evidence (R50):** each nucleus n has one ToneShape, `shape_n`, extracted once on
+  its TBU (the nearest boundary candidates around it, as in §7.3) from the nucleus's own voiced
+  run (its contiguous voiced frames, gaps of ≤ 2 frames bridged as in R32), or a `MeasureIssue`
+  if unvoiced or too short. Every candidate, the null competitor and the lattice score these same
+  shapes: a reading cannot choose the frames its tone is judged on, so a wrong tone cannot bend
+  the evidence its way (by reaching into a pause's pitch-tracker bleed, say). Boundary pairs set
+  only the duration prior and what is left over as filler and insertions; a syllable holding
+  nucleus n is reported at n's TBU, where its evidence was measured.
 - **Per candidate with K targets,** a DP over (boundary index, syllables consumed):
-  - A *syllable* edge (b_i → b_j, target k) scores `LLR(shape_ij, target_k, ctx_k) + dur(b_j − b_i)`.
-    Here `ctx_k` = previous *target* tone, index, count, and `phrase_final = (k = K−1)`.
+  - A *syllable* edge (b_i → b_j, target k) holding nucleus n scores
+    `LLR(shape_n, target_k, ctx_k) + dur(b_j − b_i)`. Here `ctx_k` = previous *target* tone,
+    index, count, and `phrase_final = (k = K−1)`. Its span [b_i, b_j) must contain exactly one
+    nucleus, so a target can neither hide on a sliver of a syllable nor straddle two.
   - A *gap* edge (b_i → b_j) costs `filler_per_frame × speech frames in (b_i, b_j)`, while
-    silent frames are free. This covers hesitations, restarts and extra words.
-  - Paths start at any boundary with leading speech frames charged as filler, and end the same
-    way.
+    silent frames are free, and adds `insertion_llr` for each nucleus it covers (an inserted
+    syllable). This covers hesitations, restarts and extra words.
+  - Paths start at any boundary with leading speech frames and nuclei charged like a gap edge,
+    and end the same way.
   - An unmeasurable syllable scores `unvoiced_syllable_llr`.
-- `dur(d) = logN(d; ln r, 0.4) − logN(r; ln r, 0.4)`, where r = median inter-nucleus interval
-  (default 220 ms).
+  - **Relaxed pass:** only if no such path exists and the analysis has ≥ 1 nucleus, syllables may
+    hold at most one nucleus. A syllable without one (a missing syllable) scores
+    `unvoiced_syllable_llr` and is `Partial(Unvoiced)`, so it counts toward `overall` as a likely
+    miss.
+  - **No path:** the candidate's K syllables sit at an empty span at the speech-region start and
+    score `K × unvoiced_syllable_llr`. They're `NotMeasured(Unvoiced)` ("tone not checked",
+    `overall = None`) only if the analysis has no nuclei; otherwise they're `Partial(Unvoiced)`.
+- `dur(d) = −(ln(d/r))² / (2·dur_sigma²)`: 0 at d = r and symmetric in log-duration, where
+  r = median inter-nucleus interval (default 220 ms) and `dur_sigma` = 0.4.
 - **Null hypothesis ("something else was said"):**
   `null_llr = Σ_tbu [max_t loglik_t − logsumexp_t(ln prior_t + loglik_t)]` over the open lattice
   (§7.3). That is the best free choice of tone per nucleus, which is always ≥ 0. Candidate
   posteriors are a softmax over `{llr_c} ∪ {null_llr + null_bias}`.
 - Seeds live in `cmn.calib.json`: `filler_per_frame = 0.03`, `unvoiced_syllable_llr = −3.0`,
-  `null_bias = −2.0`.
+  `insertion_llr = −2.0`, `null_bias = −2.0`.
 - Cost is O(|B|²·K) per candidate. With |B| ≤ 4·nuclei + 2 and up to 64 candidates, this is
   microseconds to milliseconds.
 
@@ -503,8 +550,9 @@ contributing evidence gets `p_correct = sigmoid(β0)` and an empty `basis`.
 - A confusion hit caps `p_correct` at `veto_cap` (0.05).
 - Missing evidence drops its term.
 - P0 seeds: β0 = 0, β_ac = 1, β_tr = 0.5. Fitted per lect in P1.
-- `overall` = the minimum `p_correct` over measured syllables, since one wrong tone fails a cast.
-  It's `None` if no syllable was measured.
+- `overall` = the minimum `p_correct` over syllables that were measured **or** carry a confusion
+  hit, since one wrong tone fails a cast. A whispered confusion hit is a miss, not "not checked".
+  It's `None` only if no syllable has either kind of tone evidence.
 
 ---
 
@@ -593,16 +641,20 @@ to a literal GAN.
 
 - Input: 16 kHz mono f32. Other rates return `AssessError::UnsupportedSampleRate`; the caller
   resamples.
-- pYIN: 10 ms hop, 1024-sample frame, 50–600 Hz.
+- pYIN: 10 ms hop, 1024-sample frame, 50–600 Hz. Its voicing decision (`hz.is_some()`) is what
+  "voiced" means everywhere downstream (R32); `voiced_p` only weights confidence.
 - Budget: `analyze + assess` with ≤16 candidates, p95 ≤100 ms for a 3 s utterance on iPhone 12.
   Stripped static library ≤2 MB without SwiftF0.
 - **No networking code in any crate.** `deny.toml` bans HTTP/TLS crates.
 - **Register:**
-  - Per utterance, take the 5th/50th/95th percentiles of voiced semitones. Merge with weight
+  - Per utterance, take the 5th/50th/95th percentiles of voiced semitones (every frame with an
+    f0). Merge with weight
     `w = min(0.5, u/(n+u))`, where u = syllables this utterance and n = syllables so far.
   - Cold start (no register given): use utterance percentiles widened by ±2 st, and flag
     `ColdStartRegister` until n ≥ 30.
-  - Bendy persists it per user; an optional 妈麻马骂 onboarding utterance seeds it.
+  - Bendy persists it per user; an optional 妈麻马骂 onboarding utterance seeds it. Only syllables
+    that were measured count as u, so a whispered or silent cast leaves a given register
+    unchanged; consumers persist `register_update` only if `n_syllables > 0`.
   - It's never inferred from anything but the user's own f0.
 
 ---
@@ -628,22 +680,27 @@ should review the register before launch.
 2. **Was it ever academic use?** No. Use is judged by who uses it and why. DJ building tonekit to
    power Bendy is commercial use from day one, and open-sourcing the result doesn't change that.
 
-AISHELL-1/3 and THCHS-30 state Apache-2.0, which *would* permit commercial use, next to "free for
-academic use". The ambiguity is resolved conservatively:
+These two points still govern any source whose terms say "academic" or "research" use.
 
-- **Denied** for shipped calibration until the rights holders (AISHELL; Tsinghua CSLT) confirm in
-  writing that Apache-2.0 governs. **Outreach is deferred (DJ, v2.1):** we only ask if the
-  Common Voice-calibrated version works and there's evidence these corpora would materially
-  help.
-- **MFA Mandarin** (CC BY 4.0, but trained on AISHELL-3, THCHS-30 and AI-DataTang) is downgraded
-  to `verify`. P0 doesn't need it.
-- **Replacement calibration path:**
-  - Common Voice zh-CN and zh-TW (CC0), with targets from pypinyin + g2pW + tone-sandhi rules
-    (authoring tools, MIT/Apache).
-  - Spans from tonekit's own single-candidate decoder, re-estimated over 2–3 EM-style passes.
-  - Robust statistics (median/MAD), and DJ audits a 200-syllable sample.
+**v2.2 update (DJ, 2026-09-28):** the "free for academic use" caveat on AISHELL-1/3 and THCHS-30
+has been rescinded. Both corpora are now plain Apache-2.0, which permits commercial use, so
+they're `allow` in the register. When the harness downloads them, it archives the license text
+with the download date next to the data, so the provenance claim can be shown later.
+
+- **Calibration path:**
+  - **AISHELL-3** (Apache-2.0, 85 h, 218 speakers) is the primary native source. It ships
+    toned-pinyin transcripts, so tone targets come from the corpus instead of being generated,
+    which removes the main source of label noise. Neutral-tone and sandhi realisations still get
+    a DJ audit of a 200-syllable sample, because transcripts can record citation tones.
+  - AISHELL-1 and THCHS-30 (Apache-2.0) serve as extra native speakers and held-out evaluation.
+  - Common Voice zh-CN (CC0) is a held-out cross-corpus check. Common Voice zh-TW (CC0) fits the
+    `cmn-TW` accent, with targets from pypinyin + g2pW + tone-sandhi rules.
+  - Spans come from tonekit's own single-candidate decoder, re-estimated over 2–3 EM-style
+    passes, with robust statistics (median/MAD).
   - Owned and consented recordings set the L2 operating points. OMPAL and LATIC stay `verify`
     until their terms are confirmed.
+- **MFA Mandarin** (CC BY 4.0) stays `verify`: it was also trained on AI-DataTang, whose license
+  is still unconfirmed. P0 doesn't need it.
 - **CI:** `tkh provenance` fails any weights or calibration manifest listing a `deny` source, or
   a `verify` source without a recorded sign-off.
 
@@ -700,14 +757,17 @@ learner's own audio, on-device, is inside that boundary.
 | Condition | Detection | Result |
 |---|---|---|
 | Wrong sample rate / empty audio | input check | `AssessError` |
+| Audio longer than 30 s | input check (R52) | `AssessError::TooLong`, before any work |
 | No speech | no speech region | every syllable `NotMeasured(Unvoiced)`; `overall = None`; consumer shows "tone not checked" |
-| Whisper | voiced fraction < 0.2 in speech region | as above |
+| Whisper | no nucleus (periodic energy peak) in the speech region | as above |
 | Clipping (>1% samples ≥ 0.99) / low SNR (<10 dB) | analyze | `Partial` issue; σ ×1.5; deltas suppressed under LowSnr |
-| Extra, missing or hesitation syllables | decode | absorbed by gap edges / low candidate LLR; never shifts every tone by one |
-| Octave jump (>9 st from neighbour median) | f0 post-process | shifted ±12 st toward median |
+| Given register not usable (non-finite or implausible levels, median outside floor–ceiling, inverted range, impossible syllable count) | analyze | cold start from the utterance itself, flagged `InvalidRegister` and `ColdStartRegister`; grading goes on |
+| Extra, missing or hesitation syllables | decode | one nucleus per syllable, so no tone shifts by one or hides on a sliver. Extra/hesitation: a gap edge (`insertion_llr` + filler). Missing: a nucleus-less syllable (relaxed pass), `Partial(Unvoiced)` at `unvoiced_syllable_llr`, counted in `overall` |
+| Octave jump (>9 st from the median of its neighbours in its own voiced run: `hz.is_some()` frames, gaps ≤ 2 frames bridged) | f0 post-process | shifted ±12 st toward median; runs < 5 frames untouched |
 | T3 creak | unvoiced_ok | not penalised |
 | Voiced part < 80 ms | shape | `Partial(TooShort)`; onset/offset terms only |
 | Unknown tone / accent / missing realisation | pack | `PackError`, surfaced at load where possible |
+| Non-finite external evidence (neural `p_correct`, tone shape) | fuse, pack | ignored: a measured syllable gains `InvalidEvidence` (a non-finite shape is `NotMeasured(InvalidEvidence)`) |
 
 ---
 
@@ -727,7 +787,7 @@ learner's own audio, on-device, is inside that boundary.
   - Robustness on count-mismatch clips.
   - f0 bakeoff: gross pitch error and voicing error on WORLD-resynthesised clips with exact
     ground truth.
-  - From P1: ECE of lattice posteriors, and native tone-ID on Common Voice zh-CN as a
+  - From P1: ECE of lattice posteriors, and native tone-ID on AISHELL-3 held-out speakers as a
     regression floor.
 - **Synthetic and adversarial:** §9. Diagnostics only, never gates.
 
@@ -752,7 +812,8 @@ plans.
 
 **P1: Bendy Phase 2 voice.**
 - `BendyProsody` adapter; register persistence and onboarding.
-- Common Voice calibration (EM passes); fitted fusion and λ.
+- AISHELL-3 calibration (EM passes), with a Common Voice zh-CN cross-corpus check; fitted fusion
+  and λ.
 - Apple n-best rescoring with faithful/intent transcripts; `to_prompt_json`.
 - CMA-ES adversary; `tkh critic` for reference audio; DJ-audited diagnostic copy; Tone Lab view.
 - **Gate:**
@@ -801,13 +862,13 @@ plans.
 | # | Decision | Status |
 |---|---|---|
 | 1 | Rust core; native iOS via UniFFI | **Decided** (DJ) |
-| 2 | AISHELL/THCHS denied for shipped calibration pending written clarification; Common Voice + owned data instead | **Decided** (DJ's analysis, §11.2) |
+| 2 | Academic- or research-only sources never feed shipped calibration (passthrough; commercial use from day one) | **Decided** (DJ's analysis, §11.2) |
 | 3 | Name `tonekit` until it works | **Decided** |
 | 4 | Public repo after the P0 gate | **Decided** |
 | 5 | Tencent SOE offline on DJ-owned recordings only | **Decided** |
 | 6 | Imprint = the user's own voice, with explicit user permission; no third-party voice replication; out of scope for tonekit | **Decided** (DJ, v2.1) |
 | 7 | No wasm target; iOS on-device native is the only runtime target | **Decided** (DJ, v2.1) |
-| 8 | AISHELL/THCHS outreach only if the CV-calibrated version works and evidence shows they'd help | **Decided** (DJ, v2.1) |
+| 8 | AISHELL-1/3 and THCHS-30 are plain Apache-2.0 (caveat rescinded) and allowed; AISHELL-3 is the primary native calibration source | **Decided** (DJ, v2.2) |
 
 ---
 

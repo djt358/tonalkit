@@ -1,0 +1,20 @@
+# UniFFI bindings config, passed to the generator with `--config` (see scripts/*.sh).
+#
+# The bindings span three UniFFI crates (tonekit-core: the shared types; tonekit: AssessRequest;
+# tonekit-ffi: Pack and the functions). Swift code generated for one crate calls the converters
+# generated for another (`FfiConverterTypeRegister_lift(_: RustBuffer)`), so all three must see
+# the SAME `RustBuffer` type. That means one C module for all of them: `TonekitFFI`, whose module
+# map lists the three headers (UniFFI's shared-header guard makes that safe). Keep the module name
+# in step with `--module-name` in scripts/build-xcframework.sh and scripts/check-swift-bindings.sh.
+[defaults.bindings.swift]
+ffi_module_name = "TonekitFFI"
+
+# One header per crate; without these the three headers would all be called TonekitFFI.h.
+[crates.tonekit_core.bindings.swift]
+ffi_module_filename = "tonekit_coreFFI"
+
+[crates.tonekit.bindings.swift]
+ffi_module_filename = "tonekitFFI"
+
+[crates.tonekit_ffi.bindings.swift]
+ffi_module_filename = "tonekit_ffiFFI"

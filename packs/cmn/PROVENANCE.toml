@@ -1,0 +1,2 @@
+artifacts = ["packs/cmn/cmn.toml", "packs/cmn/cmn.calib.json"]
+note = "cmn.toml: seed pack (citation tone letters and accent realisations from the literature); not fitted. cmn.calib.json: seed values from published tone letters; not fitted."
