@@ -5,6 +5,7 @@ what they say about the two trackers on real speech is the report's business."""
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 import tonekit_py
@@ -18,8 +19,11 @@ from tonekit_harness import (
     manifest,
     pitch_metrics,
     pitch_tracks,
+    provenance,
     synth,
 )
+
+REGISTER = provenance.load_register(Path(__file__).resolve().parents[2] / "data-register.csv")
 
 GATE_PROVIDERS = ["pyin", "swift-f0"]  # what the gate grades: the whole pipeline with each
 # what the synthetic section measures: swift-f0 as handed to tonekit and as tonekit ends up with it
@@ -112,18 +116,56 @@ def test_the_swiftf0_rows_are_its_track_as_handed_to_tonekit_and_the_f0_tonekit_
     assert got.counts[MEASURES[2]] == pitch_metrics.count(pitch_tracks.pyin_track(repaired), truth)
 
 
-def test_run_grades_the_gate_with_each_provider(tmp_path, pack_toml, calib_json):
+def gate_run(tmp_path, pack_toml, calib_json, *, source="synthetic-world", **kw):
     root = tmp_path / "gate"
-    write_manifest(root / "manifest.jsonl", gate_corpus(root))
-    result = bakeoff.run(
+    write_manifest(root / "manifest.jsonl", gate_corpus(root, source=source))
+    return bakeoff.run(
         gate=root / "manifest.jsonl", pack_toml=pack_toml, calib_json=calib_json,
-        cache_dir=tmp_path / "cache",
+        cache_dir=tmp_path / "cache", register=REGISTER, **kw,
     )  # fmt: skip
+
+
+def test_run_grades_the_gate_with_each_provider(tmp_path, pack_toml, calib_json):
+    result = gate_run(tmp_path, pack_toml, calib_json, source="dj-corpus")
     assert result.synthetic is None
     assert list(result.gate) == GATE_PROVIDERS
     for scores in result.gate.values():
         assert len(scores.metrics.thresholds) == 2
         assert scores.candidate_id is None and scores.n_minimal == 0  # no diag_minimal clips
+    assert result.clearance.verdict
+
+
+def test_a_gate_over_synthetic_clips_is_not_a_gate_unless_it_is_a_smoke_run(
+    tmp_path, pack_toml, calib_json
+):
+    refused = gate_run(tmp_path, pack_toml, calib_json)
+    assert (refused.clearance.mode, refused.clearance.uncleared) == ("not a gate", 4)
+    smoke = gate_run(tmp_path, pack_toml, calib_json, allow_synthetic=True)
+    assert (smoke.clearance.mode, smoke.clearance.uncleared) == ("smoke", 4)
+
+
+def test_a_gate_run_needs_the_data_register(tmp_path, pack_toml, calib_json):
+    root = tmp_path / "gate"
+    write_manifest(root / "manifest.jsonl", gate_corpus(root))
+    with pytest.raises(bakeoff.BakeoffError, match="data register"):
+        bakeoff.run(gate=root / "manifest.jsonl", pack_toml=pack_toml, calib_json=calib_json)
+
+
+def test_a_gate_source_that_is_not_a_register_id_is_an_error(tmp_path, pack_toml, calib_json):
+    with pytest.raises(manifest.ManifestError, match="source 'dj-corpu' is not an id"):
+        gate_run(tmp_path, pack_toml, calib_json, source="dj-corpu")
+
+
+def test_synthetic_rows_mixed_into_a_gate_manifest_are_an_error(tmp_path, pack_toml, calib_json):
+    root = tmp_path / "gate"
+    clips = gate_corpus(root)
+    extra = make_clip(root, "extra", ["4", "1", "3"], set="synthetic", label="correct")
+    write_manifest(root / "manifest.jsonl", [*clips, extra])
+    with pytest.raises(manifest.ManifestError, match="mixed with gate clips"):
+        bakeoff.run(
+            gate=root / "manifest.jsonl", pack_toml=pack_toml, calib_json=calib_json,
+            register=REGISTER, allow_synthetic=True,
+        )  # fmt: skip
 
 
 def test_a_synthetic_directory_without_clips_is_an_error(tmp_path, pack_toml):
@@ -181,7 +223,7 @@ def cli_run(tmp_path_factory, pack_toml, calib_json):
                      "--per-clip", "2", "--seed", "1"]) == 0  # fmt: skip
     report = root / "reports" / "p0-bakeoff.md"
     argv = ["bakeoff", "--synthetic", str(root / "synth"), "--gate", str(gate), *common,
-            "--report", str(report), "--no-cache"]  # fmt: skip
+            "--report", str(report), "--no-cache", "--allow-synthetic"]  # fmt: skip
     return root, argv, report
 
 
@@ -196,7 +238,9 @@ def test_tkh_bakeoff_writes_a_report_with_both_sections(cli_run, capsys):
     gate = text.split("## Gate S1")[1]
     for section in (synthetic, gate):
         assert "pyin" in section and "swift-f0" in section
-    assert "S1 (leave-one-pair-out): pyin " in gate and "swift-f0 " in gate
+    assert "S1 (leave-one-pair-out): SMOKE (synthetic)" in gate  # synthetic clips: no PASS or FAIL
+    assert "PASS" not in gate and "FAIL" not in gate
+    assert "- data register: " in text
     assert "Lower GPE, by condition:" in synthetic and "Lower VDE, by condition:" in synthetic
     assert "swift-f0 (after tonekit's octave repair)" in synthetic
 
@@ -228,11 +272,39 @@ def test_the_report_is_the_same_on_a_rerun(cli_run):
 
 
 def without(argv: list[str], flag: str, report: str) -> list[str]:
-    """`argv` minus `flag` and its value, writing to `report` instead."""
+    """`argv` minus `flag` and its value (a bare flag has none), writing to `report` instead."""
     i = argv.index(flag)
-    rest = argv[:i] + argv[i + 2 :]
+    rest = argv[:i] + argv[i + (1 if flag == "--allow-synthetic" else 2) :]
     rest[rest.index("--report") + 1] = report
     return rest
+
+
+def test_a_gate_over_synthetic_clips_is_not_a_gate_without_allow_synthetic(
+    cli_run, tmp_path, capsys
+):
+    root, argv, _ = cli_run
+    out = tmp_path / "refused.md"
+    assert cli.main(without(argv, "--allow-synthetic", str(out))) == 0
+    gate = out.read_text(encoding="utf-8").split("## Gate S1")[1]
+    assert "NOT A GATE (4 synthetic / non-allowed clips)" in gate
+    assert "PASS" not in gate and "FAIL" not in gate
+    summary = capsys.readouterr().out
+    assert "S1: NOT A GATE (4 synthetic / non-allowed clips)" in summary
+    assert "PASS" not in summary and "FAIL" not in summary
+
+
+def test_the_summary_line_of_a_smoke_run_has_no_verdict(cli_run, capsys):
+    _, argv, _ = cli_run
+    assert cli.main(argv) == 0
+    summary = capsys.readouterr().out
+    assert "S1: SMOKE (synthetic)" in summary and "PASS" not in summary and "FAIL" not in summary
+
+
+def test_a_missing_register_is_an_error_for_a_gate_run(cli_run, tmp_path, capsys):
+    _, argv, _ = cli_run
+    out = tmp_path / "r.md"
+    assert cli.main([*without(argv, "--synthetic", str(out)), "--register", str(tmp_path / "no.csv")]) == 1
+    assert "no.csv" in capsys.readouterr().err and not out.exists()
 
 
 def test_synthetic_only_and_gate_only_runs_write_only_their_section(cli_run, tmp_path):
@@ -270,7 +342,9 @@ def test_a_detector_failure_is_an_error_naming_the_clip_not_a_traceback(
 def test_a_gate_that_fails_s1_is_still_exit_zero(tmp_path, pack_toml):
     """The two clips of the only pairs are the same audio, so no threshold can separate them."""
     clips = [
-        make_clip(tmp_path, f"g{i}-{label}", ["4", "1", "3"], pair=f"g{i}", label=label)
+        make_clip(
+            tmp_path, f"g{i}-{label}", ["4", "1", "3"], pair=f"g{i}", label=label, source="dj-corpus"
+        )
         for i in (1, 2)
         for label in ("correct", "tone_error")
     ]
@@ -311,6 +385,8 @@ def test_the_bakeoff_command_documents_its_flags(capsys):
         "--calib",
         "--accent",
         "--report",
+        "--register",
+        "--allow-synthetic",
         "--no-cache",
     ):
         assert flag in out

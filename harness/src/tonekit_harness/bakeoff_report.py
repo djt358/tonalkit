@@ -14,6 +14,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
 
     from .bakeoff import Bakeoff, GateScores, Group
+    from .clearance import Clearance
     from .pitch_metrics import Counts
 
 
@@ -84,20 +85,33 @@ def _synthetic_section(synthetic: Mapping[str, Group]) -> list[str]:
     ]
 
 
-def _gate_row(provider: str, scores: GateScores) -> list[object]:
+def _gate_row(provider: str, scores: GateScores, clearance: Clearance) -> list[object]:
     gate = scores.metrics
     n = len(gate.thresholds)
     return [
         provider,
         report.rate(gate.ca, n),
         report.rate(gate.wa, n),
-        "PASS" if gate.passed else "FAIL",
+        ("PASS" if gate.passed else "FAIL") if clearance.verdict else "n/a",
         report.num(gate.median_threshold),
         report.rate(scores.candidate_id, scores.n_minimal),
     ]
 
 
-def _gate_section(gate: Mapping[str, GateScores]) -> list[str]:
+def _verdict_line(gate: Mapping[str, GateScores], clearance: Clearance) -> str:
+    if clearance.verdict:
+        verdict = ", ".join(
+            f"{provider} {'PASS' if scores.metrics.passed else 'FAIL'}"
+            for provider, scores in gate.items()
+        )
+        return f"S1 (leave-one-pair-out): {verdict}."
+    return (
+        f"S1 (leave-one-pair-out): {clearance.label}. Not a gate verdict, because "
+        f"{clearance.reason}; the rows above are only numbers from this run."
+    )
+
+
+def _gate_section(gate: Mapping[str, GateScores], clearance: Clearance) -> list[str]:
     n = len(next(iter(gate.values())).metrics.thresholds)
     header = [
         "Provider",
@@ -107,10 +121,6 @@ def _gate_section(gate: Mapping[str, GateScores]) -> list[str]:
         "Median threshold",
         "Candidate-ID accuracy",
     ]
-    verdict = ", ".join(
-        f"{provider} {'PASS' if scores.metrics.passed else 'FAIL'}"
-        for provider, scores in gate.items()
-    )
     return [
         "## Gate S1",
         "",
@@ -118,16 +128,21 @@ def _gate_section(gate: Mapping[str, GateScores]) -> list[str]:
         f"S1 needs leave-one-pair-out correct-accept of at least {float(CA_MIN):.2f} and "
         f"wrong-accept of at most {float(WA_MAX):.2f}.",
         "",
-        *report.table(header, [_gate_row(provider, scores) for provider, scores in gate.items()]),
+        *report.table(
+            header, [_gate_row(provider, scores, clearance) for provider, scores in gate.items()]
+        ),
         "",
-        f"S1 (leave-one-pair-out): {verdict}.",
+        _verdict_line(gate, clearance),
         "",
     ]
 
 
 def write(path: str | Path, result: Bakeoff, *, context: Mapping[str, str] | None = None) -> None:
     """Write the bakeoff report to `path` (parent directories are created). `context` (label to
-    text) is printed as a "Run" section. Only the sections `result` has are written."""
+    text) is printed as a "Run" section. Only the sections `result` has are written. A result with
+    a gate part must carry its `clearance`: it decides whether the S1 section issues a verdict."""
+    if result.gate is not None and result.clearance is None:
+        raise ValueError("a gate result needs its clearance to be written")
     lines = [
         "# P0 f0 bakeoff: pYIN against SwiftF0",
         "",
@@ -140,7 +155,7 @@ def write(path: str | Path, result: Bakeoff, *, context: Mapping[str, str] | Non
     if result.synthetic is not None:
         lines += _synthetic_section(result.synthetic)
     if result.gate is not None:
-        lines += _gate_section(result.gate)
+        lines += _gate_section(result.gate, result.clearance)
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("\n".join(lines).rstrip("\n") + "\n", encoding="utf-8")

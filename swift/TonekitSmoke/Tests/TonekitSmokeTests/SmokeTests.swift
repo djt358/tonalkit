@@ -62,9 +62,18 @@ final class SmokeTests: XCTestCase {
     // MARK: Latency (informational in P0; the gate is p95 on a physical iPhone 12, in P1)
 
     func testAssessLatency() throws {
-        let pcm = try Fixtures.pcm()
+        // The spec's latency budget (section 10) is for a 3 s utterance, so the fixture is tiled,
+        // 200 ms of silence between copies, until it lasts at least 3 s (R52): three copies.
+        let (pcm, copies) = try Fixtures.tiledPcm(minimumSeconds: 3.0)
         let pack = try Fixtures.pack()
-        let request = Fixtures.request413()
+        var tones: [String] = []
+        for _ in 0..<copies {
+            tones += ["4", "1", "3"]
+        }
+        let request = AssessRequest(
+            grading: GradingTarget(accent: "cmn-standard", style: nil, styleWeight: 0),
+            intended: Fixtures.candidate(id: "intended", tones: tones)
+        )
         let audioMilliseconds = Double(pcm.count) / 16.0
 
         // One untimed run first: a broken build fails here instead of reading as a fast time.
@@ -299,6 +308,21 @@ private enum Fixtures {
             print("AVAudioFile could not read \(location.lastPathComponent) (\(error)); using the RIFF parser")
             return try RiffFloatWav.samples(of: Data(contentsOf: location))
         }
+    }
+
+    /// The fixture repeated with 200 ms of silence between copies until it lasts at least
+    /// `minimumSeconds`, and how many copies that took: a longer utterance of the same syllables.
+    static func tiledPcm(minimumSeconds: Double) throws -> (pcm: [Float], copies: Int) {
+        let once = try pcm()
+        let silence = [Float](repeating: 0, count: 3_200)  // 200 ms at 16 kHz
+        var tiled = once
+        var copies = 1
+        while Double(tiled.count) / 16_000.0 < minimumSeconds {
+            tiled += silence
+            tiled += once
+            copies += 1
+        }
+        return (tiled, copies)
     }
 
     static func samplesViaAVAudioFile(_ location: URL) throws -> [Float] {

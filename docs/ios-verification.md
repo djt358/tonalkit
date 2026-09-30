@@ -81,19 +81,62 @@ requires `overall` (0.730), every syllable's `pCorrect` (0.730, 0.734, 0.770) an
 
 ## The number to report back
 
-Step 3 prints two things for `testAssessLatency` (one utterance of 1.33 s of audio, `analyze` then
-`assess`, cold-start register, no distractors):
+Step 3 prints two things for `testAssessLatency` (one utterance of 4.39 s of audio: the 1.33 s
+fixture three times with 200 ms of silence between the copies, the shortest tiling that reaches
+the 3 s of the spec's latency budget (R52); `analyze` then `assess` of the matching nine-syllable
+reading, cold-start register, no distractors):
 
 ```
-Test Case '-[TonekitSmokeTests.SmokeTests testAssessLatency]' measured [Time, seconds] average: 0.0xx, ...
-TONEKIT_LATENCY audio_ms=1330 analyze_plus_assess_median_ms=xx.x p95_ms=xx.x runs=20
+Test Case '-[TonekitSmokeTests.SmokeTests testAssessLatency]' measured [Time, seconds] average: 0.xxx, ...
+TONEKIT_LATENCY audio_ms=4390 analyze_plus_assess_median_ms=xxx.x p95_ms=xxx.x runs=20
 ```
 
-Please send back the `TONEKIT_LATENCY` line, the Mac model and chip, the macOS and Xcode versions.
+Please send back the `TONEKIT_LATENCY` line, the stripped library size (next section), the Mac
+model and chip, the macOS and Xcode versions.
 This is informational in P0: the Simulator runs the Rust code natively on the Mac's CPU, so it
 is not the device number. The P1 gate is p95 on a physical iPhone 12. For scale, the whole CLI run
-on this Linux dev box (process start, WAV, pack, analyse, assess) is about 250 ms. A result above a
+on the 1.33 s fixture on this Linux dev box (process start, WAV, pack, analyse, assess) is about
+250 ms. A result above a
 couple of seconds means an unoptimised Rust build slipped in (the script builds `--release`).
+
+## Library size
+
+The spec (§10) budgets the stripped static library at 2 MB or less (without SwiftF0). Please send
+back that number for the **device** slice (`aarch64-apple-ios`). Step 1 already prints the
+stripped size of both slices at its end. To get it by hand, from the repository root after step 1:
+
+```sh
+target=$(cargo metadata --no-deps --format-version 1 | sed -n 's/.*"target_directory":"\([^"]*\)".*/\1/p')
+cp "$target/aarch64-apple-ios/release/libtonekit_ffi.a" build/stripped-device.a
+strip -S -x build/stripped-device.a      # debug and local symbols out, as a release app would have
+ls -l build/stripped-device.a            # the number to report: bytes
+```
+
+The linked size of a minimal app is a different number (the linker drops what is unused, and adds
+the Swift runtime glue); measuring it is out of scope for P0. If the stripped size is over
+budget, these show where it goes:
+
+```sh
+xcrun size -m build/stripped-device.a                 # segment sizes per archive member
+xcrun llvm-nm --size-sort --print-size --demangle build/stripped-device.a | tail -30   # largest symbols
+```
+
+The workspace sets no `[profile.release]`, so the library is built with cargo's release defaults
+(no LTO, 16 codegen units). `lto = true` and `codegen-units = 1` are the first settings to try if
+the size or the latency needs help; they are not applied in P0.
+
+`rand` and `getrandom` are in the library even though tonekit never draws random numbers (the core
+crates have no randomness): they arrive through `pyin → statrs → nalgebra → rand 0.8 →
+getrandom 0.2` (`cargo tree -p tonekit-ffi -i rand`). `Package.swift` links `Security` (with
+`iconv` and `Foundation`) as a first guess at the list rustc's `native-static-libs` note gives;
+step 1 prints the real list, which decides, and it does not say which dependency needs which
+library. `getrandom` 0.2 asks the OS for entropy through CommonCrypto (`CCRandomGenerateBytes`) on
+iOS, so it is probably not what needs `Security`. To see which entropy API the library itself
+calls:
+
+```sh
+nm -u build/stripped-device.a | grep -E 'SecRandom|CCRandom|getentropy'
+```
 
 ## If something fails: the three most likely problems
 

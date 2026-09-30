@@ -28,7 +28,7 @@ import numpy as np
 import tonekit_py
 from scipy.io import wavfile
 
-from . import manifest, metrics, pitch_tracks, report
+from . import calibration, clearance, manifest, metrics, pitch_tracks, provenance, report
 from .ingest import TARGET_SR, to_float32
 from .manifest import Clip, ManifestError, to_candidate_json
 
@@ -116,9 +116,10 @@ def tonekit_py_version() -> str:
 
 
 @cache
-def _tonekit_py_fingerprint() -> str:
+def tonekit_py_fingerprint() -> str:
     """The installed tonekit_py's version and a hash of its files. The version alone would not
-    change when the Rust code does, so a rebuilt extension must also invalidate the cache."""
+    change when the Rust code does, so a rebuilt extension must also invalidate the cache (and a
+    report names the build it came from by this)."""
     h = hashlib.sha256()
     package = Path(tonekit_py.__file__).resolve().parent
     for f in sorted(p for p in package.iterdir() if p.suffix in {".so", ".pyd", ".dylib"}):
@@ -131,7 +132,7 @@ def _cache_key(wav: bytes, register_json: str | None, f0_identity: str | None = 
     """sha256 over the WAV bytes, the register JSON, the tonekit_py version and, for an f0
     provider, its name and version (each length-prefixed so the parts cannot run into each other).
     Without a provider the key is what it was before providers existed."""
-    parts = [wav, (register_json or "").encode(), _tonekit_py_fingerprint().encode()]
+    parts = [wav, (register_json or "").encode(), tonekit_py_fingerprint().encode()]
     if f0_identity is not None:
         parts.append(f0_identity.encode())
     h = hashlib.sha256()
@@ -357,13 +358,14 @@ def run(
 def _run(args: argparse.Namespace) -> int:
     manifest_path = Path(args.manifest)
     try:
-        clips = manifest.load(manifest_path)
-        pack_toml = Path(args.pack).read_text(encoding="utf-8")
-        calib_json = Path(args.calib).read_text(encoding="utf-8") if args.calib else None
+        data_register = clearance.read_register(args.register)
+        clips = manifest.load(manifest_path, register=data_register)
+        cleared = clearance.assess(clips, data_register, allow_synthetic=args.allow_synthetic)
+        files = calibration.load(args.pack, args.calib)
         results = run(
             clips,
-            pack_toml,
-            calib_json,
+            files.pack_toml,
+            files.calib_json,
             args.accent,
             root=manifest_path.parent,  # clip paths are relative to the manifest's directory
             use_cache=not args.no_cache,
@@ -378,22 +380,33 @@ def _run(args: argparse.Namespace) -> int:
             metrics.candidate_id_accuracy(results),
             metrics.count_robustness(results, theta),
             metrics.failures(results, gate, theta),
+            clearance=cleared,
             n_minimal=per_set.get("diag_minimal", 0),
             n_count=per_set.get("diag_count", 0),
             context={
                 "manifest": str(args.manifest),
-                "pack": str(args.pack),
-                "calibration": str(args.calib) if args.calib else "the pack's own",
+                "data register": str(args.register or clearance.default_register()),
+                **files.context(),
                 "accent": args.accent or "the pack's base accent",
                 "clips": ", ".join(f"{name} {n}" for name, n in per_set.items()),
-                "tonekit-py": tonekit_py_version(),
+                "tonekit-py": tonekit_py_fingerprint(),
             },
         )
-    except (ManifestError, EvalError, metrics.MetricsError, OSError) as e:
+    except (
+        ManifestError,
+        EvalError,
+        metrics.MetricsError,
+        provenance.ProvenanceError,
+        OSError,
+    ) as e:
         print(f"error: {e}", file=sys.stderr)
         return 1
-    verdict = "PASS" if gate.passed else "FAIL"
-    print(f"S1: {verdict} (CA {gate.ca:.3f}, WA {gate.wa:.3f}); report written to {args.report}")
+    numbers = f"CA {gate.ca:.3f}, WA {gate.wa:.3f}"
+    if cleared.verdict:
+        verdict = "PASS" if gate.passed else "FAIL"
+        print(f"S1: {verdict} ({numbers}); report written to {args.report}")
+    else:  # not a verdict: the label says so, and the numbers are only numbers
+        print(f"S1: {cleared.label}; {numbers}; report written to {args.report}")
     return 0
 
 
@@ -403,9 +416,24 @@ def register(subparsers) -> None:
     )
     p.add_argument("--manifest", required=True, help="corpus manifest (JSONL)")
     p.add_argument("--pack", required=True, help="language pack TOML (e.g. packs/cmn/cmn.toml)")
-    p.add_argument("--calib", help="calibration JSON (default: the pack's own)")
+    p.add_argument(
+        "--calib",
+        help="calibration JSON (default: <pack stem>.calib.json beside the pack if it exists, "
+        "as the tonekit CLI does, else tonekit's compiled-in default)",
+    )
     p.add_argument("--accent", help="accent to grade against (default: the pack's base accent)")
     p.add_argument("--report", required=True, help="markdown report to write")
+    p.add_argument(
+        "--register",
+        help="data register deciding which clip sources may back a verdict "
+        "(default: data-register.csv at the repository root)",
+    )
+    p.add_argument(
+        "--allow-synthetic",
+        action="store_true",
+        help="smoke run: grade synthetic clips and label the report SMOKE (synthetic) instead of "
+        "NOT A GATE; it never issues a PASS or FAIL",
+    )
     p.add_argument(
         "--no-cache", action="store_true", help="neither read nor write the analysis cache"
     )

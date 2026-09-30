@@ -37,18 +37,37 @@ def to_16k_mono(in_path: str | Path, out_path: str | Path) -> None:
     wavfile.write(out_path, TARGET_SR, x)
 
 
+def _output_clashes(wavs: list[Path]) -> list[list[Path]]:
+    """The inputs that share an output name (`<stem>.wav`), ignoring case: each group of two or
+    more would overwrite one another, always for `a.wav` and `a.WAV`, and on a case-folding file
+    system for `A.wav` and `a.wav` too."""
+    groups: dict[str, list[Path]] = {}
+    for p in wavs:
+        groups.setdefault(p.stem.casefold(), []).append(p)
+    return [group for group in groups.values() if len(group) > 1]
+
+
 def _run(args: argparse.Namespace) -> int:
     src = Path(args.dir)
     if not src.is_dir():
         print(f"error: {src} is not a directory", file=sys.stderr)
         return 1
-    out = Path(args.out) if args.out else src.parent / "ingested"
+    # resolved, so that `.` and `..` name the directories they stand for (`Path(".").parent` is `.`)
+    out = Path(args.out) if args.out else src.resolve().parent / "ingested"
     if out.resolve() == src.resolve():
         print(f"error: --out is the same directory as the input ({src}); refusing to overwrite", file=sys.stderr)
         return 1
     wavs = sorted(p for p in src.iterdir() if p.is_file() and p.suffix.lower() == ".wav")
     if not wavs:
         print(f"error: no .wav files in {src}", file=sys.stderr)
+        return 1
+    for clash in _output_clashes(wavs):
+        names = ", ".join(p.name for p in clash)
+        print(
+            f"error: {names} would be written to the same output file (names are compared "
+            "without regard to case, as some file systems do); rename one of them",
+            file=sys.stderr,
+        )
         return 1
     for p in wavs:
         to_16k_mono(p, out / (p.stem + ".wav"))

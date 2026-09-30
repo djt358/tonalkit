@@ -149,7 +149,11 @@ def add_source_args(p: argparse.ArgumentParser) -> None:
         "--manifest", required=True, help="corpus manifest (JSONL); its correct clips are sources"
     )
     p.add_argument("--pack", required=True, help="language pack TOML (e.g. packs/cmn/cmn.toml)")
-    p.add_argument("--calib", help="calibration JSON (default: the pack's own)")
+    p.add_argument(
+        "--calib",
+        help="calibration JSON (default: <pack stem>.calib.json beside the pack if it exists, "
+        "as the tonekit CLI does, else tonekit's compiled-in default)",
+    )
     p.add_argument("--accent", help="accent to grade against (default: the pack's base accent)")
     p.add_argument(
         "--out",

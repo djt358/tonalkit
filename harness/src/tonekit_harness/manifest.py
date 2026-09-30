@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Literal
 
@@ -56,9 +57,22 @@ class Clip(_Model):
     synthetic: dict | None = None
     needs_listen: bool = False
 
+    @model_validator(mode="after")
+    def _synthetic_iff_synthetic_set(self) -> Clip:
+        if self.set == "synthetic" and self.synthetic is None:
+            raise ValueError(f"clip {self.id!r} is in set 'synthetic' but has no `synthetic` field")
+        if self.set != "synthetic" and self.synthetic is not None:
+            raise ValueError(
+                f"clip {self.id!r} has a `synthetic` field but is in set {self.set!r}; "
+                "synthetic clips belong in set 'synthetic'"
+            )
+        return self
 
-def load(path: str | Path) -> list[Clip]:
-    """Read a JSONL manifest. Blank lines are skipped; a bad row raises `ManifestError` naming its line."""
+
+def load(path: str | Path, *, register: Mapping[str, str] | None = None) -> list[Clip]:
+    """Read a JSONL manifest. Blank lines are skipped; a bad row raises `ManifestError` naming its
+    line. With a `register` (data-register.csv's ids, see `provenance.load_register`), a `source`
+    that is not one of them is a bad row too."""
     path = Path(path)
     clips: list[Clip] = []
     with path.open(encoding="utf-8") as f:
@@ -73,9 +87,14 @@ def load(path: str | Path) -> list[Clip]:
             if not isinstance(obj, dict):
                 raise ManifestError(f"{where}: expected a JSON object, got {type(obj).__name__}")
             try:
-                clips.append(Clip.model_validate(obj))
+                clip = Clip.model_validate(obj)
             except ValidationError as e:
                 raise ManifestError(f"{where}: {e}") from e
+            if register is not None and clip.source not in register:
+                raise ManifestError(
+                    f"{where}: clip {clip.id!r}: source {clip.source!r} is not an id in the data register"
+                )
+            clips.append(clip)
     return clips
 
 

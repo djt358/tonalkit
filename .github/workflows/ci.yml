@@ -5,6 +5,10 @@ on:
     branches: [main]
   pull_request:
 
+# Nothing here writes to the repository, its issues or its packages.
+permissions:
+  contents: read
+
 env:
   CARGO_TERM_COLOR: always
 
@@ -25,20 +29,30 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
-      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
   test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - run: cargo test --workspace
+      - run: cargo test --workspace --locked
 
+  # The declared rust-version (workspace Cargo.toml) is a promise: build the workspace on exactly
+  # that toolchain. `+1.85` beats rust-toolchain.toml (which asks for stable). Keep in step with
+  # `rust-version` there.
+  msrv:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.85
+      - run: cargo +1.85 build --workspace --locked
+
+  # cargo-deny reads Cargo.lock itself and brings its own binary: no Rust toolchain needed.
   deny:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
       - uses: EmbarkStudios/cargo-deny-action@v2
         with:
           command: check
@@ -53,8 +67,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - name: Default builds have no UniFFI
         run: |
-          cargo check -p tonekit-core -p tonekit -p tonekit-cli
-          test "$(cargo tree -p tonekit-cli -e normal,build | grep -c uniffi)" = 0
+          cargo check -p tonekit-core -p tonekit -p tonekit-cli --locked
+          test "$(cargo tree -p tonekit-cli -e normal,build --locked | grep -c uniffi)" = 0
       - name: Swift bindings generate and have the expected API
         run: scripts/check-swift-bindings.sh
 

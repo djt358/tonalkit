@@ -240,13 +240,20 @@ fn insertion_llr_must_not_be_positive() {
 }
 
 #[test]
-fn provenance_declares_the_calib_file_and_no_sources() {
+fn provenance_declares_the_pack_and_its_calib_file_and_no_sources() {
     let v: toml::Table = toml::from_str(CMN_PROVENANCE).unwrap();
-    assert_eq!(v["artifact"].as_str(), Some("packs/cmn/cmn.calib.json"));
+    // Every data file of the pack is attested (`tkh provenance` checks the list is complete).
+    let artifacts: Vec<&str> = v["artifacts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|a| a.as_str().unwrap())
+        .collect();
     assert_eq!(
-        v["note"].as_str(),
-        Some("seed values from published tone letters; not fitted")
+        artifacts,
+        ["packs/cmn/cmn.toml", "packs/cmn/cmn.calib.json"]
     );
+    assert!(v["note"].as_str().unwrap().contains("not fitted"));
     assert!(
         v.get("source").is_none(),
         "seed pack must list zero sources"

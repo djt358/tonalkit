@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
 from support import gate_corpus, write_manifest
 
 from tonekit_harness import cli, evaluate, metrics, report
+from tonekit_harness.clearance import Clearance
 from tonekit_harness.evaluate import Result, Syllable
 
 PACKS = Path(__file__).resolve().parents[2] / "packs" / "cmn"
@@ -50,6 +52,7 @@ def render(results, tmp_path, **kw) -> str:
     gate = metrics.loo_gate(results)
     theta = gate.median_threshold
     out = tmp_path / "gate.md"
+    kw.setdefault("clearance", Clearance("gate"))
     report.write(
         out,
         gate,
@@ -222,8 +225,51 @@ def test_the_report_carries_run_context_when_given(tmp_path):
 def test_write_creates_missing_directories(tmp_path):
     gate = metrics.loo_gate(passing_results())
     out = tmp_path / "reports" / "nested" / "p0-gate.md"
-    report.write(out, gate, None, None, [])
+    report.write(out, gate, None, None, [], clearance=Clearance("gate"))
     assert out.is_file()
+
+
+def test_a_report_cannot_be_written_without_saying_whether_it_is_a_verdict(tmp_path):
+    gate = metrics.loo_gate(passing_results())
+    with pytest.raises(TypeError, match="clearance"):
+        report.write(tmp_path / "gate.md", gate, None, None, [])  # type: ignore[call-arg]
+
+
+# ---- no verdict for synthetic or non-allowed clips ---------------------------------------------
+
+
+def test_a_run_that_is_not_a_gate_says_so_instead_of_pass(tmp_path):
+    text = render(passing_results(), tmp_path, clearance=Clearance("not a gate", 3))
+    first = next(line for line in text.splitlines() if line.startswith("**"))
+    assert first.startswith("**NOT A GATE (3 synthetic / non-allowed clips)**")
+    assert "S1: PASS" not in text and "S1: FAIL" not in text
+    assert "not a gate verdict" in first
+    # the numbers are still reported, as numbers
+    assert "correct-accept 1.000" in first and "wrong-accept 0.000" in first and "20 gate pairs" in first
+
+
+def test_a_smoke_run_says_smoke_instead_of_pass(tmp_path):
+    text = render(failing_results(), tmp_path, clearance=Clearance("smoke", 40))
+    first = next(line for line in text.splitlines() if line.startswith("**"))
+    assert first.startswith("**SMOKE (synthetic)**")
+    assert "S1: PASS" not in text and "S1: FAIL" not in text
+    assert "plumbing" in first and "not a gate verdict" in first
+
+
+@pytest.mark.parametrize("mode", [Clearance("not a gate", 1), Clearance("smoke", 1)])
+def test_without_a_verdict_the_metrics_table_does_not_mark_rows_pass_or_fail(tmp_path, mode):
+    results = bound_results(wrong_accepted=3)  # a real FAIL
+    text = render(results, tmp_path, clearance=mode)
+    cells = result_cells(text)
+    assert cells["Correct-accept (leave-one-pair-out)"] == "n/a"
+    assert cells["Wrong-accept (leave-one-pair-out)"] == "n/a"
+    assert "above its bound" not in text and "below its bound" not in text
+    assert "0.150 (3/20)" in text  # the wrong-accept number itself stays
+
+
+def test_the_failures_are_still_listed_without_a_verdict(tmp_path):
+    text = render(failing_results(), tmp_path, clearance=Clearance("smoke", 1))
+    assert "### gate-05-correct" in text and "correct clip rejected" in text
 
 
 # ---- tkh eval ---------------------------------------------------------------------------------
@@ -231,8 +277,19 @@ def test_write_creates_missing_directories(tmp_path):
 
 @pytest.fixture
 def corpus(tmp_path, monkeypatch):
+    """The support gate corpus: synthetic audio, registered as `synthetic-world`."""
     root = tmp_path / "corpus"
     write_manifest(root / "manifest.jsonl", gate_corpus(root))
+    monkeypatch.setattr(evaluate, "DEFAULT_CACHE_DIR", tmp_path / "cache")
+    return root
+
+
+@pytest.fixture
+def recorded(tmp_path, monkeypatch):
+    """The same clips labelled as DJ's recordings (`dj-corpus`, allowed): only to exercise the
+    PASS/FAIL headline, which a corpus of real recordings earns."""
+    root = tmp_path / "recorded"
+    write_manifest(root / "manifest.jsonl", gate_corpus(root, source="dj-corpus"))
     monkeypatch.setattr(evaluate, "DEFAULT_CACHE_DIR", tmp_path / "cache")
     return root
 
@@ -249,16 +306,97 @@ def eval_args(corpus: Path, tmp_path: Path, *extra: str) -> list[str]:
 
 
 def test_tkh_eval_writes_the_report_and_exits_zero_whatever_the_gate_says(
-    corpus, tmp_path, capsys
+    recorded, tmp_path, capsys
 ):
-    code = cli.main(eval_args(corpus, tmp_path))
+    code = cli.main(eval_args(recorded, tmp_path))
     assert code == 0
     text = (tmp_path / "reports" / "p0-gate.md").read_text(encoding="utf-8")
-    assert "**S1: " in text
+    assert "**S1: PASS**" in text or "**S1: FAIL**" in text
+    assert "NOT A GATE" not in text and "SMOKE" not in text
     out = capsys.readouterr().out
-    assert "S1:" in out and "p0-gate.md" in out
-    assert f"- manifest: {corpus / 'manifest.jsonl'}" in text  # run context
+    assert out.startswith(("S1: PASS", "S1: FAIL")) and "p0-gate.md" in out
+    assert f"- manifest: {recorded / 'manifest.jsonl'}" in text  # run context
     assert (tmp_path / "cache").is_dir()  # analyses were cached
+
+
+def test_tkh_eval_on_synthetic_clips_is_not_a_gate_and_still_exits_zero(corpus, tmp_path, capsys):
+    assert cli.main(eval_args(corpus, tmp_path)) == 0
+    text = (tmp_path / "reports" / "p0-gate.md").read_text(encoding="utf-8")
+    assert "**NOT A GATE (4 synthetic / non-allowed clips)**" in text
+    assert "S1: PASS" not in text and "S1: FAIL" not in text
+    out = capsys.readouterr().out
+    assert out.startswith("S1: NOT A GATE (4 synthetic / non-allowed clips)")
+    assert "PASS" not in out and "FAIL" not in out
+
+
+def test_tkh_eval_allow_synthetic_is_a_smoke_run(corpus, tmp_path, capsys):
+    assert cli.main(eval_args(corpus, tmp_path, "--allow-synthetic")) == 0
+    text = (tmp_path / "reports" / "p0-gate.md").read_text(encoding="utf-8")
+    assert "**SMOKE (synthetic)**" in text
+    assert "NOT A GATE" not in text and "S1: PASS" not in text and "S1: FAIL" not in text
+    assert capsys.readouterr().out.startswith("S1: SMOKE (synthetic)")
+
+
+def test_allow_synthetic_does_not_turn_a_real_corpus_into_a_smoke_run(recorded, tmp_path, capsys):
+    assert cli.main(eval_args(recorded, tmp_path, "--allow-synthetic")) == 0
+    assert capsys.readouterr().out.startswith(("S1: PASS", "S1: FAIL"))
+
+
+def write_register(path: Path, rows: dict[str, str]) -> Path:
+    body = "".join(f"{sid},{verdict}\n" for sid, verdict in rows.items())
+    path.write_text("id,shipped_weights_training\n" + body, encoding="utf-8")
+    return path
+
+
+def test_tkh_eval_reads_clearance_from_the_register_it_is_given(recorded, tmp_path, capsys):
+    register = write_register(tmp_path / "reg.csv", {"dj-corpus": "verify"})  # not yet signed off
+    assert cli.main(eval_args(recorded, tmp_path, "--register", str(register))) == 0
+    out = capsys.readouterr().out
+    assert out.startswith("S1: NOT A GATE (4 synthetic / non-allowed clips)")
+    text = (tmp_path / "reports" / "p0-gate.md").read_text(encoding="utf-8")
+    assert f"- data register: {register}" in text
+
+
+def test_a_source_that_is_not_a_register_id_is_an_error(recorded, tmp_path, capsys):
+    register = write_register(tmp_path / "reg.csv", {"someone-else": "allow"})
+    assert cli.main(eval_args(recorded, tmp_path, "--register", str(register))) == 1
+    err = capsys.readouterr().err
+    assert err.startswith("error: ") and "source 'dj-corpus' is not an id in the data register" in err
+    assert not (tmp_path / "reports" / "p0-gate.md").exists()
+
+
+def test_a_missing_or_unusable_register_is_an_error(recorded, tmp_path, capsys):
+    nowhere = tmp_path / "nowhere.csv"
+    assert cli.main(eval_args(recorded, tmp_path, "--register", str(nowhere))) == 1
+    assert "nowhere.csv" in capsys.readouterr().err
+    bad = tmp_path / "bad.csv"
+    bad.write_text("id,license\ndj-corpus,owned\n", encoding="utf-8")
+    assert cli.main(eval_args(recorded, tmp_path, "--register", str(bad))) == 1
+    assert "missing column" in capsys.readouterr().err
+    assert not (tmp_path / "reports" / "p0-gate.md").exists()
+
+
+def test_a_manifest_mixing_synthetic_rows_into_the_gate_is_an_error(corpus, tmp_path, capsys):
+    lines = (corpus / "manifest.jsonl").read_text(encoding="utf-8").splitlines()
+    mixed = json.loads(lines[0])
+    mixed.update(id="extra", set="synthetic", synthetic={"from": mixed["id"]})
+    (corpus / "manifest.jsonl").write_text("\n".join([*lines, json.dumps(mixed)]) + "\n", encoding="utf-8")
+    for extra in ([], ["--allow-synthetic"]):
+        assert cli.main(eval_args(corpus, tmp_path, *extra)) == 1
+        err = capsys.readouterr().err
+        assert err.startswith("error: ") and "mixed with gate clips" in err
+    assert not (tmp_path / "reports" / "p0-gate.md").exists()
+
+
+def test_a_synthetic_field_on_a_gate_row_is_an_error_naming_the_line(corpus, tmp_path, capsys):
+    lines = (corpus / "manifest.jsonl").read_text(encoding="utf-8").splitlines()
+    first = json.loads(lines[0])
+    first["synthetic"] = {"generator": "by hand"}
+    lines[0] = json.dumps(first)
+    (corpus / "manifest.jsonl").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    assert cli.main(eval_args(corpus, tmp_path)) == 1
+    err = capsys.readouterr().err
+    assert ":1:" in err and "`synthetic` field" in err
 
 
 def test_tkh_eval_no_cache_leaves_the_cache_alone(corpus, tmp_path):

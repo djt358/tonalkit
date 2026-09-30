@@ -8,6 +8,9 @@ near-silence (a fixed low noise floor) on each side, so the segmenter finds one 
 syllable. Everything is deterministic.
 
 Synthetic audio is for testing the harness only; it is never used to fit shipped calibration.
+The clips are registered as `synthetic-world` (deny in data-register.csv), so `tkh eval` calls a
+run over them "NOT A GATE" or, with `--allow-synthetic`, "SMOKE"; pass `source="dj-corpus"` to
+stand in for a recording when a test is about the PASS/FAIL headline itself.
 """
 
 from __future__ import annotations
@@ -88,10 +91,12 @@ def write_clip(
     speaker: str = "dj",
     distractors: list[list[str]] | None = None,
     produced: list[str] | None = None,
+    source: str = "synthetic-world",
 ) -> Clip:
     """Write `pcm` (16 kHz mono samples) to `<root>/<cid>.wav` and return its manifest `Clip`,
     whose path is relative to `root`. `intended` is the reading the clip aims for; `produced` the
-    tones actually spoken, if known (`produced_tones` is null otherwise)."""
+    tones actually spoken, if known (`produced_tones` is null otherwise); `source` is its
+    data-register id."""
     root.mkdir(parents=True, exist_ok=True)
     wavfile.write(root / f"{cid}.wav", RATE, np.asarray(pcm, dtype=np.float32))
     return Clip(
@@ -105,8 +110,8 @@ def write_clip(
         distractors=[candidate(d) for d in distractors or []],
         produced_tones=None if produced is None else list(produced),
         condition=Condition(noise="none", distance="synthetic"),
-        source="synthetic-test",
-        synthetic={"generator": "tests/support.py"},
+        source=source,
+        synthetic={"generator": "tests/support.py"} if set == "synthetic" else None,
     )
 
 
@@ -124,6 +129,7 @@ def make_clip(
     seed: int = 0,
     syllable_s: float = SYLLABLE_S,
     gap_s: float = GAP_S,
+    source: str = "synthetic-world",
 ) -> Clip:
     """Synthesise `<root>/<cid>.wav` speaking `produced` (see `utterance`) and return its manifest
     `Clip`, whose intended reading is `intended` (default: what was produced)."""
@@ -138,6 +144,7 @@ def make_clip(
         speaker=speaker,
         distractors=distractors,
         produced=produced,
+        source=source,
     )
 
 
@@ -146,18 +153,22 @@ def write_manifest(path: Path, clips: list[Clip]) -> Path:
     return path
 
 
-def gate_corpus(root: Path) -> list[Clip]:
+def gate_corpus(root: Path, source: str = "synthetic-world") -> list[Clip]:
     """Two gate pairs (four clips): each pair speaks its intended tones once correctly and once
     with the middle tone changed."""
     return [
-        make_clip(root, "gate-01-correct", ["4", "1", "3"], pair="gate-01", label="correct"),
+        make_clip(
+            root, "gate-01-correct", ["4", "1", "3"], pair="gate-01", label="correct", source=source
+        ),
         make_clip(
             root, "gate-01-error", ["4", "2", "3"], intended=["4", "1", "3"],
-            pair="gate-01", label="tone_error",
+            pair="gate-01", label="tone_error", source=source,
         ),  # fmt: skip
-        make_clip(root, "gate-02-correct", ["1", "2", "4"], pair="gate-02", label="correct"),
+        make_clip(
+            root, "gate-02-correct", ["1", "2", "4"], pair="gate-02", label="correct", source=source
+        ),
         make_clip(
             root, "gate-02-error", ["1", "3", "4"], intended=["1", "2", "4"],
-            pair="gate-02", label="tone_error",
+            pair="gate-02", label="tone_error", source=source,
         ),  # fmt: skip
     ]

@@ -3,8 +3,11 @@ what the numbers show and never decide anything."""
 
 from __future__ import annotations
 
+import pytest
+
 from tonekit_harness import bakeoff_report, conditions, metrics
 from tonekit_harness.bakeoff import Bakeoff, GateScores, Group
+from tonekit_harness.clearance import Clearance
 from tonekit_harness.evaluate import Result
 from tonekit_harness.pitch_metrics import Counts
 
@@ -23,6 +26,7 @@ def gate_scores(correct: list[float], wrong: list[float], n_minimal: int = 0) ->
     return GateScores(metrics.loo_gate(rows), 0.75 if n_minimal else None, n_minimal)
 
 
+GATE = Clearance("gate")
 PASSING = gate_scores([0.9, 0.8, 0.85], [0.1, 0.2, 0.15])  # every pair separated
 FAILING = gate_scores([0.5, 0.5, 0.5], [0.5, 0.5, 0.5])  # nothing separates them
 
@@ -110,7 +114,7 @@ def test_the_snr_buckets_in_the_text_come_from_the_bucket_constant(tmp_path, mon
 
 
 def test_the_gate_table_and_verdict(tmp_path):
-    both = Bakeoff(synthetic=None, gate={"pyin": PASSING, "swift-f0": FAILING})
+    both = Bakeoff(synthetic=None, gate={"pyin": PASSING, "swift-f0": FAILING}, clearance=GATE)
     text = render(tmp_path, both)
     assert (
         "| Provider | Correct-accept | Wrong-accept | S1 | Median threshold "
@@ -124,13 +128,15 @@ def test_the_gate_table_and_verdict(tmp_path):
 
 def test_candidate_id_accuracy_is_shown_when_there_are_diag_minimal_clips(tmp_path):
     with_minimal = gate_scores([0.9, 0.8, 0.85], [0.1, 0.2, 0.15], n_minimal=4)
-    text = render(tmp_path, Bakeoff(synthetic=None, gate={"pyin": with_minimal}))
+    text = render(tmp_path, Bakeoff(synthetic=None, gate={"pyin": with_minimal}, clearance=GATE))
     assert "0.750 (3/4)" in text
-    assert "n/a (no clips)" in render(tmp_path, Bakeoff(synthetic=None, gate={"pyin": PASSING}))
+    assert "n/a (no clips)" in render(
+        tmp_path, Bakeoff(synthetic=None, gate={"pyin": PASSING}, clearance=GATE)
+    )
 
 
 def test_both_sections_and_the_run_context_appear_in_order(tmp_path):
-    both = Bakeoff(synthetic_result().synthetic, {"pyin": PASSING, "swift-f0": FAILING})
+    both = Bakeoff(synthetic_result().synthetic, {"pyin": PASSING, "swift-f0": FAILING}, GATE)
     text = render(tmp_path, both, context={"pack": "cmn.toml", "swift-f0": "0.3.0"})
     assert text.index("## Run") < text.index("## Synthetic f0 accuracy") < text.index("## Gate S1")
     assert "- pack: cmn.toml\n- swift-f0: 0.3.0\n" in text
@@ -138,3 +144,30 @@ def test_both_sections_and_the_run_context_appear_in_order(tmp_path):
 
 def test_the_output_is_deterministic(tmp_path):
     assert render(tmp_path, synthetic_result()) == render(tmp_path, synthetic_result())
+
+
+def test_a_gate_run_that_is_not_a_gate_says_so_and_issues_no_verdict(tmp_path):
+    no_verdict = Bakeoff(
+        synthetic=None,
+        gate={"pyin": PASSING, "swift-f0": FAILING},
+        clearance=Clearance("not a gate", 6),
+    )
+    text = render(tmp_path, no_verdict)
+    gate = text.split("## Gate S1")[1]
+    assert "NOT A GATE (6 synthetic / non-allowed clips)" in gate
+    assert "PASS" not in gate and "FAIL" not in gate
+    assert "| pyin | 1.000 (3/3) | 0.000 (0/3) | n/a |" in gate  # the numbers, without a verdict
+    assert "| swift-f0 | 1.000 (3/3) | 1.000 (3/3) | n/a |" in gate
+    assert "some clips are synthetic or come from a source the data register does not allow" in gate
+
+
+def test_a_smoke_gate_run_says_smoke(tmp_path):
+    smoke = Bakeoff(synthetic=None, gate={"pyin": PASSING}, clearance=Clearance("smoke", 6))
+    gate = render(tmp_path, smoke).split("## Gate S1")[1]
+    assert "SMOKE (synthetic)" in gate and "a smoke run that checks the plumbing" in gate
+    assert "PASS" not in gate and "FAIL" not in gate
+
+
+def test_a_gate_result_without_its_clearance_cannot_be_written(tmp_path):
+    with pytest.raises(ValueError, match="clearance"):
+        render(tmp_path, Bakeoff(synthetic=None, gate={"pyin": PASSING}))

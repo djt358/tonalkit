@@ -14,7 +14,7 @@ import tonekit_py
 from scipy.io import wavfile
 from support import RATE, gate_corpus, make_clip
 
-from tonekit_harness import evaluate, manifest, metrics, report
+from tonekit_harness import clearance, evaluate, manifest, metrics, report
 from tonekit_harness.evaluate import EvalError, Result
 
 PACKS = Path(__file__).resolve().parents[2] / "packs" / "cmn"
@@ -92,9 +92,11 @@ def test_results_feed_the_gate_and_the_report(results, tmp_path):
         metrics.candidate_id_accuracy(results),
         metrics.count_robustness(results, theta),
         metrics.failures(results, gate, theta),
+        clearance=clearance.Clearance("smoke", len(results)),  # synthetic clips: no verdict
     )
     text = out.read_text(encoding="utf-8")
-    assert f"S1: {'PASS' if gate.passed else 'FAIL'}" in text
+    assert "**SMOKE (synthetic)**" in text
+    assert "S1: PASS" not in text and "S1: FAIL" not in text
     assert "gate-01" in text and "gate-02" in text
 
 

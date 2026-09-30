@@ -74,14 +74,30 @@ def test_optional_fields_default():
     assert c.distractors == []
 
 
-@pytest.mark.parametrize("s", ["gate", "diag_t23", "diag_count", "diag_minimal", "quiet", "register", "synthetic"])
-def test_every_set_is_accepted(s):
+@pytest.mark.parametrize("s", ["gate", "diag_t23", "diag_count", "diag_minimal", "quiet", "register"])
+def test_every_recorded_set_is_accepted(s):
     assert Clip.model_validate(row(set=s)).set == s
 
 
-@pytest.mark.parametrize("l", ["correct", "tone_error", "graded", "n/a"])
-def test_every_label_is_accepted(l):
-    assert Clip.model_validate(row(label=l)).label == l
+def test_the_synthetic_set_is_accepted_with_its_synthetic_field():
+    c = Clip.model_validate(row(set="synthetic", synthetic={"from": "gate-01-correct"}))
+    assert c.set == "synthetic"
+
+
+@pytest.mark.parametrize("s", ["gate", "diag_t23", "diag_count", "diag_minimal", "quiet", "register"])
+def test_a_synthetic_field_outside_the_synthetic_set_is_rejected(s):
+    with pytest.raises(ValidationError, match="synthetic"):
+        Clip.model_validate(row(set=s, synthetic={"from": "gate-01-correct"}))
+
+
+def test_the_synthetic_set_without_a_synthetic_field_is_rejected():
+    with pytest.raises(ValidationError, match="synthetic"):
+        Clip.model_validate(row(set="synthetic", synthetic=None))
+
+
+@pytest.mark.parametrize("label", ["correct", "tone_error", "graded", "n/a"])
+def test_every_label_is_accepted(label):
+    assert Clip.model_validate(row(label=label)).label == label
 
 
 def test_unknown_set_and_label_rejected():
@@ -164,3 +180,29 @@ def test_load_rejects_non_object_row(tmp_path):
     with pytest.raises(ManifestError) as e:
         manifest.load(p)
     assert ":1:" in str(e.value)
+
+
+# --- `source` must be a data-register id -----------------------------------------------------
+
+REGISTER = {"dj-corpus": "allow", "synthetic-world": "deny"}  # id -> shipped_weights_training
+
+
+def test_load_without_a_register_does_not_look_at_sources(tmp_path):
+    p = write_jsonl(tmp_path / "m.jsonl", [json.dumps(row(source="made-up"))])
+    assert manifest.load(p)[0].source == "made-up"
+
+
+def test_load_with_a_register_accepts_registered_sources_whatever_their_verdict(tmp_path):
+    rows = [row(id="a"), row(id="b", source="synthetic-world")]
+    p = write_jsonl(tmp_path / "m.jsonl", [json.dumps(r) for r in rows])
+    assert [c.source for c in manifest.load(p, register=REGISTER)] == ["dj-corpus", "synthetic-world"]
+
+
+def test_load_with_a_register_rejects_an_unregistered_source_naming_the_line(tmp_path):
+    p = write_jsonl(
+        tmp_path / "m.jsonl", [json.dumps(row(id="a")), json.dumps(row(id="b", source="dj-corpu"))]
+    )
+    with pytest.raises(ManifestError) as e:
+        manifest.load(p, register=REGISTER)
+    message = str(e.value)
+    assert f"{p}:2:" in message and "source 'dj-corpu' is not an id in the data register" in message

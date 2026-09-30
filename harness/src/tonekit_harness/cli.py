@@ -34,9 +34,11 @@ def _unavailable(command: str, reason: str) -> Callable[[argparse.Namespace], in
 def _register_optional(subparsers, name: str) -> None:
     try:
         module = importlib.import_module(f".{name}", __package__)
-    except (ImportError, OSError) as e:  # pyworld missing, or built for another platform
+    except Exception as e:  # pyworld missing, built for another platform or against another numpy
         reason = f"cannot import {name} ({type(e).__name__}: {e}); the other commands still work"
-        p = subparsers.add_parser(name, help=f"unavailable: {reason}", add_help=False)
+        # argparse %-formats help text, and the reason may hold a `%` (a Windows error's "%1")
+        help_text = f"unavailable: {reason}".replace("%", "%%")
+        p = subparsers.add_parser(name, help=help_text, add_help=False)
         p.set_defaults(func=_unavailable(name, reason), unavailable=True)
     else:
         module.register(subparsers)
