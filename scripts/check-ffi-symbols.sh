@@ -22,16 +22,20 @@ cat "$headers"/*.h | grep -Eo '\b(uniffi|ffi)_tonekit[A-Za-z0-9_]*\(' | tr -d '(
 # failing `nm` (missing, or an unreadable archive) made the script exit silently, with no message
 # saying that `nm` was the problem.
 #
-# Apple's `nm` (llvm-nm) also reads the LLVM bitcode that Rust's prebuilt standard library embeds
-# in its objects, and an Xcode whose LLVM is older than rustc's can't parse it ("Unknown attribute
-# kind (86) (Producer: 'LLVM22...' Reader: 'LLVM APPLE_1_1500...')"). The symbols checked here are
-# in the Mach-O code, not the bitcode, so the bitcode reader is switched off where `nm` has one.
-nm_flags=(-g)
-if nm --help 2>&1 | grep -q -- '--no-llvm-bc'; then
-    nm_flags+=(--no-llvm-bc)
+# The `nm` is rustc's own `llvm-nm` when the `llvm-tools` component is installed (rustup component
+# add llvm-tools; build-xcframework.sh adds it). Apple's `nm` also reads the LLVM bitcode that
+# Rust's prebuilt standard library carries, and an Xcode whose LLVM is older than rustc's can't
+# parse it ("Unknown attribute kind (86) (Producer: 'LLVM22...' Reader: 'LLVM APPLE_1_1500...')").
+# rustc's `llvm-nm` has the same LLVM as the compiler that wrote the library. Otherwise the
+# system `nm` (GNU on Linux, which ignores the bitcode).
+nm_tool=nm
+if command -v rustc >/dev/null; then
+    host=$(rustc -vV | sed -n 's/^host: //p')
+    rust_nm="$(rustc --print sysroot)/lib/rustlib/$host/bin/llvm-nm"
+    [ -x "$rust_nm" ] && nm_tool=$rust_nm
 fi
-if ! nm "${nm_flags[@]}" "$lib" >"$tmp/nm.out" 2>"$tmp/nm.err"; then
-    echo "check-ffi-symbols: \`nm ${nm_flags[*]} $lib\` failed:" >&2
+if ! "$nm_tool" -g "$lib" >"$tmp/nm.out" 2>"$tmp/nm.err"; then
+    echo "check-ffi-symbols: \`$nm_tool -g $lib\` failed:" >&2
     sed 's/^/  /' "$tmp/nm.err" >&2
     exit 1
 fi

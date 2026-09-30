@@ -79,8 +79,10 @@ fi
 
 # ---- 1. Rust static libraries --------------------------------------------------------------
 
-step "adding the Rust targets (a no-op when already installed)"
+step "adding the Rust targets and llvm-tools (a no-op when already installed)"
 rustup target add "${targets[@]}"
+# rustc's own llvm-nm, for check-ffi-symbols.sh: Xcode's nm can be older than rustc's LLVM.
+rustup component add llvm-tools
 
 mkdir -p "$build"
 for triple in "${targets[@]}"; do

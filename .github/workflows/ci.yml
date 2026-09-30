@@ -82,6 +82,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-apple-ios,aarch64-apple-ios-sim
+          components: llvm-tools
       - name: Build the XCFramework
         run: |
           set -o pipefail
