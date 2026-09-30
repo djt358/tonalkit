@@ -19,6 +19,10 @@ dependencies = [
     # pyworld 0.3.5 imports `pkg_resources` (only to read its own version) but does not declare
     # setuptools; setuptools 81 and later no longer ship `pkg_resources`.
     "setuptools<81",
+    # SwiftF0 (MIT) and ONNX Runtime (MIT) for `tkh bakeoff`, the pYIN against SwiftF0 comparison.
+    # The SwiftF0 model ships inside the swift-f0 wheel: nothing is downloaded at run time.
+    "swift-f0>=0.3.0",
+    "onnxruntime>=1.30.0",
 ]
 
 [project.scripts]

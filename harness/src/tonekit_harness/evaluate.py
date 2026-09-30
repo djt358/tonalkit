@@ -1,7 +1,8 @@
 """Grade every manifest clip with tonekit and collect one `Result` per clip.
 
 Per clip: read the 16 kHz mono WAV, `tonekit_py.analyze` it (cached on disk), then
-`tonekit_py.assess` the clip's intended reading against its distractors. A speaker's `register`
+`tonekit_py.assess` the clip's intended reading against its distractors. The f0 is tonekit's own
+pYIN unless a named provider (`f0=`, see `pitch_tracks`) supplies the track. A speaker's `register`
 clips are graded first, chained so each is analysed with the register learnt from the ones before
 it, and the final register is given to that speaker's other clips; a speaker with no register
 clips is analysed cold, clip by clip.
@@ -27,7 +28,7 @@ import numpy as np
 import tonekit_py
 from scipy.io import wavfile
 
-from . import manifest, metrics, report
+from . import manifest, metrics, pitch_tracks, report
 from .ingest import TARGET_SR, to_float32
 from .manifest import Clip, ManifestError, to_candidate_json
 
@@ -107,7 +108,7 @@ def read_wav(path: Path, name: str) -> tuple[bytes, np.ndarray]:
     return data, to_float32(samples)
 
 
-def _tonekit_py_version() -> str:
+def tonekit_py_version() -> str:
     try:
         return metadata.version("tonekit-py")
     except metadata.PackageNotFoundError:
@@ -123,14 +124,18 @@ def _tonekit_py_fingerprint() -> str:
     for f in sorted(p for p in package.iterdir() if p.suffix in {".so", ".pyd", ".dylib"}):
         h.update(f.name.encode())
         h.update(f.read_bytes())
-    return f"{_tonekit_py_version()}+{h.hexdigest()}"
+    return f"{tonekit_py_version()}+{h.hexdigest()}"
 
 
-def _cache_key(wav: bytes, register_json: str | None) -> str:
-    """sha256 over the WAV bytes, the register JSON and the tonekit_py version (each length-
-    prefixed so the parts cannot run into each other)."""
+def _cache_key(wav: bytes, register_json: str | None, f0_identity: str | None = None) -> str:
+    """sha256 over the WAV bytes, the register JSON, the tonekit_py version and, for an f0
+    provider, its name and version (each length-prefixed so the parts cannot run into each other).
+    Without a provider the key is what it was before providers existed."""
+    parts = [wav, (register_json or "").encode(), _tonekit_py_fingerprint().encode()]
+    if f0_identity is not None:
+        parts.append(f0_identity.encode())
     h = hashlib.sha256()
-    for part in (wav, (register_json or "").encode(), _tonekit_py_fingerprint().encode()):
+    for part in parts:
         h.update(len(part).to_bytes(8, "big"))
         h.update(part)
     return h.hexdigest()
@@ -175,10 +180,14 @@ def _measured_kind(measured: str | dict) -> str:
     return measured if isinstance(measured, str) else next(iter(measured))
 
 
-def analyze_pcm(name: str, pcm: np.ndarray, register_json: str | None = None) -> str:
-    """`tonekit_py.analyze` of 16 kHz samples; a tonekit failure is an `EvalError` naming `name`."""
+def analyze_pcm(
+    name: str, pcm: np.ndarray, register_json: str | None = None, f0: str | None = None
+) -> str:
+    """`tonekit_py.analyze` of 16 kHz samples, with the f0 track of the provider `f0` (None:
+    tonekit's own pYIN). A tonekit or provider failure is an `EvalError` naming `name`."""
     try:
-        return tonekit_py.analyze(pcm, TARGET_SR, register_json)
+        f0_json = None if f0 is None else pitch_tracks.provider_track(f0, pcm)
+        return tonekit_py.analyze(pcm, TARGET_SR, register_json, f0_json)
     except ValueError as e:
         raise EvalError(f"{name}: {e}") from e
 
@@ -195,15 +204,24 @@ class Grader:
     accent: str
     root: Path
     cache_dir: Path | None  # None: no cache
+    f0: str | None = None  # a name in `pitch_tracks.EXTERNAL_PROVIDERS`; None: tonekit's own pYIN
 
-    def analysis(self, clip: Clip, register_json: str | None) -> str:
-        wav, pcm = read_wav(self.root / clip.path, clip.id)
+    def analysis(
+        self,
+        clip: Clip,
+        register_json: str | None,
+        audio: tuple[bytes, np.ndarray] | None = None,
+    ) -> str:
+        """The clip's Analysis JSON, from the cache if it is there. `audio` is the clip's
+        `read_wav` if the caller has already read it."""
+        wav, pcm = audio if audio is not None else read_wav(self.root / clip.path, clip.id)
         entry = None
         if self.cache_dir is not None:
-            entry = self.cache_dir / f"{_cache_key(wav, register_json)}.json"
+            identity = None if self.f0 is None else pitch_tracks.provider_identity(self.f0)
+            entry = self.cache_dir / f"{_cache_key(wav, register_json, identity)}.json"
             if (text := _read_cached(entry)) is not None:
                 return text
-        text = analyze_pcm(clip.id, pcm, register_json)
+        text = analyze_pcm(clip.id, pcm, register_json, self.f0)
         if entry is not None:
             _write_cached(entry, text)
         return text
@@ -216,7 +234,7 @@ class Grader:
         self, clip: Clip, pcm: np.ndarray, register_json: str | None = None
     ) -> tuple[Result, dict]:
         """Like `grade`, for samples in memory: `clip.path` is not read and nothing is cached."""
-        return self.assess(clip, analyze_pcm(clip.id, pcm, register_json))
+        return self.assess(clip, analyze_pcm(clip.id, pcm, register_json, self.f0))
 
     def assess(self, clip: Clip, analysis_json: str) -> tuple[Result, dict]:
         request = {
@@ -298,13 +316,19 @@ def run(
     root: str | Path = ".",
     cache_dir: str | Path | None = None,
     use_cache: bool = True,
+    f0: str | None = None,
 ) -> list[Result]:
     """Grade `clips`, returning one `Result` per clip in the same order.
 
     `accent` defaults to the pack's `base_accent`. Each clip's `path` is relative to `root`.
     Analyses are cached under `cache_dir` (default `DEFAULT_CACHE_DIR`) unless `use_cache` is
-    false. Raises `EvalError` (naming the clip) if a clip cannot be read or graded.
+    false. `f0` names the pitch provider whose track tonekit analyses (one of
+    `pitch_tracks.EXTERNAL_PROVIDERS`); None is tonekit's own pYIN. Raises `EvalError` (naming
+    the clip) if a clip cannot be read or graded, or if `f0` is not a known provider.
     """
+    if f0 is not None and f0 not in pitch_tracks.EXTERNAL_PROVIDERS:
+        known = ", ".join(pitch_tracks.EXTERNAL_PROVIDERS)
+        raise EvalError(f"unknown f0 provider {f0!r} (known: {known})")
     seen: set[str] = set()
     for clip in clips:
         if clip.id in seen:
@@ -317,6 +341,7 @@ def run(
         accent=accent or base_accent(pack_toml),
         root=Path(root),
         cache_dir=Path(cache_dir or DEFAULT_CACHE_DIR) if use_cache else None,
+        f0=f0,
     )
 
     registers, by_id = _chain_registers(clips, grader)
@@ -361,7 +386,7 @@ def _run(args: argparse.Namespace) -> int:
                 "calibration": str(args.calib) if args.calib else "the pack's own",
                 "accent": args.accent or "the pack's base accent",
                 "clips": ", ".join(f"{name} {n}" for name, n in per_set.items()),
-                "tonekit-py": _tonekit_py_version(),
+                "tonekit-py": tonekit_py_version(),
             },
         )
     except (ManifestError, EvalError, metrics.MetricsError, OSError) as e:

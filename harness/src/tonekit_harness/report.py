@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 _MS_DELTAS = {"TurnEarlier", "TurnLater"}  # the other kinds are in Chao units
 
 
-def _num(x: float | None) -> str:
+def num(x: float | None) -> str:
     if x is None:
         return "n/a"
     if math.isinf(x):
@@ -29,13 +29,14 @@ def _cell(text: object) -> str:
     return str(text).replace("|", "\\|")
 
 
-def _rate(rate: float | None, n: int | None) -> str:
-    if rate is None:
-        return "n/a (no clips)"
-    return f"{rate:.3f} ({round(rate * n)}/{n})" if n else f"{rate:.3f}"
+def rate(value: float | None, n: int | None, *, missing: str = "n/a (no clips)") -> str:
+    """A rate as `0.750 (3/4)` out of `n`; `missing` for None."""
+    if value is None:
+        return missing
+    return f"{value:.3f} ({round(value * n)}/{n})" if n else f"{value:.3f}"
 
 
-def _table(header: Sequence[str], rows: Sequence[Sequence[object]]) -> list[str]:
+def table(header: Sequence[str], rows: Sequence[Sequence[object]]) -> list[str]:
     lines = ["| " + " | ".join(header) + " |", "|" + "|".join("---" for _ in header) + "|"]
     lines += ["| " + " | ".join(_cell(c) for c in row) + " |" for row in rows]
     return lines
@@ -90,27 +91,27 @@ def _metrics_table(
             f"at most {float(WA_MAX):.2f}",
             "pass" if gate.wa_ok else "fail",
         ],
-        ["Candidate-ID accuracy (diag_minimal)", _rate(cand_acc, n_minimal), "diagnostic", "-"],
-        ["Count robustness (diag_count)", _rate(count_rob, n_count), "diagnostic", "-"],
-        ["Median threshold over the held-out pairs", _num(gate.median_threshold), "-", "-"],
+        ["Candidate-ID accuracy (diag_minimal)", rate(cand_acc, n_minimal), "diagnostic", "-"],
+        ["Count robustness (diag_count)", rate(count_rob, n_count), "diagnostic", "-"],
+        ["Median threshold over the held-out pairs", num(gate.median_threshold), "-", "-"],
     ]
-    return _table(["Metric", "Value", "Requirement", "Result"], rows)
+    return table(["Metric", "Value", "Requirement", "Result"], rows)
 
 
 def _pair_table(gate: GateMetrics) -> list[str]:
     rows = [
         [
             o.pair,
-            _num(o.theta),
-            _num(o.correct_overall),
+            num(o.theta),
+            num(o.correct_overall),
             "accepted" if o.correct_accepted else "rejected",
-            _num(o.wrong_overall),
+            num(o.wrong_overall),
             "accepted" if o.wrong_accepted else "rejected",
         ]
         for o in gate.outcomes
     ]
     header = ["Pair", "Held-out θ", "Correct overall", "Correct", "Wrong overall", "Wrong"]
-    return _table(header, rows)
+    return table(header, rows)
 
 
 def _failure(f: Failure) -> list[str]:
@@ -120,8 +121,8 @@ def _failure(f: Failure) -> list[str]:
         "",
         f"- {f.reason}",
         f"- set {r.set}, pair {r.pair or 'none'}, label {r.label}, speaker {r.speaker}",
-        f"- overall {_num(r.overall)}, intended rank {r.intended_rank}, "
-        f"margin_llr {_num(r.margin_llr)}",
+        f"- overall {num(r.overall)}, intended rank {r.intended_rank}, "
+        f"margin_llr {num(r.margin_llr)}",
         f"- register {r.register_source}; signal issues: {', '.join(r.issues) or 'none'}",
         "",
     ]
@@ -131,15 +132,15 @@ def _failure(f: Failure) -> list[str]:
                 i,
                 s.expected,
                 s.heard or "-",
-                _num(s.p_correct),
-                _num(s.distance),
+                num(s.p_correct),
+                num(s.distance),
                 s.measured,
                 _deltas(s.deltas),
             ]
             for i, s in enumerate(r.syllables, start=1)
         ]
         header = ["#", "Expected", "Heard", "p_correct", "Distance", "Measured", "Top deltas"]
-        lines += _table(header, rows) + [""]
+        lines += table(header, rows) + [""]
     return lines
 
 

@@ -4,6 +4,7 @@ ground truth, one `{"id", "f0_hz"}` per row; `null` where unvoiced)."""
 from __future__ import annotations
 
 import json
+import math
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -46,6 +47,44 @@ def write_index(out_dir: str | Path, clips: Sequence[Clip], truths: Sequence[lis
         json.dumps({"id": c.id, "f0_hz": f0}) + "\n" for c, f0 in zip(clips, truths, strict=True)
     )
     (out / "truth.jsonl").write_text("".join(lines), encoding="utf-8")
+
+
+def _positive_finite(x: object) -> bool:
+    return isinstance(x, int | float) and not isinstance(x, bool) and math.isfinite(x) and x > 0
+
+
+def read_truth(out_dir: str | Path) -> dict[str, list[float | None]]:
+    """The f0 truth `write_index` wrote: clip id to Hz per 10 ms frame (None where unvoiced), in
+    file order. Raises `SynthError` naming the file and line for a line that is not
+    `{"id", "f0_hz"}`, has a frame that is not null or a positive finite number, or repeats an
+    id, and if `out_dir` has no `truth.jsonl`."""
+    path = Path(out_dir) / "truth.jsonl"
+    if not path.is_file():
+        raise SynthError(f"no truth.jsonl in {out_dir}")
+    truth: dict[str, list[float | None]] = {}
+    for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+        if not line.strip():
+            continue
+        where = f"{path}:{lineno}"
+        try:
+            obj = json.loads(line)
+        except json.JSONDecodeError as e:
+            raise SynthError(f"{where}: invalid JSON: {e}") from e
+        if not (
+            isinstance(obj, dict)
+            and isinstance(obj.get("id"), str)
+            and isinstance(obj.get("f0_hz"), list)
+        ):
+            raise SynthError(f"{where}: expected an id and f0_hz")
+        for i, hz in enumerate(obj["f0_hz"]):
+            if hz is not None and not _positive_finite(hz):
+                raise SynthError(
+                    f"{where}: f0_hz[{i}] is {hz!r}, expected null or a positive finite number"
+                )
+        if obj["id"] in truth:
+            raise SynthError(f"{where}: duplicate id {obj['id']!r}")
+        truth[obj["id"]] = obj["f0_hz"]
+    return truth
 
 
 def write_corpus(out_dir: str | Path, made: Sequence[Made]) -> None:

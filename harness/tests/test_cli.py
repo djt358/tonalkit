@@ -22,7 +22,7 @@ def broken_pyworld(monkeypatch):
     monkeypatch.setitem(sys.modules, "pyworld", None)
 
 
-@pytest.mark.parametrize("command", ["eval", "ingest", "provenance"])
+@pytest.mark.parametrize("command", ["eval", "ingest", "provenance", "bakeoff"])
 def test_a_broken_pyworld_leaves_the_other_commands_working(broken_pyworld, command, capsys):
     with pytest.raises(SystemExit) as stop:
         cli.main([command, "--help"])
@@ -48,7 +48,7 @@ def test_the_top_level_help_still_lists_every_command_when_pyworld_is_broken(
         cli.main(["--help"])
     assert stop.value.code == 0
     out = capsys.readouterr().out
-    for command in ("ingest", "provenance", "eval", "synth", "adversary"):
+    for command in ("ingest", "provenance", "eval", "bakeoff", "synth", "adversary"):
         assert command in out
     assert "unavailable" in out
 
