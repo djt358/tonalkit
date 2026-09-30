@@ -757,7 +757,15 @@ fn non_finite_shapes_give_finite_uninformative_output() {
         assert_eq!(j.component, None);
         assert_eq!(j.heard, None);
         assert!(j.deltas.is_empty());
-        assert_eq!(j.measured, Measured::Full);
+        // Not a measurement at all (I1), whatever other issues the call carried.
+        let not_measured = Measured::NotMeasured {
+            issue: MeasureIssue::InvalidEvidence,
+        };
+        assert_eq!(j.measured, not_measured);
+        let j = pack
+            .judge(&std_g(), x, &target("4"), &c, &[MeasureIssue::LowSnr])
+            .unwrap();
+        assert_eq!(j.measured, not_measured);
         let ll = pack.tone_loglik(&std_g(), x, &tone("4"), &c, &[]).unwrap();
         assert_eq!(ll, -1.0e6);
     }

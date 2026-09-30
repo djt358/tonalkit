@@ -45,9 +45,9 @@ pub struct AssessRequest {
 ///    `intended` that were measured (anything but `NotMeasured`; ruling R38). For a given register
 ///    it is that register merged with this utterance's voiced semitones and the measured count,
 ///    or unchanged (not even `n_syllables` moves) if nothing was measured. For a cold start it is
-///    the analysis's own register (merging it back into itself would count the utterance twice),
-///    with `n_syllables` 0 if nothing was measured. Consumers persist it only if
-///    `n_syllables > 0`.
+///    the analysis's own register (merging it back into itself would count the utterance twice)
+///    with the measured count as its `n_syllables`, so 0 if nothing was measured. Consumers
+///    persist it only if `n_syllables > 0`.
 /// 4. `tonekit_fuse::assemble` fuses the acoustic judgements with `req.external` under the pack's
 ///    fusion weights. `margin_llr` is against the best rival or the null competitor's biased score
 ///    `null_llr + null_bias` (ruling R37), so a correct reading's margin is positive.
@@ -59,9 +59,10 @@ pub struct AssessRequest {
 /// - [`AssessError::EvidenceLengthMismatch`] unless `req.external` is empty or holds exactly one
 ///   list per syllable of `intended`.
 ///
-/// From decoding: [`AssessError::UnknownTone`] for a tone outside the pack's inventory and
-/// [`AssessError::Pack`] for anything the pack rejects, such as an unknown accent (in `grading` or
-/// in `compare_accents`) or a candidate with no targets.
+/// From decoding: [`AssessError::InvalidRequest`] for a candidate with no targets,
+/// [`AssessError::UnknownTone`] for a tone outside the pack's inventory and [`AssessError::Pack`]
+/// for anything the pack rejects, such as an unknown accent (in `grading` or in
+/// `compare_accents`).
 pub fn assess(
     a: &Analysis,
     pack: &LanguagePack,
@@ -158,16 +159,15 @@ fn measured_syllables(decoded: &DecodeResult, intended: &Candidate) -> usize {
 /// The register to keep after an utterance in which `measured` syllables were measured (R38).
 fn register_update(a: &Analysis, measured: usize) -> Register {
     match (a.register_source, measured) {
-        // Nothing to learn from: a given register stays as it is, and a cold start has no
-        // syllables behind it, whatever its count says.
+        // Nothing to learn from: a given register stays as it is.
         (RegisterSource::Given, 0) => a.register.clone(),
-        (RegisterSource::ColdStart, 0) => Register {
-            n_syllables: 0,
+        (RegisterSource::Given, u) => merge_register(&a.register, &a.voiced_st, count(u)),
+        // Never merge a cold register into the utterance it was estimated from. It has as many
+        // syllables behind it as were measured, whatever its own count (the nuclei) says.
+        (RegisterSource::ColdStart, u) => Register {
+            n_syllables: count(u),
             ..a.register.clone()
         },
-        // Never merge a cold register into the utterance it was estimated from.
-        (RegisterSource::ColdStart, _) => a.register.clone(),
-        (RegisterSource::Given, u) => merge_register(&a.register, &a.voiced_st, count(u)),
     }
 }
 

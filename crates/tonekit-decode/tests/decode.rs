@@ -347,17 +347,17 @@ fn duplicate_candidate_ids_error() {
 }
 
 #[test]
-fn empty_candidate_set_and_empty_candidate_error() {
+fn empty_candidate_set_and_empty_candidate_are_invalid_requests() {
     let a = quiet(40);
     assert_eq!(
         decode(&a, &cmn(), &std_g(), &[]),
-        Err(AssessError::Pack {
+        Err(AssessError::InvalidRequest {
             message: "empty candidate set".into()
         })
     );
     assert_eq!(
         decode(&a, &cmn(), &std_g(), &[c("x", &["1"]), c("nil", &[])]),
-        Err(AssessError::Pack {
+        Err(AssessError::InvalidRequest {
             message: "candidate nil has no targets".into()
         })
     );

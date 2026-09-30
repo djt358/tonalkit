@@ -45,9 +45,9 @@ const LOG_CLAMP: f64 = 1.0e6;
 /// sorted by llr, highest first (ties keep the caller's order).
 ///
 /// Errors (the candidates and the grading are checked before any audio is scored):
-/// - `Pack { "empty candidate set" }` for no candidates;
+/// - `InvalidRequest { "empty candidate set" }` for no candidates;
 /// - `DuplicateCandidate` for a repeated id;
-/// - `Pack { "candidate <id> has no targets" }` for a candidate with no targets;
+/// - `InvalidRequest { "candidate <id> has no targets" }` for a candidate with no targets;
 /// - `UnknownTone` for a target or lexical-variant tone outside the pack's inventory;
 /// - `Pack` for anything the pack rejects (unknown accent, bad variant weights, bad style, a
 ///   tone it cannot realise in a context the decode needs).
@@ -106,7 +106,7 @@ pub fn lattice(
 /// The caller-input checks of [`decode`] that need no grading, in candidate order.
 fn check_candidates(pack: &LanguagePack, candidates: &[Candidate]) -> Result<(), AssessError> {
     if candidates.is_empty() {
-        return Err(AssessError::Pack {
+        return Err(AssessError::InvalidRequest {
             message: "empty candidate set".into(),
         });
     }
@@ -117,7 +117,7 @@ fn check_candidates(pack: &LanguagePack, candidates: &[Candidate]) -> Result<(),
             });
         }
         if cand.targets.is_empty() {
-            return Err(AssessError::Pack {
+            return Err(AssessError::InvalidRequest {
                 message: format!("candidate {} has no targets", cand.id.0),
             });
         }

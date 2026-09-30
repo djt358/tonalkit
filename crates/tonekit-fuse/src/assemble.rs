@@ -18,7 +18,7 @@ fn as_u32(n: usize) -> u32 {
 ///
 /// - `external` is either empty (no external evidence) or holds exactly one `Vec<Evidence>` per
 ///   syllable of the intended candidate; anything else is [`AssessError::EvidenceLengthMismatch`].
-/// - `intended` must be one of `r.candidates`, otherwise [`AssessError::Pack`].
+/// - `intended` must be one of `r.candidates`, otherwise [`AssessError::InvalidRequest`].
 /// - `intended_rank` is the 1-based position in `r.candidates`, which is sorted by llr descending.
 /// - `margin_llr` is the intended llr minus the larger of the best other candidate's llr and the
 ///   null competitor's score `r.null_llr + null_bias` (the same biased score the decode's posterior
@@ -28,7 +28,9 @@ fn as_u32(n: usize) -> u32 {
 /// - `overall` is the minimum `p_correct` over the syllables that count: those that were measured
 ///   (`Full` or `Partial`) and those that carry a confusion hit (`heard_as` is `Some`), even if
 ///   unmeasured, because a hit is a specific miss and the veto has already capped its `p_correct`.
-///   It is `None` only when no syllable is measured and none has a hit ("tone not checked").
+///   It is `None` only when no syllable is measured and none has a hit ("tone not checked"). A
+///   counted `p_correct` that is not a number counts as 0: a syllable that cannot be graded fails
+///   the cast rather than dropping out of it.
 pub fn assemble(
     r: &DecodeResult,
     intended: &CandidateId,
@@ -42,7 +44,7 @@ pub fn assemble(
         .candidates
         .iter()
         .position(|c| &c.id == intended)
-        .ok_or_else(|| AssessError::Pack {
+        .ok_or_else(|| AssessError::InvalidRequest {
             message: "intended candidate missing".into(),
         })?;
     let chosen = &r.candidates[idx];
@@ -72,7 +74,13 @@ pub fn assemble(
     let overall = syllables
         .iter()
         .filter(|s| !matches!(s.measured, Measured::NotMeasured { .. }) || s.heard_as.is_some())
-        .map(|s| s.p_correct)
+        .map(|s| {
+            if s.p_correct.is_nan() {
+                0.0
+            } else {
+                s.p_correct
+            }
+        })
         .reduce(f32::min);
 
     Ok(UtteranceAssessment {

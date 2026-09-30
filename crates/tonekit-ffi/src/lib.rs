@@ -9,9 +9,12 @@
 //!   `ToneId`, `CandidateId`) are plain `String`s.
 //!
 //! Every function returns `Result<_, AssessError>`, which Swift sees as a thrown `AssessError`; a
-//! pack the library rejects is `AssessError.Pack(message:)`. Bad input comes back as such an error,
-//! not a panic (and UniFFI turns any panic into a thrown internal error, never a crash). An
-//! external f0 track is sanitised inside `analyze` (ruling R43): Swift may pass any floats.
+//! pack the library rejects is `AssessError.Pack(message:)`, a request that cannot be graded
+//! (no candidates, a candidate with no targets) `AssessError.InvalidRequest(message:)`, and audio
+//! over 30 s `AssessError.TooLong(seconds:max:)`. Bad input comes back as such an error, not a
+//! panic (and UniFFI turns any panic into a thrown internal error, never a crash). An external f0
+//! track is sanitised inside `analyze` (ruling R43): Swift may pass any floats, and a register
+//! that is not usable is replaced by a cold start, flagged `InvalidRegister`.
 //!
 //! The crate builds as `staticlib` (the iOS XCFramework), `cdylib` (the host build that the
 //! bindings generator reads) and `lib` (Rust tests). Build steps are in `scripts/`.
@@ -86,8 +89,9 @@ impl Pack {
 ///
 /// # Errors
 ///
-/// [`AssessError::EmptyAudio`] for no samples and [`AssessError::UnsupportedSampleRate`] unless
-/// `sample_rate` is 16 000: the caller resamples.
+/// [`AssessError::EmptyAudio`] for no samples, [`AssessError::UnsupportedSampleRate`] unless
+/// `sample_rate` is 16 000 (the caller resamples), and [`AssessError::TooLong`] for more than
+/// 30 s of audio.
 #[uniffi::export(default(register = None, external_f0 = None))]
 pub fn analyze(
     pcm: Vec<f32>,
@@ -105,8 +109,9 @@ pub fn analyze(
 ///
 /// # Errors
 ///
+/// [`AssessError::InvalidRequest`] (an empty candidate set, a candidate with no targets),
 /// [`AssessError::UnknownTone`], [`AssessError::DuplicateCandidate`] or [`AssessError::Pack`]
-/// (an unknown accent, an empty candidate set, a candidate with no targets).
+/// (an unknown accent).
 #[uniffi::export]
 pub fn decode(
     analysis: Analysis,
@@ -137,7 +142,7 @@ pub fn lattice(
 /// # Errors
 ///
 /// [`AssessError::DuplicateCandidate`], [`AssessError::EvidenceLengthMismatch`],
-/// [`AssessError::UnknownTone`] or [`AssessError::Pack`].
+/// [`AssessError::InvalidRequest`], [`AssessError::UnknownTone`] or [`AssessError::Pack`].
 #[uniffi::export]
 pub fn assess(
     analysis: Analysis,

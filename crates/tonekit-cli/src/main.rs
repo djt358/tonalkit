@@ -1,6 +1,7 @@
 //! `tonekit`: grade a WAV file's lexical tones, or print its open tone lattice, for quick local
-//! checks. Exit codes: 0 success, 1 failure (unreadable input, pack or assessment error), 2 usage
-//! (bad arguments, or a WAV that is not 16 kHz mono PCM16/float).
+//! checks. Exit codes: 0 success, 1 failure (unreadable input, audio the library will not analyse
+//! such as an empty or over-30 s recording, pack or assessment error), 2 usage (bad arguments, or
+//! a WAV that is not 16 kHz mono PCM16/float).
 
 #![forbid(unsafe_code)]
 

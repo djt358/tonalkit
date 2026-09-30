@@ -1,7 +1,8 @@
 //! Per-syllable fusion (spec §7.4).
 
 use tonekit_core::{
-    ConfusionHit, Evidence, EvidenceKind, FusionWeights, Measured, SyllableAssessment, SyllableFit,
+    ConfusionHit, Evidence, EvidenceKind, FusionWeights, MeasureIssue, Measured,
+    SyllableAssessment, SyllableFit,
 };
 
 /// Neural probabilities are clamped to `[NN_EPS, 1 − NN_EPS]` before the logit.
@@ -25,7 +26,8 @@ fn logit(p: f32) -> f32 {
 ///   `Evidence::Acoustic` entry in `external` is ignored, so the acoustic term is never counted twice.
 /// - **Transcript** adds `β_tr` when `matched_target` (`x_tr = 1`, else 0) for every entry.
 /// - **Neural** adds `β_nn·logit(p_correct)` for every entry, with `p_correct` clamped to
-///   `[1e-6, 1 − 1e-6]`.
+///   `[1e-6, 1 − 1e-6]`. An entry whose `p_correct` is not a finite number is no evidence: it is
+///   ignored, and a measured syllable gains the issue `InvalidEvidence`.
 ///
 /// A syllable with no contributing evidence gets `sigmoid(β0)` and an empty `basis`. `basis` lists
 /// each kind that contributed once, in the order Acoustic, Transcript, Neural.
@@ -34,7 +36,8 @@ fn logit(p: f32) -> f32 {
 /// `veto_cap`, sets `heard_as` to the hit's text, and fills `heard` with the hit's tone when the
 /// acoustic judgement has none. The cap only lowers `p_correct`.
 ///
-/// `expected`, `distance`, `deltas`, `component` and `measured` are copied from the fit's judgement.
+/// `expected`, `distance`, `deltas`, `component` and `measured` are copied from the fit's judgement
+/// (`measured` with `InvalidEvidence` added as above).
 pub fn fuse_syllable(
     fit: &SyllableFit,
     external: &[Evidence],
@@ -50,6 +53,7 @@ pub fn fuse_syllable(
 
     let mut transcript = false;
     let mut neural = false;
+    let mut invalid = false;
     let mut hit: Option<&ConfusionHit> = None;
     for e in external {
         match e {
@@ -65,6 +69,7 @@ pub fn fuse_syllable(
                     hit = confusion_hit.as_ref();
                 }
             }
+            Evidence::Neural { p_correct, .. } if !p_correct.is_finite() => invalid = true,
             Evidence::Neural { p_correct, .. } => {
                 z += w.beta_neural * logit(*p_correct);
                 neural = true;
@@ -100,7 +105,27 @@ pub fn fuse_syllable(
         heard_as,
         deltas: j.deltas.clone(),
         component: j.component.clone(),
-        measured: j.measured.clone(),
+        measured: if invalid {
+            flagged(&j.measured, MeasureIssue::InvalidEvidence)
+        } else {
+            j.measured.clone()
+        },
         basis,
+    }
+}
+
+/// `measured` with `issue` among its caveats: `Full` becomes `Partial`, a `Partial` gains it once,
+/// and `NotMeasured` stays as it is (there is nothing measured to qualify).
+fn flagged(measured: &Measured, issue: MeasureIssue) -> Measured {
+    match measured {
+        Measured::Full => Measured::Partial {
+            issues: vec![issue],
+        },
+        Measured::Partial { issues } if !issues.contains(&issue) => {
+            let mut issues = issues.clone();
+            issues.push(issue);
+            Measured::Partial { issues }
+        }
+        other => other.clone(),
     }
 }

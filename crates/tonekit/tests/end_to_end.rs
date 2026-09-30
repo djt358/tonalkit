@@ -276,6 +276,87 @@ fn a_given_register_that_is_still_cold_is_flagged() {
     assert!(a.issues.contains(&MeasureIssue::ColdStartRegister));
 }
 
+/// `given` is not usable: `analyze` grades from a cold start instead, and says so.
+fn falls_back_to_a_cold_start(given: &Register) {
+    let s = spoken(&["4", "1", "3"]);
+    let a = analysis_of(&s, Some(given));
+    assert_eq!(a.register_source, RegisterSource::ColdStart);
+    assert!(
+        a.issues.contains(&MeasureIssue::InvalidRegister),
+        "{:?}",
+        a.issues
+    );
+    assert!(
+        a.issues.contains(&MeasureIssue::ColdStartRegister),
+        "{:?}",
+        a.issues
+    );
+    assert_eq!(a.register, analysis_of(&s, None).register);
+
+    // Graded as any cold start: the spoken reading well, a wrong one badly, and the register to
+    // keep is the new cold one, so the bad one does not persist.
+    let pack = cmn();
+    let right = assess(&a, &pack, &req(&["4", "1", "3"])).unwrap();
+    let wrong = assess(&a, &pack, &req(&["3", "1", "3"])).unwrap();
+    assert!(right.syllables[0].p_correct > 0.5, "{right:#?}");
+    assert!(wrong.syllables[0].p_correct < 0.5, "{wrong:#?}");
+    assert!(right.overall.is_some_and(|p| p > 0.5));
+    let reg = &right.register_update;
+    assert!([reg.floor_st, reg.median_st, reg.ceil_st]
+        .iter()
+        .all(|x| x.is_finite()));
+    assert!(reg.floor_st < reg.ceil_st);
+    assert_eq!(reg.n_syllables, 3);
+}
+
+#[test]
+fn a_register_that_is_not_a_number_is_replaced_by_a_cold_start() {
+    // I1: it used to grade every syllable 0.5, right or wrong, and persist its NaN.
+    for field in 0..3 {
+        let mut r = warm();
+        *[&mut r.floor_st, &mut r.median_st, &mut r.ceil_st][field] = f32::NAN;
+        falls_back_to_a_cold_start(&r);
+    }
+    falls_back_to_a_cold_start(&Register {
+        ceil_st: f32::INFINITY,
+        ..warm()
+    });
+}
+
+#[test]
+fn an_inverted_register_is_replaced_by_a_cold_start() {
+    // I1: floor above ceiling used to be read as 4 st up from the floor, grading a T4 as a T3.
+    let w = warm();
+    falls_back_to_a_cold_start(&Register {
+        floor_st: w.ceil_st,
+        ceil_st: w.floor_st,
+        ..w.clone()
+    });
+    falls_back_to_a_cold_start(&Register {
+        ceil_st: w.floor_st,
+        ..w
+    });
+}
+
+#[test]
+fn a_register_with_an_impossible_syllable_count_is_replaced_by_a_cold_start() {
+    // More syllables than anyone speaks in decades is a corrupted count; it would freeze the
+    // register (each merge moves it u/(n+u) of the way).
+    falls_back_to_a_cold_start(&Register {
+        n_syllables: u32::MAX,
+        ..warm()
+    });
+    // A long-standing learner's count is fine.
+    let a = warm_analysis(&["4", "1", "3"]);
+    let veteran = Register {
+        n_syllables: 5_000_000,
+        ..warm()
+    };
+    let b = analysis_of(&spoken(&["4", "1", "3"]), Some(&veteran));
+    assert_eq!(b.register_source, RegisterSource::Given);
+    assert_eq!(b.issues, a.issues);
+}
+
 #[test]
 fn clipped_input_is_flagged() {
     let clipped: Vec<f32> = spoken(&["4", "1", "3"])
@@ -337,6 +418,34 @@ fn rejects_wrong_rate_and_empty() {
         analyze(&[], 16_000, None, &Default::default()),
         Err(AssessError::EmptyAudio)
     ));
+}
+
+#[test]
+fn thirty_seconds_is_the_longest_input() {
+    // R52: the dense pYIN needs memory in proportion to the length (498 MB at 120 s), so longer
+    // input is refused before any work. The external f0 path skips pYIN, keeping this test quick;
+    // the cap comes first either way.
+    let skip_pyin = external(F0Track {
+        frames: Vec::new(),
+        provider: "none".into(),
+    });
+    let thirty = vec![0.0; 30 * RATE as usize];
+    assert!(analyze(&thirty, RATE, None, &skip_pyin).is_ok());
+    let longer = vec![0.0; 30 * RATE as usize + 160];
+    for opts in [skip_pyin, AnalyzeOptions::default()] {
+        assert_eq!(
+            analyze(&longer, RATE, None, &opts),
+            Err(AssessError::TooLong {
+                seconds: 30.01,
+                max: 30.0
+            })
+        );
+    }
+    // Empty audio and a wrong rate are still reported as such.
+    assert_eq!(
+        analyze(&longer, 44_100, None, &AnalyzeOptions::default()),
+        Err(AssessError::UnsupportedSampleRate { got: 44_100 })
+    );
 }
 
 #[test]
@@ -537,6 +646,41 @@ fn register_update_of_a_cold_start_is_the_cold_register_itself() {
 }
 
 #[test]
+fn a_cold_start_update_counts_the_measured_syllables_of_the_intended_reading() {
+    // M5 (R38): a hesitation before 4-1-3 is a fourth nucleus, but only the three syllables of
+    // the intended reading were graded, so the register has three behind it.
+    let a = analysis_of(&spoken(&["1", "4", "1", "3"]), None);
+    assert_eq!(a.nuclei.len(), 4);
+    assert_eq!(a.register.n_syllables, 4);
+    let r = assess(&a, &cmn(), &req(&["4", "1", "3"])).unwrap();
+    assert_eq!(
+        r.register_update,
+        Register {
+            n_syllables: 3,
+            ..a.register.clone()
+        }
+    );
+}
+
+#[test]
+fn a_cold_start_with_nothing_measured_has_nothing_behind_it() {
+    // The (ColdStart, 0) case, whatever count the analysis's own register carries: with no nuclei
+    // nothing of the intended reading is measured.
+    let mut a = analysis_of(&spoken(&["4", "1", "3"]), None);
+    a.nuclei.clear();
+    assert_eq!(a.register.n_syllables, 3);
+    let r = assess(&a, &cmn(), &req(&["4", "1", "3"])).unwrap();
+    assert!(all_not_measured(&r));
+    assert_eq!(
+        r.register_update,
+        Register {
+            n_syllables: 0,
+            ..a.register.clone()
+        }
+    );
+}
+
+#[test]
 fn a_whispered_cast_leaves_a_given_register_unchanged() {
     // R38: nothing was measured, so u = 0 and not even n_syllables moves.
     let given = Register {
@@ -577,6 +721,18 @@ fn only_measured_syllables_count_toward_the_register_update() {
 }
 
 // ---- request validation -----------------------------------------------------------------
+
+#[test]
+fn a_reading_with_no_targets_is_an_invalid_request() {
+    // M4: a request error, not a pack error.
+    let a = warm_analysis(&["4", "1", "3"]);
+    assert_eq!(
+        assess(&a, &cmn(), &req(&[])),
+        Err(AssessError::InvalidRequest {
+            message: "candidate spell has no targets".into()
+        })
+    );
+}
 
 #[test]
 fn duplicate_candidate_ids_error() {
