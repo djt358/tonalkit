@@ -54,12 +54,7 @@ pub(crate) fn tbus(a: &Analysis) -> Vec<Tbu> {
 ///
 /// `nuclei` and `bounds` are frame positions in any order; the TBUs follow the nuclei in time, one
 /// per distinct nucleus frame, and never overlap.
-pub(crate) fn tbu_spans(
-    nuclei: &[u32],
-    bounds: &[u32],
-    lo_edge: u32,
-    hi_edge: u32,
-) -> Vec<TbuSpan> {
+fn tbu_spans(nuclei: &[u32], bounds: &[u32], lo_edge: u32, hi_edge: u32) -> Vec<TbuSpan> {
     let mut frames = nuclei.to_vec();
     frames.sort_unstable();
     frames.dedup();
