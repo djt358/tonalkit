@@ -166,7 +166,7 @@ fn assess_correct_vs_single_tone_error() {
     let ok = assess_of(&spoken(&["4", "1", "3"]), intended(&["4", "1", "3"]));
     let bad = assess_of(&spoken(&["4", "1", "4"]), intended(&["4", "1", "3"]));
     let (ok, bad) = (ok.overall.unwrap(), bad.overall.unwrap());
-    // Thresholds per ruling R9. Observed on these utterances: correct 0.766, wrong 0.003.
+    // Thresholds per ruling R9. Observed on these utterances: correct 0.768, wrong 0.002.
     assert!(ok > 0.6, "correct overall {ok}");
     assert!(bad < 0.3, "wrong overall {bad}");
     assert!(ok - bad > 0.4, "gap {}", ok - bad);
@@ -179,7 +179,7 @@ fn assessment_reports_the_intended_reading_first() {
     assert_eq!(ok.intended, CandidateId("spell".into()));
     assert_eq!(ok.intended_rank, 1);
     // R37: the margin is against the null's biased score (`null_llr + null_bias`), so a correct
-    // reading with no distractors is clearly ahead of "something else was said". Observed 1.97
+    // reading with no distractors is clearly ahead of "something else was said". Observed 1.98
     // (the raw-null margin was -0.03).
     assert!(ok.margin_llr > 0.0, "margin {}", ok.margin_llr);
     let expected: Vec<&str> = ok.syllables.iter().map(|s| s.expected.0.as_str()).collect();
@@ -336,6 +336,61 @@ fn an_inverted_register_is_replaced_by_a_cold_start() {
         ceil_st: w.floor_st,
         ..w
     });
+}
+
+#[test]
+fn a_register_whose_median_is_outside_its_range_is_replaced_by_a_cold_start() {
+    let w = warm();
+    falls_back_to_a_cold_start(&Register {
+        median_st: w.floor_st - 0.5,
+        ..w.clone()
+    });
+    falls_back_to_a_cold_start(&Register {
+        median_st: w.ceil_st + 0.5,
+        ..w.clone()
+    });
+    // The median may sit on either end of the range.
+    for median_st in [w.floor_st, w.ceil_st] {
+        let edge = Register {
+            median_st,
+            ..w.clone()
+        };
+        let a = analysis_of(&spoken(&["4", "1", "3"]), Some(&edge));
+        assert_eq!(a.register_source, RegisterSource::Given);
+        assert!(!a.issues.contains(&MeasureIssue::InvalidRegister));
+    }
+}
+
+#[test]
+fn a_register_of_absurd_magnitude_is_replaced_by_a_cold_start() {
+    // Finite and in order, but not a voice: outside -24..72 st re 55 Hz (14 Hz to 3.5 kHz).
+    let w = warm();
+    for (floor_st, median_st, ceil_st) in [
+        (-24.5, 0.0, 20.0),
+        (10.0, 20.0, 72.5),
+        (-200.0, -150.0, -100.0),
+        (80.0, 90.0, 100.0),
+        (-1.0e30, 0.0, 1.0e30),
+        (1.0e30, 2.0e30, 3.0e30),
+    ] {
+        falls_back_to_a_cold_start(&Register {
+            floor_st,
+            median_st,
+            ceil_st,
+            ..w.clone()
+        });
+    }
+    // The band itself is fine.
+    let band = Register {
+        floor_st: -24.0,
+        median_st: 10.0,
+        ceil_st: 72.0,
+        ..w
+    };
+    let a = analysis_of(&spoken(&["4", "1", "3"]), Some(&band));
+    assert_eq!(a.register_source, RegisterSource::Given);
+    assert_eq!(a.register, band);
+    assert!(!a.issues.contains(&MeasureIssue::InvalidRegister));
 }
 
 #[test]

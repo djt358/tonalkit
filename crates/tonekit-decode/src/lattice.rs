@@ -140,8 +140,18 @@ fn emission(
     Ok(table)
 }
 
+/// Whether every number a pack scores `x` on is finite; it reads any other shape as no evidence
+/// (`LanguagePack::judge`, `NotMeasured { InvalidEvidence }`).
+fn finite(x: &ToneShape) -> bool {
+    x.onset.is_finite()
+        && x.offset.is_finite()
+        && x.contour.iter().all(|v| v.is_finite())
+        && x.voiced_weights.iter().all(|v| v.is_finite())
+}
+
 /// The open lattice of `a` on its nuclei's evidence `tbus` ([`crate::evidence::tbus`]; grading
-/// already validated by the caller).
+/// already validated by the caller). A TBU with no shape, or one holding a non-finite number (as
+/// `judge` reads it: `NotMeasured { InvalidEvidence }`), carries no evidence.
 pub(crate) fn build(
     a: &Analysis,
     pack: &LanguagePack,
@@ -152,7 +162,13 @@ pub(crate) fn build(
     let mut units = Vec::with_capacity(n);
     let mut emissions = Vec::with_capacity(n);
     for (i, tbu) in tbus.iter().enumerate() {
-        match &tbu.segment {
+        let segment = match &tbu.segment {
+            Ok(ex) if finite(&ex.shape) => Ok(ex),
+            // As `judge` reads it: numbers that mean nothing are no evidence, not a measurement.
+            Ok(_) => Err(MeasureIssue::InvalidEvidence),
+            Err(issue) => Err(*issue),
+        };
+        match segment {
             Ok(ex) => {
                 let issues = merged_issues(&a.issues, &ex.issues);
                 emissions.push(Some(emission(pack, g, &ex.shape, &issues, i, n)?));
@@ -165,11 +181,7 @@ pub(crate) fn build(
             }
             Err(issue) => {
                 emissions.push(None);
-                units.push((
-                    tbu.span.clone(),
-                    Measured::NotMeasured { issue: *issue },
-                    None,
-                ));
+                units.push((tbu.span.clone(), Measured::NotMeasured { issue }, None));
             }
         }
     }
@@ -202,7 +214,7 @@ pub(crate) fn build(
 mod tests {
     use super::*;
     use crate::evidence::tbus;
-    use crate::test_support::{cmn, hand, hand_with, marked, std_g};
+    use crate::test_support::{cmn, hand, hand_with, marked, std_g, target};
 
     const EPS: f64 = 1e-9;
 
@@ -542,6 +554,55 @@ mod tests {
         // The widened tolerances change the likelihoods.
         let clean = built(&two_unvoiced_one(), &pack, &g);
         assert_ne!(l.tbus[0].loglik, clean.tbus[0].loglik);
+    }
+
+    #[test]
+    fn a_non_finite_shape_is_not_measured_as_judge_has_it() {
+        // Unreachable from `analyze`, which only feeds finite numbers, but the lattice reads a
+        // TBU with a NaN in its shape as `judge` does: `NotMeasured { InvalidEvidence }`, no
+        // evidence and no shape reported, not `Full` on numbers that mean nothing.
+        let (pack, g) = (cmn(), std_g());
+        let a = marked(hand(&[&[2.0, 1.0], &[5.0, 5.0], &[4.0]]));
+        let clean = tbus(&a);
+        let invalid = MeasureIssue::InvalidEvidence;
+        let ctx = TargetContext {
+            index: 1,
+            count: 3,
+            prev: None,
+            phrase_final: false,
+        };
+        // The same lattice as for a TBU that had no shape for that reason.
+        let mut shapeless = clean.clone();
+        shapeless[1].segment = Err(invalid);
+        let want = build(&a, &pack, &g, &shapeless).unwrap();
+        assert_eq!(
+            want.tbus[1].measured,
+            Measured::NotMeasured { issue: invalid }
+        );
+
+        let poisons: [fn(&mut ToneShape); 4] = [
+            |x| x.contour[4] = f32::NAN,
+            |x| x.voiced_weights[0] = f32::INFINITY,
+            |x| x.onset = f32::NAN,
+            |x| x.offset = f32::NEG_INFINITY,
+        ];
+        for (n, poison) in poisons.into_iter().enumerate() {
+            let mut spoiled = clean.clone();
+            poison(&mut spoiled[1].segment.as_mut().unwrap().shape);
+            let shape = &spoiled[1].segment.as_ref().unwrap().shape;
+            let judged = pack
+                .judge(&g, shape, &target("1", None), &ctx, &[])
+                .unwrap();
+            assert_eq!(judged.measured, want.tbus[1].measured, "{n}");
+
+            let l = build(&a, &pack, &g, &spoiled).unwrap();
+            assert_eq!(l, want, "{n}");
+            assert!(l.tbus[1].shape.is_none());
+            assert!(l.tbus[1].loglik.iter().all(|&v| v == 0.0));
+            // Its neighbours are measured as before.
+            assert_eq!(l.tbus[0].measured, Measured::Full);
+            assert_eq!(l.tbus[2].measured, Measured::Full);
+        }
     }
 
     #[test]

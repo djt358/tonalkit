@@ -24,7 +24,7 @@ case "$(uname -s)" in
 esac
 
 echo "==> building tonekit-ffi (host, with the bindings generator)"
-cargo build -p tonekit-ffi --features cli
+cargo build --locked -p tonekit-ffi --features cli
 [ -f "$lib" ] || fail "expected $lib after the build"
 
 echo "==> generating Swift bindings into ${out#"$root"/}"
@@ -81,6 +81,11 @@ done
 have tonekit_core.swift '^enum AssessError: Swift.Error'
 have tonekit_core.swift 'case UnsupportedSampleRate\(got: UInt32'
 have tonekit_core.swift 'case Pack\(message: String'
+have tonekit_core.swift 'case InvalidRequest\(message: String'
+have tonekit_core.swift 'case TooLong\(seconds: Float, max: Float'
+# The two issues a caller sees for input that was not usable as given.
+have tonekit_core.swift 'case invalidRegister'
+have tonekit_core.swift 'case invalidEvidence'
 for id in Lect AccentId ToneId CandidateId; do
     have tonekit_core.swift "^public typealias $id = String\$"
 done

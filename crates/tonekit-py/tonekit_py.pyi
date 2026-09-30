@@ -21,7 +21,11 @@ def analyze(
     register_json: str | None = None,
     f0_json: str | None = None,
 ) -> str:
-    """Analyse one utterance (16 kHz mono floats in -1..1); returns the Analysis JSON."""
+    """Analyse one utterance (16 kHz mono floats in -1..1); returns the Analysis JSON.
+
+    Raises ValueError for empty audio, audio longer than 30 seconds, a sample rate other than
+    16000, or JSON that does not parse.
+    """
 
 def decode(
     analysis_json: str,

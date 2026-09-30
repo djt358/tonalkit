@@ -216,7 +216,8 @@ fn assess_json(
 ///
 /// Returns the `Analysis` as JSON.
 ///
-/// Raises `ValueError` for empty audio, a sample rate other than 16000 (including one too large
+/// Raises `ValueError` for empty audio, audio longer than 30 seconds (`audio is 31 s long; at most
+/// 30 s can be assessed`, ruling R52), a sample rate other than 16000 (including one too large
 /// for a 64-bit integer) or JSON that does not parse, and `TypeError` if `pcm` is not a sequence
 /// or buffer of floats or `sample_rate` is not an integer.
 #[pyfunction]

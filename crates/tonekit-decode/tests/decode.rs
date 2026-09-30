@@ -671,6 +671,14 @@ fn a_dropped_syllable_is_a_likely_miss_not_unmeasured() {
         s[0].judgement.llr_target > 0.0 && s[2].judgement.llr_target > 0.0,
         "{s:#?}"
     );
+    // The reported spans run in time order without overlapping, the dropped syllable's included
+    // (R55; the gap it keeps is clipped to its neighbours' TBUs).
+    for fit in s {
+        assert!(fit.span.start_frame <= fit.span.end_frame, "{s:#?}");
+    }
+    for pair in s.windows(2) {
+        assert!(pair[0].span.end_frame <= pair[1].span.start_frame, "{s:#?}");
+    }
 }
 
 #[test]

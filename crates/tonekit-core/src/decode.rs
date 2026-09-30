@@ -9,6 +9,11 @@ use crate::shape::TbuSpan;
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "ffi", derive(uniffi::Record))]
 pub struct SyllableFit {
+    /// Where the syllable's tone was measured (ruling R55). A syllable with a nucleus reports that
+    /// nucleus's tone-bearing-unit span, the one the lattice reports for it. One without (the
+    /// decoder's relaxed pass: a likely miss, `Partial { [Unvoiced] }`) reports the span its path
+    /// gave it, clipped to the gap between the neighbouring syllables' spans, so it can be empty.
+    /// The spans of one candidate's syllables run in time order and never overlap.
     pub span: TbuSpan,
     pub judgement: ToneJudgement,
 }

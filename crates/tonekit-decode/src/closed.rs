@@ -331,8 +331,9 @@ impl<'a> Decoder<'a> {
     ///
     /// A syllable with a nucleus is judged on the nucleus's shape and reported at the nucleus's
     /// TBU, where that shape was measured (the lattice's span for it, whatever boundary pair the
-    /// path took); one without (relaxed pass only) is a likely miss at its path's span:
-    /// `unvoiced_syllable_llr`, `Partial { [Unvoiced] }`.
+    /// path took); one without (relaxed pass only) is a likely miss at its path's span, clipped
+    /// to the gap its neighbours' spans leave ([`clip_unanchored`]): `unvoiced_syllable_llr`,
+    /// `Partial { [Unvoiced] }`.
     pub(crate) fn score(
         &mut self,
         cand: &Candidate,
@@ -345,9 +346,12 @@ impl<'a> Decoder<'a> {
         let ctxs = contexts(&cand.targets);
         let unvoiced = self.scorer.unvoiced_llr();
         let mut syllables = Vec::with_capacity(path.syllables.len());
+        let mut anchored = Vec::with_capacity(path.syllables.len());
         for ((&(i, j), target), ctx) in path.syllables.iter().zip(&cand.targets).zip(&ctxs) {
             let (from, to) = (self.bounds[i], self.bounds[j]);
-            let fit = match self.filler.nucleus_in(from, to) {
+            let nucleus = self.filler.nucleus_in(from, to);
+            anchored.push(nucleus.is_some());
+            let fit = match nucleus {
                 Some(n) => self.scorer.fit(n, target, ctx)?,
                 None => SyllableFit {
                     span: TbuSpan {
@@ -359,6 +363,7 @@ impl<'a> Decoder<'a> {
             };
             syllables.push(fit);
         }
+        clip_unanchored(&mut syllables, &anchored);
         Ok(CandidateScore {
             id: cand.id.clone(),
             llr: clamp_log(path.score),
@@ -431,6 +436,32 @@ impl<'a> Decoder<'a> {
             posterior: 0.0,
             syllables,
         }
+    }
+}
+
+/// Clips the span of every syllable that holds no nucleus (`anchored[s]` false: relaxed pass
+/// only) to the gap between the spans reported around it: from the end of the previous syllable's
+/// final span to the start of the next nucleus-holding syllable's, or an empty span at the nearest
+/// point of that gap if its own pair lies outside it.
+///
+/// The pairs of a path never overlap, but a nucleus's TBU can reach back over its syllable's own
+/// pair (a nucleus on a boundary is bounded by the boundaries strictly around it), and a
+/// nucleus-less pair next to it would then be reported over part of that TBU. After this, the
+/// reported spans of a candidate run in time order without overlapping.
+fn clip_unanchored(fits: &mut [SyllableFit], anchored: &[bool]) {
+    for s in 0..fits.len() {
+        if anchored[s] {
+            continue;
+        }
+        let (from, to) = (fits[s].span.start_frame, fits[s].span.end_frame);
+        let lo = s.checked_sub(1).map_or(from, |p| fits[p].span.end_frame);
+        let next = (s + 1..fits.len()).find(|&n| anchored[n]);
+        let hi = next.map_or(to, |n| fits[n].span.start_frame).max(lo);
+        let start_frame = from.max(lo).min(hi);
+        fits[s].span = TbuSpan {
+            start_frame,
+            end_frame: to.max(start_frame).min(hi),
+        };
     }
 }
 
@@ -685,6 +716,114 @@ mod tests {
             Err::<f64, _>("boom")
         });
         assert_eq!(r, Err("boom"));
+    }
+
+    #[test]
+    fn unanchored_spans_are_clipped_to_the_gap_between_their_neighbours() {
+        use crate::test_support::target;
+        let fits = |spans: &[(u32, u32)]| -> Vec<SyllableFit> {
+            spans
+                .iter()
+                .map(|&(start_frame, end_frame)| SyllableFit {
+                    span: TbuSpan {
+                        start_frame,
+                        end_frame,
+                    },
+                    judgement: missed(&target("1", None), -3.0),
+                })
+                .collect()
+        };
+        let clipped = |spans: &[(u32, u32)], anchored: &[bool]| -> Vec<(u32, u32)> {
+            let mut f = fits(spans);
+            clip_unanchored(&mut f, anchored);
+            f.iter()
+                .map(|x| (x.span.start_frame, x.span.end_frame))
+                .collect()
+        };
+        let (yes, no) = (true, false);
+        // A span inside its gap stays; one reaching into either neighbour is cut back to it.
+        assert_eq!(
+            clipped(&[(10, 35), (38, 44), (50, 70)], &[yes, no, yes]),
+            [(10, 35), (38, 44), (50, 70)]
+        );
+        assert_eq!(
+            clipped(&[(10, 35), (30, 55), (50, 70)], &[yes, no, yes]),
+            [(10, 35), (35, 50), (50, 70)]
+        );
+        // Nothing left, in either direction: empty, at the nearest point of the gap.
+        assert_eq!(
+            clipped(&[(10, 35), (35, 41), (35, 66)], &[yes, no, yes]),
+            [(10, 35), (35, 35), (35, 66)]
+        );
+        assert_eq!(
+            clipped(&[(10, 40), (20, 30), (45, 70)], &[yes, no, yes]),
+            [(10, 40), (40, 40), (45, 70)]
+        );
+        // Neighbours that overlap each other (TBUs never do) leave an empty span, not an inverted
+        // one.
+        assert_eq!(
+            clipped(&[(10, 60), (30, 50), (40, 70)], &[yes, no, yes]),
+            [(10, 60), (60, 60), (40, 70)]
+        );
+        // Without a neighbour on a side, that side is the span's own; unanchored ones in a row
+        // are clipped one after the other.
+        assert_eq!(clipped(&[(10, 20)], &[no]), [(10, 20)]);
+        assert_eq!(
+            clipped(&[(0, 12), (12, 30), (30, 50)], &[no, yes, no]),
+            [(0, 12), (12, 30), (30, 50)]
+        );
+        assert_eq!(
+            clipped(
+                &[(10, 30), (30, 45), (45, 60), (60, 80)],
+                &[yes, no, no, yes]
+            ),
+            [(10, 30), (30, 45), (45, 60), (60, 80)]
+        );
+        assert_eq!(
+            clipped(
+                &[(10, 40), (30, 50), (50, 55), (45, 80)],
+                &[yes, no, no, yes]
+            ),
+            [(10, 40), (40, 45), (45, 45), (45, 80)]
+        );
+        assert!(clipped(&[], &[]).is_empty());
+    }
+
+    #[test]
+    fn a_nucleus_less_syllable_reports_only_the_gap_its_neighbours_leave() {
+        // Nuclei at frames 22 and 41, the second one on a boundary, so its TBU (35, 66) starts
+        // before its syllable's pair does. Three targets need the relaxed pass: pairs (10, 35),
+        // (35, 41) and (41, 66), of which the middle one holds no nucleus. Its own pair would
+        // overlap the TBU of the syllable after it (R55); it reports what the TBUs leave: none.
+        use crate::test_support::{cmn, hand, marked, std_g, target};
+        use tonekit_core::{CandidateId, Measured, Nucleus};
+        let mut a = marked(hand(&[&[5.0, 1.0], &[2.0, 1.0]]));
+        assert_eq!(a.boundaries, [10, 35, 41, 66]);
+        a.nuclei = [22, 41]
+            .map(|frame| Nucleus {
+                frame,
+                strength_db: 20.0,
+            })
+            .to_vec();
+        let cand = Candidate {
+            id: CandidateId("c".into()),
+            targets: vec![target("4", None), target("1", None), target("3", None)],
+        };
+        let r = crate::decode(&a, &cmn(), &std_g(), &[cand]).unwrap();
+        let s = &r.candidates[0].syllables;
+        let spans: Vec<(u32, u32)> = s
+            .iter()
+            .map(|f| (f.span.start_frame, f.span.end_frame))
+            .collect();
+        assert_eq!(spans, [(10, 35), (35, 35), (35, 66)], "{s:#?}");
+        assert_eq!(
+            s[1].judgement.measured,
+            Measured::Partial {
+                issues: vec![MeasureIssue::Unvoiced]
+            }
+        );
+        assert!(matches!(s[0].judgement.measured, Measured::Full));
+        assert!(matches!(s[2].judgement.measured, Measured::Full));
     }
 
     #[test]

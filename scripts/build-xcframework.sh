@@ -88,7 +88,7 @@ for triple in "${targets[@]}"; do
     # `cargo rustc --crate-type staticlib` builds just the static library. `cargo build` would
     # also link the cdylib, which iOS does not need. The log keeps rustc's note on which system
     # libraries the static library needs at link time.
-    cargo rustc -p tonekit-ffi --lib --release --target "$triple" --crate-type staticlib \
+    cargo rustc --locked -p tonekit-ffi --lib --release --target "$triple" --crate-type staticlib \
         -- --print native-static-libs 2>&1 | tee "$build/rustc-$triple.log"
     [ -f "$target_dir/$triple/release/libtonekit_ffi.a" ] ||
         fail "expected $target_dir/$triple/release/libtonekit_ffi.a after the build"
@@ -102,7 +102,7 @@ grep -h 'native-static-libs' "$build/rustc-aarch64-apple-ios.log" | sed 's/^/   
 # ---- 2. Swift bindings, headers, module map ------------------------------------------------
 
 step "building the bindings generator (host)"
-cargo build -p tonekit-ffi --features cli --bin uniffi-bindgen-swift
+cargo build --locked -p tonekit-ffi --features cli --bin uniffi-bindgen-swift
 bindgen=$target_dir/debug/uniffi-bindgen-swift
 [ -x "$bindgen" ] || fail "expected $bindgen after the build"
 
