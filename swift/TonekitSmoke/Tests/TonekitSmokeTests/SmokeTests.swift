@@ -233,7 +233,8 @@ final class SmokeTests: XCTestCase {
         let url = try Fixtures.url("spoken-413", "wav", repoPath: "fixtures/spoken-413.wav")
         let viaAVAudioFile = try Fixtures.samplesViaAVAudioFile(url)
         let viaParser = try RiffFloatWav.samples(of: Data(contentsOf: url))
-        XCTAssertEqual(viaAVAudioFile.count, viaParser.count)
+        let length = try AVAudioFile(forReading: url).length
+        XCTAssertEqual(viaAVAudioFile.count, viaParser.count, "AVAudioFile.length is \(length)")
         XCTAssertGreaterThan(viaParser.count, 16_000)
         var largest: Float = 0
         for (a, b) in zip(viaAVAudioFile, viaParser) {
@@ -331,16 +332,25 @@ private enum Fixtures {
         guard format.sampleRate == 16_000, format.channelCount == 1 else {
             throw FixtureError.unreadable("\(location.lastPathComponent): expected 16 kHz mono, got \(format)")
         }
-        let capacity = AVAudioFrameCount(file.length)
-        guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: capacity) else {
-            throw FixtureError.unreadable("\(location.lastPathComponent): no buffer of \(capacity) frames")
+        // One `read(into:)` may return fewer frames than asked for (seen on the iOS 17 Simulator:
+        // 20 463 of 21 280), so read in chunks until the file's end.
+        let chunk: AVAudioFrameCount = 4096
+        guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: chunk) else {
+            throw FixtureError.unreadable("\(location.lastPathComponent): no buffer of \(chunk) frames")
         }
-        try file.read(into: buffer)
-        guard let channels = buffer.floatChannelData else {
-            throw FixtureError.unreadable("\(location.lastPathComponent): not float samples")
+        var samples: [Float] = []
+        samples.reserveCapacity(Int(file.length))
+        while file.framePosition < file.length {
+            try file.read(into: buffer, frameCount: chunk)
+            if buffer.frameLength == 0 {
+                break
+            }
+            guard let channels = buffer.floatChannelData else {
+                throw FixtureError.unreadable("\(location.lastPathComponent): not float samples")
+            }
+            samples.append(contentsOf: UnsafeBufferPointer(start: channels[0], count: Int(buffer.frameLength)))
         }
-        let first: UnsafePointer<Float> = UnsafePointer(channels[0])
-        return Array(UnsafeBufferPointer(start: first, count: Int(buffer.frameLength)))
+        return samples
     }
 
     /// The bundled cmn pack with its calibration.
