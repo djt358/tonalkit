@@ -13,7 +13,7 @@ def row(family: str | None, params: dict | None = None, noise: str = "none") -> 
     """A manifest row with only what `conditions.condition` looks at."""
     synthetic = None if family is None else {"family": family, "params": params or {}}
     return Clip(
-        id="c", path="c.wav", speaker="s", set="synthetic", label="correct",
+        id="c", path="c.wav", speaker="s", set="gate" if family is None else "synthetic", label="correct",
         intended=candidate(["1"]), condition=Condition(noise=noise, distance="synthetic"),
         source="synthetic-world", synthetic=synthetic,
     )  # fmt: skip

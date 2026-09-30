@@ -17,7 +17,7 @@ from pathlib import Path
 import numpy as np
 import tonekit_py
 
-from . import evaluate, manifest, world
+from . import calibration, evaluate, manifest, world
 from .family import SynthError
 from .manifest import Clip
 from .voice import PackTones, Voice
@@ -190,8 +190,8 @@ def load_sources(
     when the generator is exhausted) if no clip could be perturbed."""
     manifest_path = Path(manifest_path)
     clips = manifest.load(manifest_path)
-    pack_toml = Path(pack).read_text(encoding="utf-8")
-    calib_json = Path(calib).read_text(encoding="utf-8") if calib else None
+    files = calibration.load(pack, calib)
+    pack_toml, calib_json = files.pack_toml, files.calib_json
     grader = evaluate.Grader(
         pack_toml,
         calib_json,

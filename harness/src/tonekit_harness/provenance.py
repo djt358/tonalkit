@@ -1,25 +1,31 @@
-"""Data-provenance check: every PROVENANCE.toml source must be cleared by data-register.csv."""
+"""Data-provenance check: every PROVENANCE.toml source must be cleared by data-register.csv, and
+every data file in a pack must be attested by the pack's PROVENANCE.toml."""
 
 from __future__ import annotations
 
 import argparse
 import csv
 import difflib
+import os
 import sys
 import tomllib
 from collections.abc import Iterable
 from pathlib import Path
 
 _VALUES = {"allow", "verify", "deny", "n/a"}
-_TOP_LEVEL_KEYS = ("artifact", "note", "source", "signoff")
+_TOP_LEVEL_KEYS = ("artifact", "artifacts", "note", "source", "signoff")
 _MANIFEST_NAME = "PROVENANCE.toml"
+_DATA_SUFFIXES = {".toml", ".json"}  # the pack's data files: the pack itself and its calibrations
 
 
 class ProvenanceError(ValueError):
     """The register itself is unusable (as opposed to a manifest violating it)."""
 
 
-def _load_register(register_csv: Path) -> dict[str, str]:
+def load_register(register_csv: Path) -> dict[str, str]:
+    """data-register.csv as {id: shipped_weights_training}, the column that says whether a dataset
+    may be used (`allow`), needs a sign-off (`verify`) or may not (`deny`). Raises
+    `ProvenanceError` if the file cannot be used as a register, `OSError` if it cannot be opened."""
     try:
         return _read_register(Path(register_csv))
     except (UnicodeDecodeError, csv.Error) as e:
@@ -53,8 +59,20 @@ def _is_text(value: object) -> bool:
     return isinstance(value, str) and bool(value.strip())
 
 
+def _artifact_entries(doc: dict) -> list[str] | None:
+    """The artifact paths the manifest names (`artifact`, or each of `artifacts`), or None if it
+    names none in a usable form (`_check_format` says why)."""
+    if "artifact" in doc and "artifacts" not in doc:
+        return [doc["artifact"]] if _is_text(doc["artifact"]) else None
+    many = doc.get("artifacts")
+    if "artifact" not in doc and isinstance(many, list) and many and all(_is_text(a) for a in many):
+        return many
+    return None
+
+
 def _check_format(manifest: Path, doc: dict) -> list[str]:
-    """Top-level shape: only artifact/note/source/signoff, and artifact and note present."""
+    """Top-level shape: only artifact(s)/note/source/signoff, exactly one of `artifact` and
+    `artifacts`, and a note."""
     violations: list[str] = []
     for key in doc:
         if key in _TOP_LEVEL_KEYS:
@@ -65,11 +83,18 @@ def _check_format(manifest: Path, doc: dict) -> list[str]:
             f"{manifest}: unknown top-level key {key!r}{suffix}; "
             f"allowed keys are {', '.join(_TOP_LEVEL_KEYS)}"
         )
-    for key in ("artifact", "note"):
-        if key not in doc:
-            violations.append(f"{manifest}: missing required key `{key}`")
-        elif not _is_text(doc[key]):
-            violations.append(f"{manifest}: `{key}` must be a non-empty string")
+    if "artifact" in doc and "artifacts" in doc:
+        violations.append(f"{manifest}: give `artifact` or `artifacts`, not both")
+    elif "artifact" not in doc and "artifacts" not in doc:
+        violations.append(f"{manifest}: missing required key `artifact` (or `artifacts`)")
+    elif "artifact" in doc and not _is_text(doc["artifact"]):
+        violations.append(f"{manifest}: `artifact` must be a non-empty string")
+    elif "artifacts" in doc and _artifact_entries(doc) is None:
+        violations.append(f"{manifest}: `artifacts` must be a non-empty array of non-empty strings")
+    if "note" not in doc:
+        violations.append(f"{manifest}: missing required key `note`")
+    elif not _is_text(doc["note"]):
+        violations.append(f"{manifest}: `note` must be a non-empty string")
     return violations
 
 
@@ -131,7 +156,7 @@ def check(register_csv: str | Path, manifests: Iterable[Path]) -> list[str]:
 
     A file that appears more than once is checked once.
     """
-    register = _load_register(Path(register_csv))
+    register = load_register(Path(register_csv))
     violations: list[str] = []
     seen: set[Path] = set()
     for m in manifests:
@@ -165,27 +190,55 @@ def _artifact_problem(artifact: str, repo_root: Path, pack_dir: Path) -> str | N
     return None
 
 
+def _uncovered_data_files(pack_dir: Path, repo_root: Path, artifacts: list[str]) -> list[Path]:
+    """The data files (`_DATA_SUFFIXES`, at any depth) in `pack_dir`, other than the manifest, that
+    no artifact names. Paths are compared as written (relative to the repo root, `..` folded),
+    not through symlinks: an artifact that strays outside the pack is reported on its own."""
+    named = {os.path.normpath(repo_root / a) for a in artifacts}
+    files = sorted(
+        f
+        for f in pack_dir.rglob("*")
+        if f.is_file() and f.suffix.lower() in _DATA_SUFFIXES and f.name != _MANIFEST_NAME
+    )
+    return [f for f in files if os.path.normpath(f) not in named]
+
+
 def _artifact_violations(manifest: Path, repo_root: Path) -> list[str]:
-    """The manifest's `artifact` (a repo-root-relative path) must be a regular file inside the
-    manifest's own directory."""
+    """Each of the manifest's artifacts (repo-root-relative paths) must be a regular file inside the
+    manifest's own directory, and every data file in that directory must be one of them."""
     try:
         with manifest.open("rb") as f:
-            artifact = tomllib.load(f).get("artifact")
+            artifacts = _artifact_entries(tomllib.load(f))
     except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError):
         return []  # check() reports an unreadable manifest
-    if not _is_text(artifact):
-        return []  # check() reports a missing or empty artifact
-    problem = _artifact_problem(artifact, repo_root, manifest.parent.resolve())
-    return [f"{manifest}: artifact {artifact!r} {problem}"] if problem else []
+    if artifacts is None:
+        return []  # check() reports a missing, empty or malformed artifact
+    pack_dir = manifest.parent.resolve()
+    violations = []
+    for artifact in artifacts:
+        problem = _artifact_problem(artifact, repo_root, pack_dir)
+        if problem:
+            violations.append(f"{manifest}: artifact {artifact!r} {problem}")
+    for data_file in _uncovered_data_files(pack_dir, repo_root, artifacts):
+        try:
+            shown = data_file.relative_to(repo_root).as_posix()
+        except ValueError:  # a pack directory that is a link to somewhere outside the repo
+            shown = data_file.as_posix()
+        violations.append(
+            f"{manifest}: data file {shown!r} is not covered: list it under `artifacts` "
+            f"(or drop it from the pack)"
+        )
+    return violations
 
 
 def check_packs(register_csv: str | Path, packs_root: str | Path, manifests: Iterable[Path] = ()) -> list[str]:
     """Check every pack under `packs_root`, plus any extra `manifests`.
 
-    Each immediate subdirectory of `packs_root` must hold a PROVENANCE.toml whose `artifact` is a
-    regular file inside that subdirectory. Artifact paths are relative to the repo root, which is
-    the parent of `packs_root` (e.g. `packs/cmn/cmn.calib.json`). Every manifest found is then
-    checked like an explicit one.
+    Each immediate subdirectory of `packs_root` must hold a PROVENANCE.toml whose `artifact` (or
+    each of its `artifacts`) is a regular file inside that subdirectory, and that names every
+    `*.toml` and `*.json` file in it. Artifact paths are relative to the repo root, which is the
+    parent of `packs_root` (e.g. `packs/cmn/cmn.calib.json`). Every manifest found is then checked
+    like an explicit one.
     """
     packs_root = Path(packs_root)
     violations: list[str] = []
@@ -238,8 +291,9 @@ def register(subparsers) -> None:
     p.add_argument(
         "--packs-root",
         metavar="DIR",
-        help="also require every subdirectory of DIR to have a PROVENANCE.toml whose artifact exists "
-        "(artifact paths are relative to DIR/..), and check those files",
+        help="also require every subdirectory of DIR to have a PROVENANCE.toml that names each of "
+        "its data files (*.toml, *.json) as an existing artifact (paths relative to DIR/..), "
+        "and check those files",
     )
     p.add_argument("files", nargs="*", help="PROVENANCE.toml files to check")
     p.set_defaults(func=lambda args: _run(args, p))

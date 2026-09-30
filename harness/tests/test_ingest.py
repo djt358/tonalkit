@@ -159,3 +159,58 @@ def test_cli_ingest_refuses_to_overwrite_source_dir(tmp_path, capsys):
     assert cli.main(["ingest", str(raw), "--out", str(raw)]) == 1
     assert (raw / "a.wav").read_bytes() == before
     assert "same" in capsys.readouterr().err
+
+
+def test_cli_ingest_default_out_of_the_current_directory_is_its_parents_ingested(
+    tmp_path, monkeypatch
+):
+    raw = make_raw(tmp_path)
+    monkeypatch.chdir(raw)
+    assert cli.main(["ingest", "."]) == 0
+    # `.`'s parent is the directory above it, not `.` itself (which would put the output inside
+    # the recordings)
+    assert sorted(p.name for p in (tmp_path / "ingested").iterdir()) == ["a.wav", "b.wav"]
+    assert not (raw / "ingested").exists()
+
+
+def test_cli_ingest_default_out_of_a_dotdot_path_is_beside_the_directory_it_names(
+    tmp_path, monkeypatch
+):
+    raw = make_raw(tmp_path)
+    deeper = raw / "sub"
+    deeper.mkdir()
+    monkeypatch.chdir(deeper)
+    assert cli.main(["ingest", ".."]) == 0  # `..` is `raw`, so the output is beside `raw`
+    assert sorted(p.name for p in (tmp_path / "ingested").iterdir()) == ["a.wav", "b.wav"]
+    assert not (tmp_path.parent / "ingested").exists()
+
+
+def make_case_clash(tmp_path: Path, names: tuple[str, str]) -> Path:
+    raw = tmp_path / "raw"
+    raw.mkdir()
+    for name in names:
+        write_pcm16(raw / name, SR_OUT, sine(200, SR_OUT, 1_600))
+    if len(list(raw.iterdir())) < 2:
+        pytest.skip("this file system folds case: the two names are one file")
+    return raw
+
+
+@pytest.mark.parametrize("names", [("Yes.wav", "yes.wav"), ("a.wav", "a.WAV")])
+def test_cli_ingest_refuses_inputs_whose_outputs_would_collide_ignoring_case(
+    tmp_path, capsys, names
+):
+    raw = make_case_clash(tmp_path, names)
+    out = tmp_path / "out"
+    assert cli.main(["ingest", str(raw), "--out", str(out)]) == 1
+    err = capsys.readouterr().err
+    assert err.startswith("error: ") and all(name in err for name in names)
+    assert "same output" in err
+    assert not out.exists()  # nothing was converted
+
+
+def test_cli_ingest_accepts_names_that_differ_by_more_than_case(tmp_path):
+    raw = tmp_path / "raw"
+    raw.mkdir()
+    for name in ("one.wav", "two.WAV"):
+        write_pcm16(raw / name, SR_OUT, sine(200, SR_OUT, 1_600))
+    assert cli.main(["ingest", str(raw), "--out", str(tmp_path / "out")]) == 0

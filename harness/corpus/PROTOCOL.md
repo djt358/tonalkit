@@ -43,7 +43,12 @@ From `harness/`:
    ../packs/cmn/cmn.calib.json --report reports/p0-gate.md` grades every clip, computes the
    leave-one-pair-out gate S1 (correct-accept at least 0.90, wrong-accept at most 0.10 over the 20
    gate pairs) and writes the report. It exits 0 whether or not the gate passes; the report's
-   headline says which. A speaker's `register` clips are graded first and their register is
+   headline says which. The verdict is issued only when every clip is a real recording whose
+   `source` is `allow` in `data-register.csv` (the repository's own, or `--register FILE`): if any
+   clip is synthetic or from another source, the headline reads `NOT A GATE (n synthetic /
+   non-allowed clips)` and no PASS or FAIL appears. `--allow-synthetic` is for smoke runs on
+   synthetic clips: the headline then reads `SMOKE (synthetic)`. A manifest that mixes
+   `set: "synthetic"` rows with `gate` rows is an error. A speaker's `register` clips are graded first and their register is
    used for that speaker's other clips. Analyses are cached in `.cache/analysis/` (keyed by the
    WAV bytes, the register and the installed `tonekit_py`); `--no-cache` bypasses the cache.
 
@@ -64,8 +69,8 @@ is an error instead of silently dropped data. The schema is `manifest.Clip`.
 | `distractors` | list of candidates (default empty) | Other readings to decode against, e.g. the other member of a minimal set. |
 | `produced_tones` | list of strings or null | The tones actually produced, per syllable, labelled exactly. Null when not applicable. |
 | `condition` | `{noise, distance}`, both strings | Recording conditions, e.g. `{"noise": "cafe", "distance": "arm"}`. |
-| `source` | string | A `data-register.csv` id: `dj-corpus` for these recordings, `synthetic-world` for synthetic clips. |
-| `synthetic` | object or null | For synthetic clips, how they were derived (source clip, perturbation). Null for real recordings. |
+| `source` | string | A `data-register.csv` id: `dj-corpus` for these recordings, `synthetic-world` for synthetic clips. `tkh eval` and `tkh bakeoff --gate` reject an id that is not in the register. |
+| `synthetic` | object or null | For synthetic clips, how they were derived (source clip, perturbation). Null for real recordings. It is set exactly when `set` is `synthetic`: any other combination is an error. |
 | `needs_listen` | bool (default false) | Set when a person must listen to the clip before its label is trusted (gate failures and adversarial finds). |
 
 A candidate is `{"id": string, "tones": [string], "labels": [string]}`. `tones` has one entry per

@@ -26,6 +26,30 @@ targets=(aarch64-apple-ios aarch64-apple-ios-sim)
 step() { printf '\n==> %s\n' "$*"; }
 fail() { printf '\nbuild-xcframework: %s\n' "$*" >&2; exit 1; }
 
+# Prints the size of each slice's static library after `strip -S -x` (debug and local symbols
+# out), measured on a copy in build/. Informational: the spec (section 10) budgets 2 MB stripped
+# for the device slice, and nothing here fails the build, not even a missing `strip`.
+report_sizes() {
+    command -v strip >/dev/null || { echo "    (no strip on the PATH: sizes not reported)"; return 0; }
+    local triple lib copy bytes
+    for triple in "${targets[@]}"; do
+        lib=$target_dir/$triple/release/libtonekit_ffi.a
+        copy=$build/stripped-$triple.a
+        if cp "$lib" "$copy" && strip -S -x "$copy" 2>/dev/null; then
+            bytes=$(wc -c <"$copy" | tr -d ' ')
+            printf '    %-22s %9s bytes stripped (%s KiB)' "$triple" "$bytes" "$((bytes / 1024))"
+            if [ "$triple" = aarch64-apple-ios ] && [ "$bytes" -gt 2097152 ]; then
+                printf '  <- over the 2 MB budget'
+            fi
+            printf '\n'
+        else
+            echo "    $triple: could not strip a copy of $lib; size not reported"
+        fi
+        rm -f "$copy"
+    done
+    return 0
+}
+
 # ---- prerequisites -------------------------------------------------------------------------
 
 step "checking prerequisites"
@@ -134,6 +158,9 @@ resources=$pkg/Tests/TonekitSmokeTests/Resources
 mkdir -p "$resources"
 cp fixtures/spoken-413.wav fixtures/spoken-413.assessment.json "$resources/"
 cp packs/cmn/cmn.toml packs/cmn/cmn.calib.json "$resources/"
+
+step "stripped size of each slice's static library (budget for the device slice: 2 MB)"
+report_sizes
 
 step "done"
 echo "    XCFramework:  build/Tonekit.xcframework"

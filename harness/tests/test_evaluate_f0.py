@@ -22,7 +22,7 @@ def corpus(tmp_path_factory):
 def old_cache_key(wav: bytes, register_json: str | None) -> str:
     """The analysis cache key as it was before f0 providers existed."""
     h = hashlib.sha256()
-    for part in (wav, (register_json or "").encode(), evaluate._tonekit_py_fingerprint().encode()):
+    for part in (wav, (register_json or "").encode(), evaluate.tonekit_py_fingerprint().encode()):
         h.update(len(part).to_bytes(8, "big"))
         h.update(part)
     return h.hexdigest()

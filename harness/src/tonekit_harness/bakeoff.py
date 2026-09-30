@@ -15,13 +15,26 @@ from __future__ import annotations
 
 import argparse
 import sys
+from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from importlib import metadata
 from pathlib import Path
 
 import numpy as np
 
-from . import bakeoff_report, conditions, corpus, evaluate, manifest, metrics, pitch_tracks
+from . import (
+    bakeoff_report,
+    calibration,
+    clearance,
+    conditions,
+    corpus,
+    evaluate,
+    manifest,
+    metrics,
+    pitch_tracks,
+    provenance,
+)
+from .clearance import Clearance
 from .family import SynthError
 from .manifest import Clip, ManifestError
 from .metrics import GateMetrics
@@ -69,10 +82,12 @@ class GateScores:
 @dataclass(frozen=True)
 class Bakeoff:
     """What a run measured: per condition (`clean` first, then noise by SNR) and per provider;
-    None for a part that was not run."""
+    None for a part that was not run. `clearance` says whether the gate part may claim an S1
+    verdict (required when there is a gate part)."""
 
     synthetic: dict[str, Group] | None
     gate: dict[str, GateScores] | None
+    clearance: Clearance | None = None
 
 
 # ---- running -----------------------------------------------------------------------------------
@@ -129,9 +144,16 @@ def _synthetic(
 
 
 def _gate(
-    manifest_path: Path, pack_toml: str, calib_json: str | None, accent: str | None, cache_dir
-) -> dict[str, GateScores]:
-    clips = manifest.load(manifest_path)
+    manifest_path: Path,
+    pack_toml: str,
+    calib_json: str | None,
+    accent: str | None,
+    cache_dir,
+    register: Mapping[str, str],
+    allow_synthetic: bool,
+) -> tuple[dict[str, GateScores], Clearance]:
+    clips = manifest.load(manifest_path, register=register)
+    cleared = clearance.assess(clips, register, allow_synthetic=allow_synthetic)
     n_minimal = sum(c.set == "diag_minimal" for c in clips)
     scores = {}
     for provider, f0 in PROVIDERS.items():
@@ -148,7 +170,7 @@ def _gate(
         scores[provider] = GateScores(
             metrics.loo_gate(results), metrics.candidate_id_accuracy(results), n_minimal
         )
-    return scores
+    return scores, cleared
 
 
 def run(
@@ -160,42 +182,57 @@ def run(
     accent: str | None = None,
     cache_dir: str | Path | None = None,
     use_cache: bool = True,
+    register: Mapping[str, str] | None = None,
+    allow_synthetic: bool = False,
 ) -> Bakeoff:
     """Measure each provider on the `tkh synth` directory `synthetic` and/or grade the gate
     manifest `gate` with it. Analyses are cached like `evaluate.run`'s (`cache_dir`, `use_cache`).
 
-    Raises `BakeoffError` if neither is given, a clip has no f0 truth or a truth of the wrong
-    length; `EvalError`, `ManifestError`, `SynthError`, `MetricsError` and `OSError` as the
-    modules underneath do."""
+    A gate run needs the data `register` (`provenance.load_register`): every clip's source must be
+    one of its ids, and the result's `clearance` says whether the gate may claim an S1 verdict
+    (real recordings the register allows) or not (synthetic or non-allowed clips; with
+    `allow_synthetic`, synthetic clips make a smoke run).
+
+    Raises `BakeoffError` if neither is given, a gate run has no register, a clip has no f0 truth
+    or a truth of the wrong length; `EvalError`, `ManifestError`, `SynthError`, `MetricsError` and
+    `OSError` as the modules underneath do."""
     require_input(synthetic, gate)
+    if gate is not None and register is None:
+        raise BakeoffError("a gate run needs the data register (--register)")
     cache = (Path(cache_dir or evaluate.DEFAULT_CACHE_DIR)) if use_cache else None
+    scores, cleared = (
+        (None, None)
+        if gate is None
+        else _gate(Path(gate), pack_toml, calib_json, accent, cache, register, allow_synthetic)
+    )
     return Bakeoff(
         synthetic=(
             None
             if synthetic is None
             else _synthetic(Path(synthetic), pack_toml, calib_json, accent, cache)
         ),
-        gate=(None if gate is None else _gate(Path(gate), pack_toml, calib_json, accent, cache)),
+        gate=scores,
+        clearance=cleared,
     )
 
 
 # ---- tkh bakeoff -------------------------------------------------------------------------------
 
 
-def _context(args: argparse.Namespace) -> dict[str, str]:
+def _context(args: argparse.Namespace, files: calibration.PackFiles) -> dict[str, str]:
     context = {}
     if args.synthetic:
         context["synthetic corpus"] = str(args.synthetic)
     if args.gate:
         context["gate manifest"] = str(args.gate)
+        context["data register"] = str(args.register or clearance.default_register())
     onnx = metadata.version("onnxruntime")
     swift = f"{pitch_tracks.provider_identity('swift-f0')} on onnxruntime {onnx}"
     context |= {
-        "pack": str(args.pack),
-        "calibration": str(args.calib) if args.calib else "the pack's own",
+        **files.context(),
         "accent": args.accent or "the pack's base accent",
         "providers": f"pyin (tonekit's own); {swift}",
-        "tonekit-py": evaluate.tonekit_py_version(),
+        "tonekit-py": evaluate.tonekit_py_fingerprint(),
     }
     return context
 
@@ -206,35 +243,39 @@ def _summary(result: Bakeoff, report_path: str) -> str:
         clips = sum(group.clips for group in result.synthetic.values())
         parts.append(f"{clips} synthetic clip{'' if clips == 1 else 's'}")
     if result.gate is not None:
-        verdicts = ", ".join(
-            f"{provider} {'PASS' if s.metrics.passed else 'FAIL'} "
-            f"(CA {s.metrics.ca:.3f}, WA {s.metrics.wa:.3f})"
-            for provider, s in result.gate.items()
-        )
-        parts.append(f"S1: {verdicts}")
+        label = result.clearance.label  # None: a verdict may be issued
+        each = []
+        for provider, s in result.gate.items():
+            numbers = f"CA {s.metrics.ca:.3f}, WA {s.metrics.wa:.3f}"
+            verdict = "" if label is not None else ("PASS " if s.metrics.passed else "FAIL ")
+            each.append(f"{provider} {verdict}({numbers})")
+        parts.append(f"S1: {'' if label is None else label + ': '}{', '.join(each)}")
     return f"bakeoff: {'; '.join(parts)}; report written to {report_path}"
 
 
 def _run(args: argparse.Namespace) -> int:
     try:
         require_input(args.synthetic, args.gate)
-        pack_toml = Path(args.pack).read_text(encoding="utf-8")
-        calib_json = Path(args.calib).read_text(encoding="utf-8") if args.calib else None
+        register = clearance.read_register(args.register) if args.gate else None
+        files = calibration.load(args.pack, args.calib)
         result = run(
             synthetic=args.synthetic,
             gate=args.gate,
-            pack_toml=pack_toml,
-            calib_json=calib_json,
+            pack_toml=files.pack_toml,
+            calib_json=files.calib_json,
             accent=args.accent,
             use_cache=not args.no_cache,
+            register=register,
+            allow_synthetic=args.allow_synthetic,
         )
-        bakeoff_report.write(args.report, result, context=_context(args))
+        bakeoff_report.write(args.report, result, context=_context(args, files))
     except (
         BakeoffError,
         ManifestError,
         evaluate.EvalError,
         SynthError,
         metrics.MetricsError,
+        provenance.ProvenanceError,
         OSError,
     ) as e:
         print(f"error: {e}", file=sys.stderr)
@@ -253,9 +294,24 @@ def register(subparsers) -> None:
     )
     p.add_argument("--gate", help="a corpus manifest (JSONL) with gate pairs, e.g. the DJ corpus")
     p.add_argument("--pack", required=True, help="language pack TOML (e.g. packs/cmn/cmn.toml)")
-    p.add_argument("--calib", help="calibration JSON (default: the pack's own)")
+    p.add_argument(
+        "--calib",
+        help="calibration JSON (default: <pack stem>.calib.json beside the pack if it exists, "
+        "as the tonekit CLI does, else tonekit's compiled-in default)",
+    )
     p.add_argument("--accent", help="accent to grade against (default: the pack's base accent)")
     p.add_argument("--report", required=True, help="markdown report to write")
+    p.add_argument(
+        "--register",
+        help="data register deciding which gate clip sources may back an S1 verdict "
+        "(default: data-register.csv at the repository root)",
+    )
+    p.add_argument(
+        "--allow-synthetic",
+        action="store_true",
+        help="smoke run: grade synthetic gate clips and label the S1 section SMOKE (synthetic) "
+        "instead of NOT A GATE; it never issues a PASS or FAIL",
+    )
     p.add_argument(
         "--no-cache", action="store_true", help="neither read nor write the analysis cache"
     )
