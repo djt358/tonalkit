@@ -1,11 +1,23 @@
 # tonekit
 
+[![CI](https://github.com/djt358/tonalkit/actions/workflows/ci.yml/badge.svg)](https://github.com/djt358/tonalkit/actions/workflows/ci.yml)
+
 Grades lexical tone (Mandarin first) from a short recording, on-device. A Rust library with an
 iOS-first build (UniFFI to a Swift XCFramework). Audio is analysed once and can then be decoded
 against many candidate readings, or turned into a tone lattice for other systems to rescore.
 
-**Status:** P0 in progress. The design is in [`docs/superpowers/specs/`](docs/superpowers/specs/2026-09-28-tone-assessment-design.md)
-and the plan is in [`docs/superpowers/plans/`](docs/superpowers/plans/2026-09-28-tonekit-p0.md).
+`tonekit` is the working name of the crates and APIs; the repository is
+[`djt358/tonalkit`](https://github.com/djt358/tonalkit). The name will be settled before a
+release.
+
+**Status:** P0 is built. The Rust library, the CLI, the Swift and Python bindings and the
+evaluation harness are done and tested on Linux. Two things are still to come: the first build and
+test run on the iOS Simulator ([`docs/ios-verification.md`](docs/ios-verification.md)), and the P0
+gate on real recordings ([`harness/corpus/PROTOCOL.md`](harness/corpus/PROTOCOL.md)). Scores are
+uncalibrated seeds until P1. The design is in
+[`docs/superpowers/specs/`](docs/superpowers/specs/2026-09-28-tone-assessment-design.md), the plan
+in [`docs/superpowers/plans/`](docs/superpowers/plans/2026-09-28-tonekit-p0.md), and the choices
+made along the way in [`docs/decisions.md`](docs/decisions.md).
 
 ## Scope
 
@@ -131,3 +143,9 @@ harness tests with `uv run pytest`.
 
 The design choices that shaped behaviour and data, with their reasons and what each costs if it
 turns out wrong, are in [`docs/decisions.md`](docs/decisions.md). Code comments cite them as `R<n>`.
+
+## Contributing and licence
+
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) for setup, the checks CI runs and the project's
+conventions. tonekit is dual-licensed under [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE), at
+your option.
