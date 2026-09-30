@@ -9,6 +9,11 @@ on:
 permissions:
   contents: read
 
+# A newer push to the same branch or pull request cancels the older run.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   CARGO_TERM_COLOR: always
 
@@ -74,70 +79,6 @@ jobs:
 
   # Task 12: the iOS build, proven on the Simulator (spec 4.3). Builds the XCFramework, then runs
   # the Swift tests in swift/TonekitSmoke against it.
-  ios:
-    runs-on: macos-14
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: aarch64-apple-ios,aarch64-apple-ios-sim
-          components: llvm-tools
-      - name: Build the XCFramework
-        run: |
-          set -o pipefail
-          mkdir -p build
-          if ! scripts/build-xcframework.sh 2>&1 | tee build/build-xcframework.log; then
-            # Also report the tail as an annotation: annotations are readable through the API
-            # from places that can't fetch GitHub's log storage.
-            tail -n 40 build/build-xcframework.log | sed -e 's/\x1b\[[0-9;]*m//g' -e 's/%/%25/g' |
-              awk '{ printf "%s%%0A", $0 }' >build/tail.txt
-            echo "::error title=build-xcframework.sh failed::$(cat build/tail.txt)"
-            exit 1
-          fi
-      - name: Swift tests on the iOS Simulator
-        working-directory: swift/TonekitSmoke
-        run: |
-          set -o pipefail
-          destination='platform=iOS Simulator,name=iPhone 15'
-          log=../../build/xcodebuild-test.log
-          # SwiftPM names the scheme after the library product; if this Xcode only offers the
-          # package-wide scheme, use that.
-          scheme=TonekitSmoke
-          schemes=$(xcodebuild -list)
-          grep -Eq '^[[:space:]]+TonekitSmoke$' <<<"$schemes" || scheme=TonekitSmoke-Package
-          echo "scheme: $scheme"
-          if ! xcodebuild test -scheme "$scheme" -destination "$destination" 2>&1 | tee "$log"; then
-            # The library scheme can be listed yet not testable ("not currently configured for the
-            # test action"); the package-wide scheme then still runs the tests. Any other failure
-            # is the real one: stop there. Both attempts stay in the log.
-            [ "$scheme" = TonekitSmoke ] || exit 1
-            grep -q 'not currently configured for the test action' "$log" || exit 1
-            echo "::warning::xcodebuild test -scheme TonekitSmoke failed; retrying with TonekitSmoke-Package"
-            echo "=== retry: -scheme TonekitSmoke-Package ===" | tee -a "$log"
-            xcodebuild test -scheme TonekitSmoke-Package -destination "$destination" 2>&1 | tee -a "$log"
-          fi
-      - name: Report a Swift test failure as an annotation
-        if: failure()
-        run: |
-          log=build/xcodebuild-test.log
-          [ -f "$log" ] || exit 0
-          { grep -E -B2 'error:|Undefined symbol|Failing tests|failed \(|nonzero exit code|unrecognized|TEST FAILED' "$log" | head -n 40; echo '---'; tail -n 15 "$log"
-            echo '--- available iPhone simulators'; xcrun simctl list devices available | grep -E 'iPhone|-- iOS' | head -n 12; } |
-            sed -e 's/%/%25/g' | awk '{ printf "%s%%0A", $0 }' >build/swift-tail.txt
-          echo "::error title=Swift tests failed::$(cat build/swift-tail.txt)"
-      - name: Latency on the Simulator (informational)
-        if: always()
-        run: |
-          grep -E 'measured \[Time|TONEKIT_LATENCY' build/xcodebuild-test.log 2>/dev/null |
-            while read -r line; do echo "::notice title=Simulator latency::$line"; done || true
-      - name: Keep the logs
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: ios-logs
-          path: build/*.log
-
   harness:
     runs-on: ubuntu-latest
     defaults:

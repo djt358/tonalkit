@@ -213,7 +213,8 @@ It links `iconv`, `Security` and `Foundation`. Step 1 prints the list rustc repo
 | `scripts/build-xcframework.sh` | step 1 of the checklist |
 | `scripts/check-swift-bindings.sh`, `scripts/check-ffi-symbols.sh` | checks that also run on Linux, in CI |
 | `swift/TonekitSmoke/` | the SwiftPM package: binary target on the XCFramework, the generated bindings, the tests |
-| `.github/workflows/ci.yml` | the `ffi` job (Linux) and the `ios` job (macos-14: the same two commands as above) |
+| `.github/workflows/ci.yml` | the `ffi` job (Linux): the bindings and FFI-symbol checks on every change |
+| `.github/workflows/ios.yml` | the `ios` job (macos-14: the same two commands as above), on demand (Actions > ios > Run workflow) and on pull requests that touch the iOS bridge; its latency test runs in a quick mode (5 runs) |
 
 Generated files (`build/`, `swift/TonekitSmoke/Frameworks/`, `.../Generated/`, `.../Fixtures/`)
 are git-ignored.

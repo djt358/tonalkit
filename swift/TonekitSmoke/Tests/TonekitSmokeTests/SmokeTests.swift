@@ -84,20 +84,26 @@ final class SmokeTests: XCTestCase {
         )
         XCTAssertEqual(warmup.intendedRank, 1)
 
+        // CI sets TONEKIT_QUICK_LATENCY (as TEST_RUNNER_TONEKIT_QUICK_LATENCY): five timed runs and
+        // no measure block, to spend less of a shared VM's time on numbers it makes noisy anyway.
+        let quick = ProcessInfo.processInfo.environment["TONEKIT_QUICK_LATENCY"] != nil
+
         // XCTest's measurement: ten runs, reported in the xcodebuild log as
         // "measured [Time, seconds] average: ...".
-        measure {
-            do {
-                let analysis = try analyze(pcm: pcm, sampleRate: 16_000, register: nil, externalF0: nil)
-                _ = try assess(analysis: analysis, pack: pack, request: request)
-            } catch {
-                XCTFail("analyze + assess threw: \(error)")
+        if !quick {
+            measure {
+                do {
+                    let analysis = try analyze(pcm: pcm, sampleRate: 16_000, register: nil, externalF0: nil)
+                    _ = try assess(analysis: analysis, pack: pack, request: request)
+                } catch {
+                    XCTFail("analyze + assess threw: \(error)")
+                }
             }
         }
 
         // The same thing as plain numbers, for the report back.
         var milliseconds: [Double] = []
-        for _ in 0..<20 {
+        for _ in 0..<(quick ? 5 : 20) {
             let start = DispatchTime.now().uptimeNanoseconds
             let analysis = try analyze(pcm: pcm, sampleRate: 16_000, register: nil, externalF0: nil)
             _ = try assess(analysis: analysis, pack: pack, request: request)
