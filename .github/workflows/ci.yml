@@ -83,7 +83,17 @@ jobs:
         with:
           targets: aarch64-apple-ios,aarch64-apple-ios-sim
       - name: Build the XCFramework
-        run: scripts/build-xcframework.sh
+        run: |
+          set -o pipefail
+          mkdir -p build
+          if ! scripts/build-xcframework.sh 2>&1 | tee build/build-xcframework.log; then
+            # Also report the tail as an annotation: annotations are readable through the API
+            # from places that can't fetch GitHub's log storage.
+            tail -n 40 build/build-xcframework.log | sed -e 's/\x1b\[[0-9;]*m//g' -e 's/%/%25/g' |
+              awk '{ printf "%s%%0A", $0 }' >build/tail.txt
+            echo "::error title=build-xcframework.sh failed::$(cat build/tail.txt)"
+            exit 1
+          fi
       - name: Swift tests on the iOS Simulator
         working-directory: swift/TonekitSmoke
         run: |
