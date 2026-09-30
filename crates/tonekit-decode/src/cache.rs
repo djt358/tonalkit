@@ -1,18 +1,18 @@
-//! Per-decode memo tables (spec §7.2 "segment cache"): one shape per boundary pair, and the
-//! target LLRs of each shape per context.
+//! Per-decode memo tables (spec §7.2): the target LLRs of each nucleus's shape, per context.
 //!
-//! Every candidate in a decode searches the same boundary pairs, so a shape is extracted at most
-//! once per pair however many candidates visit it. `judge` resolves an expectation for every
-//! inventory tone on each call (≈2 µs), so the DP does not call it per edge. For a target without
-//! lexical variants it reads a row of per-tone LLRs instead, computed from `tone_loglik` exactly
-//! as `judge` computes `llr_target` (see [`tone_llrs`]) once per (pair, context class).
+//! Every nucleus has one shape, extracted once per decode on its TBU (ruling R50, see
+//! [`crate::evidence`]), and every candidate whose path puts a syllable on that nucleus is scored
+//! on it. `judge` resolves an expectation for every inventory tone on each call (≈2 µs), so the DP
+//! does not call it per edge. For a target without lexical variants it reads a row of per-tone
+//! LLRs instead, computed from `tone_loglik` exactly as `judge` computes `llr_target` (see
+//! [`tone_llrs`]) once per (nucleus, context class).
 //!
 //! A *context class* is a set of contexts under which the pack resolves the same expectation for
 //! every inventory tone. A tone's likelihood depends on its context only through that expectation
 //! (spec §7.1: the mixture over the expectation's components), so every context in a class gives
 //! the same row. Classes are found by resolving the expectations, never by assuming which context
 //! fields the pack reads, and they let candidates of different lengths and positions share rows.
-//! Targets with lexical variants go through `judge`, memoised per (pair, target, context).
+//! Targets with lexical variants go through `judge`, memoised per (nucleus, target, context).
 //! `judge` itself is only called for the syllables of chosen paths.
 
 use std::collections::BTreeMap;
@@ -22,12 +22,10 @@ use tonekit_core::{
     ToneJudgement, ToneTarget,
 };
 use tonekit_pack::{logsumexp, Expectation, LanguagePack, TargetContext};
-use tonekit_shape::{extract, Extracted};
+use tonekit_shape::Extracted;
 
+use crate::evidence::Tbu;
 use crate::{clamp_log, pack_err, tone_index};
-
-/// A segment's shape, or why there is none.
-pub(crate) type Segment = Result<Extracted, MeasureIssue>;
 
 /// The analysis-level issues followed by those of the extraction, without repeats.
 pub(crate) fn merged_issues(
@@ -41,15 +39,6 @@ pub(crate) fn merged_issues(
         }
     }
     issues
-}
-
-/// The shape of frames `[from, to)` of `a`, normalised by its register.
-pub(crate) fn extract_span(a: &Analysis, from: u32, to: u32) -> Segment {
-    let span = TbuSpan {
-        start_frame: from,
-        end_frame: to,
-    };
-    extract(&a.f0, &span, &a.register)
 }
 
 /// The judgement of a syllable that gives no tone evidence: the target is expected, nothing was
@@ -128,32 +117,38 @@ pub(crate) enum TargetKey {
     Mixed { id: usize },
 }
 
-/// Scores targets on the segments between boundary candidates, memoising shapes and LLRs.
+/// Scores targets on the nuclei's shapes, memoising LLRs.
 pub(crate) struct Scorer<'a> {
     a: &'a Analysis,
     pack: &'a LanguagePack,
     g: &'a GradingTarget,
+    /// The evidence of every distinct nucleus, in frame order; a nucleus is its index here.
+    tbus: &'a [Tbu],
     unvoiced_llr: f32,
-    segments: BTreeMap<(u32, u32), Segment>,
     /// Every context seen, with its class.
     contexts: Vec<(TargetContext, usize)>,
     /// Per class: the expectation of every inventory tone, and the first context seen in it.
     classes: Vec<(Vec<Expectation>, TargetContext)>,
     mixed: Vec<(ToneTarget, TargetContext)>,
-    /// `(from, to, class)` → [`tone_llrs`] of that segment.
-    rows: BTreeMap<(u32, u32, usize), Vec<f32>>,
-    /// `(from, to, mixed id)` → `judge(..).llr_target`.
-    mixed_llrs: BTreeMap<(u32, u32, usize), f32>,
+    /// `(nucleus, class)` → [`tone_llrs`] of its shape.
+    rows: BTreeMap<(usize, usize), Vec<f32>>,
+    /// `(nucleus, mixed id)` → `judge(..).llr_target`.
+    mixed_llrs: BTreeMap<(usize, usize), f32>,
 }
 
 impl<'a> Scorer<'a> {
-    pub(crate) fn new(a: &'a Analysis, pack: &'a LanguagePack, g: &'a GradingTarget) -> Self {
+    pub(crate) fn new(
+        a: &'a Analysis,
+        pack: &'a LanguagePack,
+        g: &'a GradingTarget,
+        tbus: &'a [Tbu],
+    ) -> Self {
         Scorer {
             a,
             pack,
             g,
+            tbus,
             unvoiced_llr: pack.calibration().decode.unvoiced_syllable_llr,
-            segments: BTreeMap::new(),
             contexts: Vec::new(),
             classes: Vec::new(),
             mixed: Vec::new(),
@@ -162,7 +157,7 @@ impl<'a> Scorer<'a> {
         }
     }
 
-    /// The LLR of an unmeasurable segment (`unvoiced_syllable_llr`).
+    /// The LLR of an unmeasurable syllable (`unvoiced_syllable_llr`).
     pub(crate) fn unvoiced_llr(&self) -> f32 {
         self.unvoiced_llr
     }
@@ -229,29 +224,25 @@ impl<'a> Scorer<'a> {
         Ok(class)
     }
 
-    /// `judge(..).llr_target` of the target behind `key` on frames `[from, to)`, or
-    /// `unvoiced_syllable_llr` if the segment has no shape.
-    pub(crate) fn llr(&mut self, from: u32, to: u32, key: TargetKey) -> Result<f32, AssessError> {
+    /// `judge(..).llr_target` of the target behind `key` on the shape of nucleus `nucleus` (an
+    /// index into the evidence), or `unvoiced_syllable_llr` if it has no shape.
+    pub(crate) fn llr(&mut self, nucleus: usize, key: TargetKey) -> Result<f32, AssessError> {
         let (a, pack, g) = (self.a, self.pack, self.g);
-        let segment = self
-            .segments
-            .entry((from, to))
-            .or_insert_with(|| extract_span(a, from, to));
-        let Ok(ex) = segment else {
+        let Ok(ex) = &self.tbus[nucleus].segment else {
             return Ok(self.unvoiced_llr);
         };
         match key {
             TargetKey::Tone { class, tone } => {
-                if let Some(row) = self.rows.get(&(from, to, class)) {
+                if let Some(row) = self.rows.get(&(nucleus, class)) {
                     return Ok(row[tone]);
                 }
                 let row = tone_llrs(pack, g, ex, &self.classes[class].1, &a.issues)?;
                 let v = row[tone];
-                self.rows.insert((from, to, class), row);
+                self.rows.insert((nucleus, class), row);
                 Ok(v)
             }
             TargetKey::Mixed { id } => {
-                if let Some(&v) = self.mixed_llrs.get(&(from, to, id)) {
+                if let Some(&v) = self.mixed_llrs.get(&(nucleus, id)) {
                     return Ok(v);
                 }
                 let (target, ctx) = &self.mixed[id];
@@ -260,49 +251,39 @@ impl<'a> Scorer<'a> {
                     .judge(g, &ex.shape, target, ctx, &issues)
                     .map_err(pack_err)?
                     .llr_target;
-                self.mixed_llrs.insert((from, to, id), v);
+                self.mixed_llrs.insert((nucleus, id), v);
                 Ok(v)
             }
         }
     }
 
-    /// The full judgement of `target` in `ctx` on frames `[from, to)`: `judge` on its shape, or
-    /// [`unmeasured`] if it has none.
+    /// The syllable at `span` holding nucleus `nucleus`, judged as `target` in `ctx`: `judge` on
+    /// the nucleus's shape, or [`unmeasured`] if it has none.
     pub(crate) fn fit(
-        &mut self,
-        from: u32,
-        to: u32,
+        &self,
+        nucleus: usize,
+        span: TbuSpan,
         target: &ToneTarget,
         ctx: &TargetContext,
     ) -> Result<SyllableFit, AssessError> {
-        let a = self.a;
-        let segment = self
-            .segments
-            .entry((from, to))
-            .or_insert_with(|| extract_span(a, from, to));
-        let judgement = match segment {
+        let judgement = match &self.tbus[nucleus].segment {
             Ok(ex) => {
-                let issues = merged_issues(&a.issues, &ex.issues);
+                let issues = merged_issues(&self.a.issues, &ex.issues);
                 self.pack
                     .judge(self.g, &ex.shape, target, ctx, &issues)
                     .map_err(pack_err)?
             }
             Err(issue) => unmeasured(target, *issue, self.unvoiced_llr),
         };
-        Ok(SyllableFit {
-            span: TbuSpan {
-                start_frame: from,
-                end_frame: to,
-            },
-            judgement,
-        })
+        Ok(SyllableFit { span, judgement })
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::{cmn, ctx, hand, std_g, target};
+    use crate::evidence::tbus;
+    use crate::test_support::{cmn, ctx, hand, hand_with, marked, std_g, target};
     use tonekit_core::{ToneId, WeightedTone};
 
     fn varied(tone: &str, variant: &str, weight: f32) -> ToneTarget {
@@ -329,7 +310,7 @@ mod tests {
     fn keys_ignore_labels_but_not_tones_variants_or_context() {
         let (pack, g) = (cmn(), std_g());
         let a = hand(&[]);
-        let mut s = Scorer::new(&a, &pack, &g);
+        let mut s = Scorer::new(&a, &pack, &g, &[]);
         let mut key = |t: &ToneTarget, c: &TargetContext| s.key(t, c).unwrap();
         let class = |k: TargetKey| match k {
             TargetKey::Tone { class, .. } => class,
@@ -374,7 +355,7 @@ mod tests {
         assert!(matches!(heavy, Err(AssessError::Pack { .. })), "{heavy:?}");
         let mut bad = std_g();
         bad.accent.0 = "cmn-XX".into();
-        let mut s = Scorer::new(&a, &pack, &bad);
+        let mut s = Scorer::new(&a, &pack, &bad, &[]);
         let r = s.key(&target("1", None), &ctx(0, None, false));
         assert!(matches!(r, Err(AssessError::Pack { ref message }) if message.contains("cmn-XX")));
     }
@@ -382,8 +363,9 @@ mod tests {
     #[test]
     fn cached_llrs_equal_judge_bit_for_bit() {
         let (pack, g) = (cmn(), std_g());
-        let a = hand(&[&[2.0, 1.0], &[5.0, 5.0], &[4.0], &[2.0, 1.0, 4.0]]);
-        let spans = [(10, 35), (41, 66), (72, 97), (103, 128), (10, 66), (30, 50)];
+        let a = marked(hand(&[&[2.0, 1.0], &[5.0, 5.0], &[4.0], &[2.0, 1.0, 4.0]]));
+        let tbus = tbus(&a);
+        assert_eq!(tbus.len(), 4);
         let targets = [
             target("1", None),
             target("2", None),
@@ -409,9 +391,14 @@ mod tests {
             moved(ctx(2, Some("3"), true)),
             ctx(2, Some("1"), true),
         ];
-        let mut s = Scorer::new(&a, &pack, &g);
-        for &(from, to) in &spans {
-            let ex = extract_span(&a, from, to).unwrap();
+        // The syllable's span is the caller's; the evidence is the nucleus's.
+        let span = TbuSpan {
+            start_frame: 3,
+            end_frame: 9,
+        };
+        let mut s = Scorer::new(&a, &pack, &g, &tbus);
+        for (n, tbu) in tbus.iter().enumerate() {
+            let ex = tbu.segment.as_ref().unwrap();
             for c in &contexts {
                 for t in &targets {
                     let key = s.key(t, c).unwrap();
@@ -420,11 +407,11 @@ mod tests {
                         .unwrap()
                         .llr_target;
                     // Twice: once computed, once from the cache.
-                    assert_eq!(s.llr(from, to, key).unwrap().to_bits(), want.to_bits());
-                    assert_eq!(s.llr(from, to, key).unwrap().to_bits(), want.to_bits());
-                    let fit = s.fit(from, to, t, c).unwrap();
+                    assert_eq!(s.llr(n, key).unwrap().to_bits(), want.to_bits());
+                    assert_eq!(s.llr(n, key).unwrap().to_bits(), want.to_bits());
+                    let fit = s.fit(n, span.clone(), t, c).unwrap();
                     assert_eq!(fit.judgement.llr_target.to_bits(), want.to_bits());
-                    assert_eq!((fit.span.start_frame, fit.span.end_frame), (from, to));
+                    assert_eq!(fit.span, span);
                 }
             }
         }
@@ -435,18 +422,20 @@ mod tests {
         // A cold-start register widens every tolerance: the LLRs change, and judge sees it too.
         let (pack, g) = (cmn(), std_g());
         let (t, c) = (target("4", None), ctx(0, None, true));
-        let mut a = hand(&[&[5.0, 1.0]]);
+        let mut a = marked(hand(&[&[5.0, 1.0]]));
+        let tbus = tbus(&a);
+        let span = tbus[0].span.clone();
         let warm = {
-            let mut s = Scorer::new(&a, &pack, &g);
+            let mut s = Scorer::new(&a, &pack, &g, &tbus);
             let k = s.key(&t, &c).unwrap();
-            s.llr(10, 35, k).unwrap()
+            s.llr(0, k).unwrap()
         };
         a.issues.push(MeasureIssue::ColdStartRegister);
-        let mut s = Scorer::new(&a, &pack, &g);
+        let mut s = Scorer::new(&a, &pack, &g, &tbus);
         let k = s.key(&t, &c).unwrap();
-        let cold = s.llr(10, 35, k).unwrap();
+        let cold = s.llr(0, k).unwrap();
         assert_ne!(cold, warm);
-        let fit = s.fit(10, 35, &t, &c).unwrap();
+        let fit = s.fit(0, span, &t, &c).unwrap();
         assert_eq!(fit.judgement.llr_target, cold);
         assert_eq!(
             fit.judgement.measured,
@@ -457,20 +446,22 @@ mod tests {
     }
 
     #[test]
-    fn unvoiced_segments_score_the_unvoiced_llr_and_are_not_measured() {
+    fn a_nucleus_without_a_shape_scores_the_unvoiced_llr_and_is_not_measured() {
+        // A whispered syllable with a nucleus (hand-built): no pitch on its TBU.
         let (pack, g) = (cmn(), std_g());
-        let a = hand(&[&[5.0, 5.0]]);
-        let mut s = Scorer::new(&a, &pack, &g);
+        let a = marked(hand_with(&[(&[5.0, 5.0], false)]));
+        let tbus = tbus(&a);
+        assert_eq!(tbus[0].segment, Err(MeasureIssue::Unvoiced));
+        let mut s = Scorer::new(&a, &pack, &g, &tbus);
         let t = target("1", None);
         let c = ctx(0, None, true);
         for key in [
             s.key(&t, &c).unwrap(),
             s.key(&varied("1", "2", 0.5), &c).unwrap(),
         ] {
-            // Frames 0..10 are silent.
-            assert_eq!(s.llr(0, 10, key), Ok(-3.0));
+            assert_eq!(s.llr(0, key), Ok(-3.0));
         }
-        let fit = s.fit(0, 10, &t, &c).unwrap();
+        let fit = s.fit(0, tbus[0].span.clone(), &t, &c).unwrap();
         assert_eq!(fit.judgement, unmeasured(&t, MeasureIssue::Unvoiced, -3.0));
         assert_eq!(fit.judgement.expected, t.tone);
         assert!(fit.judgement.loglik.is_empty() && fit.judgement.heard.is_none());

@@ -8,10 +8,14 @@
 //!
 //! The margins below are deliberately modest (R48). At the seed calibration the posteriors are
 //! compressed: a perfect synthetic T1 scores only about 0.71 with a cold register, so a clip's
-//! `overall` (the minimum over its syllables) has little room to fall, and the T3-for-T2 error's
-//! middle syllable still scores above 0.5. What is pinned is the direction of the fix and that
-//! the intended-T3 side keeps its credit; the absolute sharpness belongs to the P1 calibration,
-//! and the mixture weight is not to be tuned on synthetic audio.
+//! `overall` (the minimum over its syllables) has little room to fall. What is pinned is the
+//! direction of the fix and that the intended-T3 side keeps its credit; the absolute sharpness
+//! belongs to the P1 calibration, and the mixture weight is not to be tuned on synthetic audio.
+//!
+//! R51: most of the gate-02 error's credit was the decoder's span shopping, fixed by R50 (every
+//! candidate is scored on each nucleus's one shape). Re-measured on the fixed decoder, the error's
+//! middle syllable scores 0.39 with this pack and 0.44 with the pre-R47 one (0.66 and 0.71
+//! before R50); the tests hold with either decoder.
 
 use tonekit::{
     analyze, assess, AccentId, AnalyzeOptions, AssessRequest, Candidate, CandidateId,
@@ -103,7 +107,7 @@ fn grade(produced: &[&str], intended: &[&str], register: Option<&Register>) -> (
 #[test]
 fn a_full_dip_third_tone_is_graded_below_a_second_tone_in_non_final_position() {
     // Gate pair 02 (intended 1-2-4), cold register: the T3-for-T2 error must score clearly below
-    // the correct clip. Before R47 the two were 0.004 apart.
+    // the correct clip. Before R47 (and R50) the two were 0.004 apart.
     let (correct, correct_p) = grade(&["1", "2", "4"], &["1", "2", "4"], None);
     let (error, error_p) = grade(&["1", "3", "4"], &["1", "2", "4"], None);
     eprintln!("R47 gate-02: correct {correct:.4} {correct_p:.4?}, error {error:.4} {error_p:.4?}");
@@ -116,7 +120,8 @@ fn a_full_dip_third_tone_is_graded_below_a_second_tone_in_non_final_position() {
 #[test]
 fn an_intended_third_tone_keeps_its_credit_for_the_full_dip() {
     // The other direction: a learner asked for a T3 who over-produces it as the full dip in a
-    // non-final position is not punished (the old pack scored this middle syllable 0.63).
+    // non-final position is not punished (the old pack scored this middle syllable 0.63; 0.65
+    // since R50).
     let (overall, p) = grade(&["1", "3", "4"], &["1", "3", "4"], None);
     eprintln!("R47 intended 1-3-4, produced 1-3-4: overall {overall:.4} {p:.4?}");
     assert!(p[1] > 0.65, "intended T3 middle p_correct {:.4}", p[1]);

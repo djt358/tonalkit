@@ -6,6 +6,10 @@ use serde::{Deserialize, Serialize};
 pub const SAMPLE_RATE: u32 = 16_000;
 /// Samples per frame hop (10 ms at [`SAMPLE_RATE`]).
 pub const HOP: usize = 160;
+/// A voiced run (a maximal stretch of frames with a pitch) bridges unvoiced gaps of at most this
+/// many frames (ruling R32). Octave repair works run by run, and a nucleus's tone shape is taken
+/// from its own run (ruling R50).
+pub const MAX_BRIDGED_GAP_FRAMES: usize = 2;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "ffi", derive(uniffi::Record))]

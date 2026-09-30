@@ -14,6 +14,10 @@
 //! when no strict path exists (fewer nuclei than targets, or boundaries that do not allow it) and
 //! the analysis has a nucleus, a relaxed pass allows syllables with no nucleus: each is a likely
 //! miss, scored `unvoiced_syllable_llr` and reported `Partial { [Unvoiced] }`.
+//!
+//! A syllable's tone evidence is its nucleus's shape, the same for every edge that holds the
+//! nucleus and for every candidate (ruling R50): the boundary pair only sets the duration prior and
+//! what is left over as filler and insertions, so a target cannot choose the frames that suit it.
 
 use tonekit_core::{
     Analysis, AssessError, Candidate, CandidateScore, EnergyTrack, GradingTarget, MeasureIssue,
@@ -24,6 +28,7 @@ use tonekit_segment::{speech_threshold, SegmentParams};
 
 use crate::cache::{missed, unmeasured, Scorer, TargetKey};
 use crate::duration::{log_prior, rate_s, FRAME_S};
+use crate::evidence::Tbu;
 use crate::{clamp_log, count_u32};
 
 /// Shortest syllable edge, in frames (60 ms).
@@ -97,6 +102,12 @@ impl Filler {
     /// Nuclei in frames `[from, to)`.
     pub(crate) fn nuclei(&self, from: u32, to: u32) -> u32 {
         Self::count(&self.nuclei, from, to)
+    }
+
+    /// The first nucleus in frames `[from, to)`, if any, as its index among the distinct nucleus
+    /// frames on the track in frame order (the order of [`crate::evidence::tbus`]).
+    pub(crate) fn nucleus_in(&self, from: u32, to: u32) -> Option<usize> {
+        (self.nuclei(from, to) > 0).then(|| Self::count(&self.nuclei, 0, from) as usize)
     }
 
     /// The cost of leaving frames `[from, to)` to no syllable, clamped to the track (frames past
@@ -261,7 +272,8 @@ pub(crate) fn contexts(targets: &[ToneTarget]) -> Vec<TargetContext> {
         .collect()
 }
 
-/// Decodes candidates against one analysis, sharing the segment and LLR caches between them.
+/// Decodes candidates against one analysis, sharing the nuclei's evidence and LLR caches between
+/// them.
 pub(crate) struct Decoder<'a> {
     /// Where the speech region starts, if there is one.
     speech_start: Option<u32>,
@@ -277,7 +289,13 @@ pub(crate) struct Decoder<'a> {
 }
 
 impl<'a> Decoder<'a> {
-    pub(crate) fn new(a: &'a Analysis, pack: &'a LanguagePack, g: &'a GradingTarget) -> Self {
+    /// `tbus` is the analysis's evidence, [`crate::evidence::tbus`].
+    pub(crate) fn new(
+        a: &'a Analysis,
+        pack: &'a LanguagePack,
+        g: &'a GradingTarget,
+        tbus: &'a [Tbu],
+    ) -> Self {
         let d = &pack.calibration().decode;
         let mut bounds = a.boundaries.clone();
         bounds.sort_unstable();
@@ -296,7 +314,7 @@ impl<'a> Decoder<'a> {
             filler,
             rate_s: rate_s(&a.nuclei, f64::from(d.default_rate_s)),
             dur_sigma: f64::from(d.dur_sigma),
-            scorer: Scorer::new(a, pack, g),
+            scorer: Scorer::new(a, pack, g, tbus),
         }
     }
 
@@ -314,8 +332,9 @@ impl<'a> Decoder<'a> {
     /// The candidate's best path, its LLR (the path score) and its syllables, each judged in its
     /// context; `keys` is its [`Decoder::plan`]. `posterior` is left at 0 for the caller to fill.
     ///
-    /// A syllable with a nucleus is judged on its shape; one without (relaxed pass only) is a
-    /// likely miss: `unvoiced_syllable_llr`, `Partial { [Unvoiced] }`.
+    /// A syllable with a nucleus is judged on the nucleus's shape and reported at the span its
+    /// path gives it; one without (relaxed pass only) is a likely miss: `unvoiced_syllable_llr`,
+    /// `Partial { [Unvoiced] }`.
     pub(crate) fn score(
         &mut self,
         cand: &Candidate,
@@ -330,16 +349,16 @@ impl<'a> Decoder<'a> {
         let mut syllables = Vec::with_capacity(path.syllables.len());
         for ((&(i, j), target), ctx) in path.syllables.iter().zip(&cand.targets).zip(&ctxs) {
             let (from, to) = (self.bounds[i], self.bounds[j]);
-            let fit = if self.filler.nuclei(from, to) == 0 {
-                SyllableFit {
-                    span: TbuSpan {
-                        start_frame: from,
-                        end_frame: to,
-                    },
+            let span = TbuSpan {
+                start_frame: from,
+                end_frame: to,
+            };
+            let fit = match self.filler.nucleus_in(from, to) {
+                Some(n) => self.scorer.fit(n, span, target, ctx)?,
+                None => SyllableFit {
+                    span,
                     judgement: missed(target, unvoiced),
-                }
-            } else {
-                self.scorer.fit(from, to, target, ctx)?
+                },
             };
             syllables.push(fit);
         }
@@ -367,7 +386,8 @@ impl<'a> Decoder<'a> {
     }
 
     /// [`best_path`] for the targets behind `keys` under `pass`: a syllable with a nucleus scores
-    /// its target's LLR, one without scores `unvoiced_syllable_llr`, each plus the duration prior.
+    /// its target's LLR on the nucleus's shape, one without scores `unvoiced_syllable_llr`, each
+    /// plus the duration prior of its span.
     fn best(&mut self, keys: &[TargetKey], pass: Pass) -> Result<Option<Path>, AssessError> {
         let (bounds, filler, scorer) = (&self.bounds, &self.filler, &mut self.scorer);
         let (rate, sigma) = (self.rate_s, self.dur_sigma);
@@ -375,10 +395,9 @@ impl<'a> Decoder<'a> {
         best_path(bounds, filler, keys.len(), pass, |i, j, s| {
             let (from, to) = (bounds[i], bounds[j]);
             let d_s = f64::from(to - from) * FRAME_S;
-            let llr = if filler.nuclei(from, to) == 0 {
-                unvoiced
-            } else {
-                f64::from(scorer.llr(from, to, keys[s])?)
+            let llr = match filler.nucleus_in(from, to) {
+                Some(n) => f64::from(scorer.llr(n, keys[s])?),
+                None => unvoiced,
             };
             Ok(llr + log_prior(d_s, rate, sigma))
         })

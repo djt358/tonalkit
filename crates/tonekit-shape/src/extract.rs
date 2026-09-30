@@ -1,6 +1,8 @@
 //! ToneShape extraction from an f0 track and a syllable span (spec §5, §7).
 
-use tonekit_core::{F0Track, MeasureIssue, Register, TbuSpan, ToneShape, CONTOUR_POINTS};
+use tonekit_core::{
+    F0Track, MeasureIssue, Register, TbuSpan, ToneShape, CONTOUR_POINTS, MAX_BRIDGED_GAP_FRAMES,
+};
 
 use crate::chao::{st_to_chao_f64, voiced_st};
 use crate::fit::{line_slope, quadratic_coefficient, turning_point};
@@ -57,8 +59,9 @@ pub struct Extracted {
 ///
 /// The voiced part runs from the first to the last voiced frame in the span (a voiced frame has
 /// an f0, `hz.is_some()`: the provider's own voicing decision, ruling R32); unvoiced frames inside
-/// it are filled by linear interpolation in semitones. `Err(Unvoiced)` if the span holds fewer than three voiced frames. A voiced part
-/// under 80 ms still yields a shape, flagged [`MeasureIssue::TooShort`].
+/// it are filled by linear interpolation in semitones. `Err(Unvoiced)` if the span holds fewer
+/// than three voiced frames. A voiced part under 80 ms still yields a shape, flagged
+/// [`MeasureIssue::TooShort`].
 ///
 /// - `contour[k]` is centred at fraction `k/(K−1)` of the voiced part and is the mean of the
 ///   (interpolated) curve over ±5 % of its duration: at least one frame wide, and narrowing
@@ -75,19 +78,69 @@ pub struct Extracted {
 ///   mean `voiced_p` of the voiced frames, the only place `voiced_p` enters.
 /// - `turning_point` follows ruling R4 (see the private `fit` module).
 pub fn extract(f0: &F0Track, span: &TbuSpan, r: &Register) -> Result<Extracted, MeasureIssue> {
+    let voiced = voiced_frames(f0, span);
+    shape_of(span, &voiced, r)
+}
+
+/// [`extract`] for the syllable whose nucleus is at frame `nucleus` (ruling R50): only the
+/// nucleus's own voiced run counts as the voiced part, so voiced frames elsewhere in `span` (pitch
+/// bleeding from a neighbouring syllable, a stray periodic noise) cannot bend its contour.
+///
+/// A voiced run is a maximal stretch of the span's voiced frames with no gap between consecutive
+/// ones longer than [`MAX_BRIDGED_GAP_FRAMES`], the definition octave repair uses (ruling R32).
+/// The nucleus's run is the one holding its frame, or, when the frame sits outside every run, the
+/// nearest one (the earlier on a tie). Everything else is as in [`extract`], with the run's
+/// frames as the span's voiced frames: `span`, `duration_ms` and the denominator of
+/// `voiced_fraction` stay the whole span's, and a run under three frames is `Err(Unvoiced)`.
+pub fn extract_nucleus(
+    f0: &F0Track,
+    span: &TbuSpan,
+    nucleus: u32,
+    r: &Register,
+) -> Result<Extracted, MeasureIssue> {
+    let voiced = voiced_frames(f0, span);
+    shape_of(span, own_run(&voiced, nucleus as usize), r)
+}
+
+/// A voiced frame of a span: (frame index, semitones, voiced_p).
+type Voiced = (usize, f64, f32);
+
+/// The voiced frames of `span` (clamped to the track), in frame order.
+fn voiced_frames(f0: &F0Track, span: &TbuSpan) -> Vec<Voiced> {
     let start = span.start_frame as usize;
     let end = (span.end_frame as usize).min(f0.frames.len());
-    if start >= end {
-        return Err(MeasureIssue::Unvoiced);
-    }
-
-    // Truly voiced frames: (frame index, semitones, voiced_p).
-    let voiced: Vec<(usize, f64, f32)> = (start..end)
+    (start..end)
         .filter_map(|i| {
             let frame = &f0.frames[i];
             voiced_st(frame).map(|st| (i, st, frame.voiced_p))
         })
-        .collect();
+        .collect()
+}
+
+/// The voiced run of `voiced` (in frame order) holding frame `at`, or the nearest to it; empty
+/// if there are no voiced frames.
+fn own_run(voiced: &[Voiced], at: usize) -> &[Voiced] {
+    let mut best: Option<(usize, &[Voiced])> = None;
+    let mut start = 0;
+    for end in 1..=voiced.len() {
+        let run_ends =
+            end == voiced.len() || voiced[end].0 - voiced[end - 1].0 > MAX_BRIDGED_GAP_FRAMES + 1;
+        if !run_ends {
+            continue;
+        }
+        let run = &voiced[start..end];
+        let (first, last) = (run[0].0, run[run.len() - 1].0);
+        let distance = first.saturating_sub(at).max(at.saturating_sub(last));
+        if best.is_none_or(|(d, _)| distance < d) {
+            best = Some((distance, run));
+        }
+        start = end;
+    }
+    best.map_or(&[], |(_, run)| run)
+}
+
+/// The shape of the syllable in `span` whose voiced frames are `voiced` (in frame order).
+fn shape_of(span: &TbuSpan, voiced: &[Voiced], r: &Register) -> Result<Extracted, MeasureIssue> {
     if voiced.len() < MIN_VOICED_FRAMES {
         return Err(MeasureIssue::Unvoiced);
     }
@@ -97,7 +150,7 @@ pub fn extract(f0: &F0Track, span: &TbuSpan, r: &Register) -> Result<Extracted, 
     let n = voiced[voiced.len() - 1].0 - first + 1;
     let mut st = vec![0.0_f64; n];
     let mut is_voiced = vec![false; n];
-    for &(i, s, _) in &voiced {
+    for &(i, s, _) in voiced {
         st[i - first] = s;
         is_voiced[i - first] = true;
     }

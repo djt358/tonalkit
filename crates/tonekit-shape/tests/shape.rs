@@ -816,3 +816,110 @@ fn the_initial_fall_of_spoken_4_1_3_reads_as_a_fall_on_real_pyin() {
         "{e:?}"
     );
 }
+
+// ---------------------------------------------------------------------------------------------
+// Ruling R50: a nucleus's shape comes from its own voiced run.
+// ---------------------------------------------------------------------------------------------
+
+/// A 60-frame track voiced (at `hz(i)`, `voiced_p` 0.8) exactly on the frames `voiced(i)` holds.
+fn track_where(voiced: impl Fn(u32) -> bool, hz: impl Fn(u32) -> f32) -> F0Track {
+    F0Track {
+        frames: (0..60)
+            .map(|i| F0Frame {
+                hz: voiced(i).then(|| hz(i)),
+                voiced_p: if voiced(i) { 0.8 } else { 0.0 },
+            })
+            .collect(),
+        provider: "x".into(),
+    }
+}
+
+fn span(start_frame: u32, end_frame: u32) -> TbuSpan {
+    TbuSpan {
+        start_frame,
+        end_frame,
+    }
+}
+
+#[test]
+fn a_nucleus_shape_ignores_voiced_frames_outside_its_own_run() {
+    // A level syllable at Chao 3 on frames 20..40, and two frames of high "bleed" at 44..46 after a
+    // three-frame hole: the bleed is a run of its own and plays no part.
+    let reg = register_for(100.0, 200.0);
+    let hz = |i: u32| {
+        let chao = if i < 42 { 3.0 } else { 5.0 };
+        tonekit_testkit::chao_to_hz(chao, 100.0, 200.0)
+    };
+    let with_bleed = track_where(|i| (20..40).contains(&i) || (43..46).contains(&i), hz);
+    let alone = track_where(|i| (20..40).contains(&i), hz);
+    let got = extract_nucleus(&with_bleed, &span(15, 50), 30, &reg).unwrap();
+    let want = extract(&alone, &span(15, 50), &reg).unwrap();
+    assert_eq!(got, want);
+    // Whereas the whole span's first..last voiced frame bends up into the bleed.
+    let whole = extract(&with_bleed, &span(15, 50), &reg).unwrap();
+    assert!(whole.shape.contour[9] > 4.0, "{whole:?}");
+    assert!((got.shape.contour[9] - 3.0).abs() < 0.05, "{got:?}");
+    // The span is the one asked for, and so are the fractions over it.
+    assert_eq!(got.shape.span, span(15, 50));
+    assert_eq!(got.shape.duration_ms, 350.0);
+    assert_abs_diff_eq!(got.shape.voiced_fraction, 20.0 / 35.0, epsilon = 1e-6);
+}
+
+#[test]
+fn a_run_bridges_holes_of_up_to_two_frames() {
+    let reg = register_for(100.0, 200.0);
+    let hz = |_| 150.0;
+    // Frames 20..30 and 32..40 (a two-frame hole): one run, so a nucleus in either half sees both.
+    let two = track_where(|i| (20..30).contains(&i) || (32..40).contains(&i), hz);
+    for nucleus in [22, 30, 36] {
+        let e = extract_nucleus(&two, &span(10, 50), nucleus, &reg).unwrap();
+        assert_eq!(e, extract(&two, &span(10, 50), &reg).unwrap(), "{nucleus}");
+    }
+    // A three-frame hole (20..30, 33..40) ends the run: each half is its own.
+    let three = track_where(|i| (20..30).contains(&i) || (33..40).contains(&i), hz);
+    let left = extract_nucleus(&three, &span(10, 50), 25, &reg).unwrap();
+    let right = extract_nucleus(&three, &span(10, 50), 35, &reg).unwrap();
+    assert_abs_diff_eq!(left.shape.voiced_fraction, 10.0 / 40.0, epsilon = 1e-6);
+    assert_abs_diff_eq!(right.shape.voiced_fraction, 7.0 / 40.0, epsilon = 1e-6);
+}
+
+#[test]
+fn a_nucleus_between_runs_takes_the_nearest() {
+    // Runs at 10..20 and 30..45; a nucleus at 23 is 4 frames from the first and 7 from the second.
+    let reg = register_for(100.0, 200.0);
+    let t = track_where(
+        |i| (10..20).contains(&i) || (30..45).contains(&i),
+        |_| 150.0,
+    );
+    let e = extract_nucleus(&t, &span(5, 50), 23, &reg).unwrap();
+    assert_abs_diff_eq!(e.shape.voiced_fraction, 10.0 / 45.0, epsilon = 1e-6);
+    let e = extract_nucleus(&t, &span(5, 50), 27, &reg).unwrap();
+    assert_abs_diff_eq!(e.shape.voiced_fraction, 15.0 / 45.0, epsilon = 1e-6);
+    // Only voiced frames inside the span count: a run cut by the span edge is what is left of it.
+    let e = extract_nucleus(&t, &span(15, 50), 12, &reg).unwrap();
+    assert_abs_diff_eq!(e.shape.voiced_fraction, 5.0 / 35.0, epsilon = 1e-6);
+}
+
+#[test]
+fn a_nucleus_run_too_short_for_a_shape_is_unvoiced() {
+    // The nucleus's run has two voiced frames; the span's other run would have given a shape.
+    let reg = register_for(100.0, 200.0);
+    let t = track_where(
+        |i| (10..12).contains(&i) || (30..45).contains(&i),
+        |_| 150.0,
+    );
+    assert_eq!(
+        extract_nucleus(&t, &span(5, 50), 11, &reg),
+        Err(MeasureIssue::Unvoiced)
+    );
+    assert!(extract(&t, &span(5, 50), &reg).is_ok());
+    let silent = track_where(|_| false, |_| 150.0);
+    assert_eq!(
+        extract_nucleus(&silent, &span(5, 50), 20, &reg),
+        Err(MeasureIssue::Unvoiced)
+    );
+    assert_eq!(
+        extract_nucleus(&t, &span(40, 40), 40, &reg),
+        Err(MeasureIssue::Unvoiced)
+    );
+}
