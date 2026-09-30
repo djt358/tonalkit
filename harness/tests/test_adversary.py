@@ -12,9 +12,9 @@ import pytest
 import tonekit_py
 from support import utterance, write_clip, write_manifest
 
-from tonekit_harness import adversary, cli, evaluate, manifest, synth
+from tonekit_harness import adversary, cli, evaluate, manifest, source, synth
 from tonekit_harness.evaluate import EvalError, Result
-from tonekit_harness.synth import SynthError
+from tonekit_harness.family import SynthError
 
 PACKS = Path(__file__).resolve().parents[2] / "packs" / "cmn"
 TONE_ERROR = {"tone_swap", "t3_no_dip", "neutral_full"}
@@ -22,22 +22,12 @@ NUISANCE = {"noise", "register_shift", "rate"}
 
 
 @pytest.fixture(scope="module")
-def pack_toml() -> str:
-    return (PACKS / "cmn.toml").read_text(encoding="utf-8")
-
-
-@pytest.fixture(scope="module")
-def calib_json() -> str:
-    return (PACKS / "cmn.calib.json").read_text(encoding="utf-8")
-
-
-@pytest.fixture(scope="module")
-def sources(tmp_path_factory, pack_toml, calib_json) -> list[synth.Source]:
+def sources(tmp_path_factory, pack_toml, calib_json) -> list[source.Source]:
     root = tmp_path_factory.mktemp("adversary-sources")
     made = []
     for cid, tones in [("adv-413", ["4", "1", "3"]), ("adv-152", ["1", "5", "2"])]:
         clip = write_clip(root, cid, 0.5 * utterance(tones), intended=tones, produced=tones)
-        made.append(synth.prepare(clip, root=root, pack_toml=pack_toml, calib_json=calib_json))
+        made.append(source.prepare(clip, root=root, pack_toml=pack_toml, calib_json=calib_json))
     return made
 
 
@@ -342,7 +332,7 @@ def register_manifest(tmp_path_factory) -> Path:
 
 
 def load(manifest_path):
-    return synth.load_sources(manifest_path, PACKS / "cmn.toml", PACKS / "cmn.calib.json", None)
+    return source.load_sources(manifest_path, PACKS / "cmn.toml", PACKS / "cmn.calib.json", None)
 
 
 def test_a_source_carries_its_speakers_register_and_is_analysed_with_it(

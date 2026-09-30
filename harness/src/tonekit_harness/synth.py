@@ -1,10 +1,9 @@
-"""Controlled resynthesis (spec §9): analyse a real, correct recording once with WORLD, then
-resynthesise it with its f0 replaced by a perturbed target contour. The timbre stays real, and the
-tone and f0 ground truth are exact.
+"""Controlled resynthesis (spec §9): resynthesise a real, correct recording with its f0 replaced by
+a perturbed target contour. The timbre stays real, and the tone and f0 ground truth are exact.
 
-`prepare` does the per-clip work (WORLD analysis, tonekit's syllable spans); `perturb` makes one
-perturbed clip from it; `tkh synth` samples many. Synthetic audio is for tests and diagnostics,
-never for fitting shipped calibration: every row's `source` is `synthetic-world`.
+`perturb` makes one perturbed clip from a prepared `source.Source`; `tkh synth` samples many.
+Synthetic audio is for tests and diagnostics, never for fitting shipped calibration: every row's
+`source` is `synthetic-world`.
 """
 
 from __future__ import annotations
@@ -13,163 +12,17 @@ import argparse
 import hashlib
 import json
 import sys
-from collections.abc import Sequence
-from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
-import tonekit_py
-from scipy.io import wavfile
 
-from . import evaluate, families, manifest, world
-from .families import PackTones, SynthError, Voice
-from .ingest import TARGET_SR
+from . import corpus, evaluate, families, source, world
+from .corpus import Made
+from .family import SynthError
 from .manifest import Clip, ManifestError
+from .source import Source
 
-MIN_VOICED_FRAMES = 5  # a syllable needs this many voiced frames to be redrawn (50 ms)
-MIN_REGISTER_ST = 4.0  # tonekit's minimum register width, expanded symmetrically
 PEAK = 0.99  # tonekit flags a clip with more than 1% of samples at or above this
-
-# One perturbed clip: its samples, the f0 truth per 10 ms frame (None where unvoiced), its row.
-Made = tuple[np.ndarray, list[float | None], Clip]
-
-
-@dataclass(frozen=True)
-class Source:
-    """A correct clip, analysed once and ready to perturb many times."""
-
-    clip: Clip
-    pcm: np.ndarray  # float32, 16 kHz
-    world: world.World
-    voice: Voice  # syllable extents, f0 in semitones, register (what the families see)
-    pack_toml: str
-    calib_json: str | None
-    accent: str
-    register_json: str | None  # the speaker's register from their register clips; None: cold
-
-
-# ---- analysis ---------------------------------------------------------------------------------
-
-
-def _semitones(hz: np.ndarray) -> np.ndarray:
-    """Semitones re 55 Hz, NaN where unvoiced (hz == 0)."""
-    voiced = hz > 0
-    return np.where(voiced, 12.0 * np.log2(np.where(voiced, hz, 55.0) / 55.0), np.nan)
-
-
-def register_bounds(voiced_st: np.ndarray) -> tuple[float, float]:
-    """The speaker's register as (floor, ceil) semitones: p5 and p95 of the voiced semitones, at
-    least `MIN_REGISTER_ST` wide (expanded symmetrically), Chao 1 and Chao 5."""
-    floor, ceil = (float(x) for x in np.percentile(voiced_st, [5, 95]))
-    if ceil - floor < MIN_REGISTER_ST:
-        mid = (floor + ceil) / 2.0
-        floor, ceil = mid - MIN_REGISTER_ST / 2.0, mid + MIN_REGISTER_ST / 2.0
-    return floor, ceil
-
-
-def _extents(
-    clip: Clip,
-    pcm: np.ndarray,
-    world_voiced: np.ndarray,
-    pack_toml: str,
-    calib_json: str | None,
-    accent: str,
-    register_json: str | None,
-) -> list[tuple[int, int] | None]:
-    """The voiced core [start, end) of each intended syllable, or None if it has none to redraw.
-
-    tonekit decodes the clip against its own intended reading (analysed with the speaker's
-    register, so the same way the grader will see it) to say where each syllable is. A decoded span can include silence or a
-    neighbour's tail, and WORLD calls some noise voiced, so the core is the run from the first to
-    the last frame that both WORLD and tonekit's pitch tracker call voiced within the span."""
-    analysis_json = evaluate.analyze_pcm(clip.id, pcm, register_json)
-    analysis = json.loads(analysis_json)
-    voiced = world_voiced & np.array([f["hz"] is not None for f in analysis["f0"]["frames"]])
-    intended = json.loads(manifest.to_candidate_json(clip.intended))
-    try:
-        decoded = tonekit_py.decode(
-            analysis_json,
-            pack_toml,
-            calib_json,
-            json.dumps(evaluate.grading_target(accent)),
-            json.dumps([intended]),
-        )
-    except ValueError as e:
-        raise evaluate.EvalError(f"{clip.id}: {e}") from e
-    syllables = json.loads(decoded)["candidates"][0]["syllables"]
-    if len(syllables) != len(clip.intended.tones):
-        raise SynthError(
-            f"{clip.id}: tonekit found {len(syllables)} syllables, "
-            f"not the intended {len(clip.intended.tones)}"
-        )
-    extents: list[tuple[int, int] | None] = []
-    for syllable in syllables:
-        start, end = syllable["span"]["start_frame"], syllable["span"]["end_frame"]
-        frames = np.flatnonzero(voiced[start:end])
-        if len(frames) < MIN_VOICED_FRAMES:
-            extents.append(None)
-        else:
-            extents.append((start + int(frames[0]), start + int(frames[-1]) + 1))
-    return extents
-
-
-def prepare(
-    clip: Clip,
-    *,
-    root: str | Path,
-    pack_toml: str,
-    calib_json: str | None = None,
-    accent: str | None = None,
-    register_json: str | None = None,
-) -> Source:
-    """Read `clip` (its `path` is relative to `root`) and do the once-per-clip analysis.
-
-    `register_json` is the speaker's register (see `evaluate.speaker_registers`); the clip's spans
-    are decoded with it, and `adversary.search` grades the clip's perturbations with it.
-
-    Only correct, non-synthetic clips can be perturbed: the label of a perturbed clip comes from
-    the family, and would be wrong for a clip that is already wrong or already synthetic."""
-    if clip.set == "synthetic":
-        raise SynthError(f"{clip.id}: a synthetic clip cannot be perturbed again")
-    if clip.label != "correct":
-        raise SynthError(
-            f"{clip.id}: labelled {clip.label!r}; only clips labelled 'correct' can be perturbed"
-        )
-    if Path(clip.id).name != clip.id or clip.id in {"", ".", ".."}:
-        raise SynthError(f"{clip.id!r}: the id must be usable as a file name")
-    pack = PackTones.parse(pack_toml)
-    unknown = [t for t in clip.intended.tones if t not in pack.chao]
-    if unknown:
-        raise SynthError(f"{clip.id}: tone {unknown[0]!r} is not in the pack")
-    accent = accent or evaluate.base_accent(pack_toml)
-
-    _, pcm = evaluate.read_wav(Path(root) / clip.path, clip.id)
-    analysed = world.analyse(pcm)
-    voiced = analysed.f0 > 0
-    extents = (
-        _extents(clip, pcm, voiced, pack_toml, calib_json, accent, register_json)
-        if voiced.any()
-        else []
-    )
-    if not any(extents):
-        raise SynthError(
-            f"{clip.id}: no syllable with at least {MIN_VOICED_FRAMES} voiced frames to perturb"
-        )
-
-    st = _semitones(analysed.f0)
-    floor, ceil = register_bounds(st[voiced])
-    voice = Voice(
-        tones=tuple(clip.intended.tones),
-        extents=tuple(extents),
-        st=st,
-        floor=floor,
-        ceil=ceil,
-        pack=pack,
-    )
-    return Source(clip, pcm, analysed, voice, pack_toml, calib_json, accent, register_json)
-
-
-# ---- perturbation -----------------------------------------------------------------------------
 
 
 def _resample_f0(st: np.ndarray, pos: np.ndarray) -> np.ndarray:
@@ -266,78 +119,11 @@ def _row(src: Source, fam: families.Family, p: dict, seed: int) -> Clip:
     )
 
 
-# ---- writing ----------------------------------------------------------------------------------
-
-
-def write_wav(out_dir: str | Path, clip: Clip, audio: np.ndarray) -> None:
-    """Write `audio` to `clip.path` under `out_dir` as a 16 kHz mono float32 WAV."""
-    path = Path(out_dir) / clip.path
-    path.parent.mkdir(parents=True, exist_ok=True)
-    wavfile.write(path, TARGET_SR, np.asarray(audio, dtype=np.float32))
-
-
-def write_index(out_dir: str | Path, clips: Sequence[Clip], truths: Sequence[list[float | None]]):
-    """Write `manifest.jsonl` and `truth.jsonl` (`{"id", "f0_hz"}` per clip, null if unvoiced)."""
-    out = Path(out_dir)
-    manifest.write(out / "manifest.jsonl", list(clips))
-    lines = (
-        json.dumps({"id": c.id, "f0_hz": f0}) + "\n" for c, f0 in zip(clips, truths, strict=True)
-    )
-    (out / "truth.jsonl").write_text("".join(lines), encoding="utf-8")
-
-
-def write_corpus(out_dir: str | Path, made: Sequence[Made]) -> None:
-    """Write perturbed clips (WAVs under `wav/`, the manifest and the truth) to `out_dir`."""
-    for audio, _, clip in made:
-        write_wav(out_dir, clip, audio)
-    write_index(out_dir, [c for _, _, c in made], [f0 for _, f0, _ in made])
-
-
 # ---- tkh synth --------------------------------------------------------------------------------
 
 
 def _plural(n: int, noun: str) -> str:
     return f"{n} {noun}{'' if n == 1 else 's'}"
-
-
-def load_sources(
-    manifest_path: str | Path, pack: str | Path, calib: str | Path | None, accent: str | None
-) -> list[Source]:
-    """`prepare` every non-synthetic clip labelled `correct` in the manifest, each with its
-    speaker's register (chained from their `register` clips exactly as `tkh eval` does; cold if
-    they have none). A clip with nothing to perturb is skipped with a warning; it is an error if
-    none can be perturbed."""
-    manifest_path = Path(manifest_path)
-    clips = manifest.load(manifest_path)
-    pack_toml = Path(pack).read_text(encoding="utf-8")
-    calib_json = Path(calib).read_text(encoding="utf-8") if calib else None
-    grader = evaluate.Grader(
-        pack_toml,
-        calib_json,
-        accent or evaluate.base_accent(pack_toml),
-        root=manifest_path.parent,
-        cache_dir=None,
-    )
-    registers = evaluate.speaker_registers(clips, grader)
-    candidates = [c for c in clips if c.label == "correct" and c.set != "synthetic"]
-    sources = []
-    for clip in candidates:
-        try:
-            sources.append(
-                prepare(
-                    clip,
-                    root=manifest_path.parent,
-                    pack_toml=pack_toml,
-                    calib_json=calib_json,
-                    accent=accent,
-                    register_json=registers[clip.speaker],
-                )
-            )
-        except SynthError as e:
-            print(f"warning: skipping {e}", file=sys.stderr)
-    if not sources:
-        raise SynthError(f"{manifest_path}: no clip labelled 'correct' can be perturbed")
-    return sources
 
 
 def add_source_args(p: argparse.ArgumentParser) -> None:
@@ -356,7 +142,7 @@ def _run(args: argparse.Namespace) -> int:
     try:
         if args.per_clip < 1:
             raise SynthError(f"--per-clip must be at least 1, not {args.per_clip}")
-        sources = load_sources(args.manifest, args.pack, args.calib, args.accent)
+        sources = source.load_sources(args.manifest, args.pack, args.calib, args.accent)
         pool = families.searched(("tone_error", "graded", "correct"))
         bounds = families.resolve_pool_bounds(pool, None)
         rng = np.random.default_rng(args.seed)
@@ -365,7 +151,7 @@ def _run(args: argparse.Namespace) -> int:
             for _ in range(args.per_clip):
                 fam, params = families.draw(src.voice, rng, pool, bounds)
                 made.append(perturb(src, fam.name, params, int(rng.integers(2**31))))
-        write_corpus(args.out, made)
+        corpus.write_corpus(args.out, made)
     except (ManifestError, evaluate.EvalError, SynthError, OSError) as e:
         print(f"error: {e}", file=sys.stderr)
         return 1

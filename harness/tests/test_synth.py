@@ -1,6 +1,6 @@
-"""WORLD resynthesis and the perturbation families, on the numpy harmonic test voice (never DJ's
-audio). Each family is checked through the ground-truth f0 it reports, which is exactly the f0
-handed to WORLD; the direction check at the end asks tonekit itself."""
+"""`synth.perturb` and `tkh synth`: what a perturbed clip is (audio, ground-truth f0, manifest row),
+determinism, refusals, and the direction check that asks tonekit itself. The families' effects are
+in test_family_effects.py, the source in test_source.py, the files written in test_corpus.py."""
 
 from __future__ import annotations
 
@@ -11,96 +11,13 @@ from pathlib import Path
 import numpy as np
 import pytest
 from support import RATE, utterance, write_clip, write_manifest
+from synth_support import HOP, PACKS, quiet_clip, semitones
 
-from tonekit_harness import cli, evaluate, manifest, synth, world
+from tonekit_harness import cli, evaluate, manifest, source, synth
 from tonekit_harness.families import FAMILIES
-from tonekit_harness.synth import SynthError
-
-PACKS = Path(__file__).resolve().parents[2] / "packs" / "cmn"
-HOP = 160
-
-
-@pytest.fixture(scope="module")
-def pack_toml() -> str:
-    return (PACKS / "cmn.toml").read_text(encoding="utf-8")
-
-
-@pytest.fixture(scope="module")
-def calib_json() -> str:
-    return (PACKS / "cmn.calib.json").read_text(encoding="utf-8")
-
-
-@pytest.fixture(scope="module")
-def root(tmp_path_factory) -> Path:
-    return tmp_path_factory.mktemp("synth-sources")
-
-
-def quiet_clip(root: Path, cid: str, tones: list[str], **kw):
-    """A support-voice clip at half amplitude, so resynthesis plus noise cannot clip."""
-    return write_clip(root, cid, 0.5 * utterance(tones), intended=tones, produced=tones, **kw)
-
-
-@pytest.fixture(scope="module")
-def src(root, pack_toml, calib_json) -> synth.Source:
-    """T4 T1 T3: syllable 1 is level, syllable 2 dips."""
-    clip = quiet_clip(root, "src-413", ["4", "1", "3"])
-    return synth.prepare(clip, root=root, pack_toml=pack_toml, calib_json=calib_json)
-
-
-@pytest.fixture(scope="module")
-def src_neutral(root, pack_toml, calib_json) -> synth.Source:
-    """T1 T5 T2: syllable 1 is the neutral tone."""
-    clip = quiet_clip(root, "src-152", ["1", "5", "2"])
-    return synth.prepare(clip, root=root, pack_toml=pack_toml, calib_json=calib_json)
-
-
-def semitones(hz: list[float | None]) -> np.ndarray:
-    return np.array([np.nan if h is None else 12 * np.log2(h / 55.0) for h in hz])
-
-
-def core(src: synth.Source, truth: list[float | None], index: int) -> np.ndarray:
-    """The truth's semitones over syllable `index`'s voiced core, unvoiced frames dropped."""
-    start, end = src.voice.extents[index]
-    st = semitones(truth)[start:end]
-    return st[~np.isnan(st)]
-
-
-# ---- WORLD ---------------------------------------------------------------------------------------
-
-
-@pytest.mark.parametrize("extra", [0, 1, 79, 159])
-def test_world_analysis_is_on_tonekits_grid(extra):
-    pcm = np.concatenate([utterance(["1", "2"]), np.zeros(extra, dtype=np.float32)])
-    w = world.analyse(pcm)
-    assert len(w.f0) == len(w.sp) == len(w.ap) == len(pcm) // 160 + 1
-    assert len(world.synthesise(w, len(pcm))) == len(pcm)
-    assert world.synthesise(w).dtype == np.float32
-
-
-def test_world_resynthesis_keeps_the_pitch(src):
-    """Analysing the identity resynthesis again finds the pitch that was given."""
-    audio, truth, _ = synth.perturb(src, "identity", {}, 0)
-    assert [h is not None for h in truth] == list(src.world.f0 > 0)
-    again = world.analyse(audio).f0
-    both = (again > 0) & (src.world.f0 > 0)
-    assert both.sum() > 50
-    off = 12 * np.log2(again[both] / src.world.f0[both])
-    assert np.median(np.abs(off)) < 0.5  # semitones
-
+from tonekit_harness.family import SynthError
 
 # ---- the brief's checks --------------------------------------------------------------------------
-
-
-def test_tone_swap_of_a_level_syllable_to_4_falls_over_the_syllable(src):
-    _, truth, row = synth.perturb(src, "tone_swap", {"index": 1, "to": "4"}, 1)
-    _, identity, _ = synth.perturb(src, "identity", {}, 1)
-
-    fall = core(src, truth, 1)
-    assert row.label == "tone_error"
-    assert fall[0] - fall[-1] > 6.0  # a T4 falls most of the register
-    assert np.all(np.diff(fall) <= 1e-9)  # and falls all the way
-    level = core(src, identity, 1)
-    assert abs(level[0] - level[-1]) < 1.5  # the source syllable it replaced was level
 
 
 def test_noise_leaves_f0_unchanged_and_is_correct(src):
@@ -152,180 +69,6 @@ def test_rate_shortens_when_faster_and_truth_stays_on_the_new_grid(src):
     assert np.nanmedian(semitones(fast_truth)) == pytest.approx(ident, abs=0.5)
 
 
-# ---- the families' effects on the ground truth ---------------------------------------------------
-
-
-def test_unvoiced_frames_stay_none_in_the_truth(src):
-    _, truth, _ = synth.perturb(src, "tone_swap", {"index": 1, "to": "2"}, 0)
-    assert [h is None for h in truth] == list(src.world.f0 == 0)
-
-
-def test_register_shift_moves_the_voiced_truth_by_the_given_semitones(src):
-    _, shifted, _ = synth.perturb(src, "register_shift", {"st": 3.0}, 0)
-    _, identity, _ = synth.perturb(src, "identity", {}, 0)
-    assert [h is None for h in shifted] == [h is None for h in identity]
-    diff = semitones(shifted) - semitones(identity)
-    assert np.nanmax(np.abs(diff - 3.0)) < 1e-6
-
-
-def test_range_compress_narrows_the_range_about_the_midline(src):
-    _, squeezed, _ = synth.perturb(src, "range_compress", {"factor": 0.5}, 0)
-    _, identity, _ = synth.perturb(src, "identity", {}, 0)
-    mid = (src.voice.floor + src.voice.ceil) / 2
-    assert np.nanmax(np.abs(semitones(squeezed) - (mid + 0.5 * (semitones(identity) - mid)))) < 1e-6
-
-
-def test_t3_no_dip_renders_a_low_rise_where_the_source_dips(src):
-    _, truth, row = synth.perturb(src, "t3_no_dip", {"index": 2}, 0)
-    rise = core(src, truth, 2)
-    assert np.all(np.diff(rise) >= -1e-9) and rise[-1] - rise[0] > 2.0
-    assert row.label == "tone_error"
-    assert row.produced_tones == ["4", "1", "2"]  # a T3 without its dip is heard as a T2
-
-
-def test_turn_shift_moves_the_turning_point_by_the_given_time(src):
-    turn = {}
-    for ms in (-80.0, 80.0):
-        _, truth, row = synth.perturb(src, "turn_shift", {"index": 2, "ms": ms}, 0)
-        turn[ms] = int(np.nanargmin(semitones(truth)[slice(*src.voice.extents[2])]))
-        assert row.label == "graded"
-    assert (turn[80.0] - turn[-80.0]) * 10 == pytest.approx(160, abs=20)  # frames of 10 ms
-
-
-def test_onset_and_offset_shift_move_only_their_end_of_the_contour(src):
-    _, base, _ = synth.perturb(src, "onset_shift", {"index": 0, "chao": 0.5}, 0)
-    _, up, _ = synth.perturb(src, "onset_shift", {"index": 0, "chao": 1.5}, 0)
-    _, down, _ = synth.perturb(src, "offset_shift", {"index": 0, "chao": -1.5}, 0)
-    _, plain, _ = synth.perturb(src, "offset_shift", {"index": 0, "chao": 0.5}, 0)
-    register = src.voice.ceil - src.voice.floor
-    assert core(src, up, 0)[0] - core(src, base, 0)[0] == pytest.approx(register / 4, abs=0.05)
-    assert core(src, up, 0)[-1] == pytest.approx(core(src, base, 0)[-1], abs=0.05)
-    assert core(src, plain, 0)[-1] - core(src, down, 0)[-1] == pytest.approx(
-        2 * register / 4, abs=0.05
-    )
-    assert core(src, plain, 0)[0] == pytest.approx(core(src, down, 0)[0], abs=0.05)
-
-
-def test_neutral_full_gives_a_neutral_syllable_a_full_tone(src_neutral):
-    _, truth, row = synth.perturb(src_neutral, "neutral_full", {"index": 1, "to": "1"}, 0)
-    level = core(src_neutral, truth, 1)
-    assert np.ptp(level) < 0.1  # T1 is level, at the top of the register
-    assert level[0] == pytest.approx(src_neutral.voice.ceil, abs=0.05)
-    assert row.label == "tone_error" and row.produced_tones == ["1", "1", "2"]
-
-
-def test_the_join_is_blended_over_two_frames_each_side_of_the_syllable(src):
-    """The source's syllable 2 has voiced frames (WORLD's, not tonekit's) just before its core;
-    they move 2/3 and then 1/3 of the way toward the new contour's onset; the frame after is
-    untouched."""
-    start, _ = src.voice.extents[2]
-    assert src.world.f0[start - 3 : start].all()  # the voiced neighbours this test relies on
-    _, truth, _ = synth.perturb(src, "tone_swap", {"index": 2, "to": "2"}, 0)
-    _, identity, _ = synth.perturb(src, "identity", {}, 0)
-    new, old = semitones(truth), semitones(identity)
-    onset = new[start]
-    assert new[start - 1] == pytest.approx(2 / 3 * onset + 1 / 3 * old[start - 1])
-    assert new[start - 2] == pytest.approx(1 / 3 * onset + 2 / 3 * old[start - 2])
-    assert new[start - 3] == pytest.approx(old[start - 3])
-    assert abs(new[start - 1] - onset) < abs(old[start - 1] - onset)  # a smaller jump than before
-
-
-def test_a_neutral_syllable_is_perturbed_from_the_context_fallback_contour(src_neutral):
-    """The neutral tone has no citation contour in the pack; the harness draws it as 3 -> 2."""
-    register = src_neutral.voice.ceil - src_neutral.voice.floor
-    _, truth, row = synth.perturb(src_neutral, "onset_shift", {"index": 1, "chao": 1.0}, 0)
-    contour = core(src_neutral, truth, 1)
-    assert contour[0] == pytest.approx(src_neutral.voice.floor + 3.0 / 4 * register, abs=0.05)
-    assert contour[-1] == pytest.approx(src_neutral.voice.floor + 1.0 / 4 * register, abs=0.05)
-    assert row.label == "graded" and row.produced_tones == ["1", "5", "2"]
-    with pytest.raises(SynthError, match="turn_shift: index 1 is not a syllable"):
-        synth.perturb(src_neutral, "turn_shift", {"index": 1, "ms": 60.0}, 0)
-
-
-def test_the_new_contour_is_drawn_in_the_sources_own_register(src):
-    """T4's onset is Chao 5, the source register's ceiling; its end is Chao 1, the floor."""
-    _, truth, _ = synth.perturb(src, "tone_swap", {"index": 1, "to": "4"}, 0)
-    fall = core(src, truth, 1)
-    assert fall[0] == pytest.approx(src.voice.ceil, abs=0.05)
-    assert fall[-1] == pytest.approx(src.voice.floor, abs=0.05)
-
-
-def test_the_register_is_the_voiced_p5_to_p95(src):
-    voiced = 12 * np.log2(src.world.f0[src.world.f0 > 0] / 55.0)
-    p5, p95 = np.percentile(voiced, [5, 95])
-    assert (src.voice.floor, src.voice.ceil) == pytest.approx((p5, p95))
-    assert src.voice.ceil - src.voice.floor > 4.0  # the support voice spans an octave
-
-
-def test_a_narrow_register_is_widened_symmetrically_to_4_st():
-    level = np.full(50, 20.0)
-    assert synth.register_bounds(level) == pytest.approx((18.0, 22.0))
-    assert synth.register_bounds(np.linspace(19.0, 21.0, 50)) == pytest.approx((18.0, 22.0))
-    wide = np.linspace(10.0, 20.0, 101)
-    assert synth.register_bounds(wide) == pytest.approx((10.5, 19.5))  # p5 and p95, untouched
-
-
-# ---- bounds and validation -----------------------------------------------------------------------
-
-
-@pytest.mark.parametrize(
-    ("family", "params", "message"),
-    [
-        ("range_compress", {"factor": 0.3}, r"range_compress: factor 0\.3 is outside \[0\.4, 0\.8"),
-        ("range_compress", {"factor": 0.9}, r"range_compress: factor 0\.9 is outside"),
-        ("turn_shift", {"index": 2, "ms": 30.0}, r"turn_shift: ms 30 is outside a magnitude in"),
-        ("turn_shift", {"index": 2, "ms": -130.0}, r"turn_shift: ms -130 is outside"),
-        ("onset_shift", {"index": 0, "chao": 0.2}, r"onset_shift: chao 0\.2 is outside"),
-        ("offset_shift", {"index": 0, "chao": 1.6}, r"offset_shift: chao 1\.6 is outside"),
-        ("noise", {"snr_db": 4.0}, r"noise: snr_db 4 is outside \[5, 20\]"),
-        ("noise", {"snr_db": 21.0}, r"noise: snr_db 21 is outside"),
-        ("register_shift", {"st": 6.5}, r"register_shift: st 6\.5 is outside \[-6, 6\]"),
-        ("rate", {"factor": 1.3}, r"rate: factor 1\.3 is outside \[0\.8, 1\.25\]"),
-        ("rate", {"factor": float("nan")}, r"rate: factor nan is not a finite number"),
-        ("rate", {"factor": "fast"}, r"rate: factor 'fast' is not a finite number"),
-        ("tone_swap", {"index": 1, "to": "1"}, r"tone_swap: to '1' must be one of \['2', '3'"),
-        ("tone_swap", {"index": 1, "to": "5"}, r"tone_swap: to '5' must be one of"),
-        ("tone_swap", {"index": 7, "to": "2"}, r"tone_swap: index 7 is not a syllable"),
-        ("tone_swap", {"index": True, "to": "2"}, r"tone_swap: index True is not a syllable"),
-        ("t3_no_dip", {"index": 0}, r"t3_no_dip: index 0 is not a syllable this family can target"),
-        ("neutral_full", {"index": 1, "to": "2"}, r"neutral_full: index 1 is not a syllable"),
-        ("turn_shift", {"index": 0, "ms": 60.0}, r"turn_shift: index 0 is not a syllable"),
-        ("tone_swap", {"index": 1}, r"tone_swap: missing parameter 'to'"),
-        ("noise", {}, r"noise: missing parameter 'snr_db'"),
-        ("noise", {"snr_db": 10.0, "colour": "pink"}, r"noise: unknown parameter 'colour'"),
-        ("noise", {"snr_db": 10.0, "noise_wav": 3}, r"noise: noise_wav 3 is not a path"),
-        ("teleport", {}, r"unknown family 'teleport'; known: identity, tone_swap"),
-    ],
-)
-def test_out_of_bounds_or_invalid_parameters_are_a_synth_error(src, family, params, message):
-    with pytest.raises(SynthError, match=message):
-        synth.perturb(src, family, params, 0)
-
-
-def test_every_bound_is_inclusive(src):
-    for family, params in [
-        ("range_compress", {"factor": 0.4}),
-        ("range_compress", {"factor": 0.8}),
-        ("turn_shift", {"index": 2, "ms": -40.0}),
-        ("turn_shift", {"index": 2, "ms": 120.0}),
-        ("noise", {"snr_db": 5.0}),
-        ("noise", {"snr_db": 20.0}),
-        ("register_shift", {"st": 6.0}),
-        ("rate", {"factor": 0.8}),
-        ("rate", {"factor": 1.25}),
-    ]:
-        synth.perturb(src, family, params, 0)
-
-
-def test_the_neutral_tone_is_never_a_tone_swap_source_or_target(src_neutral):
-    with pytest.raises(SynthError, match="tone_swap: index 1 is not a syllable"):
-        synth.perturb(src_neutral, "tone_swap", {"index": 1, "to": "2"}, 0)
-    with pytest.raises(SynthError, match="tone_swap: to '5' must be one of"):
-        synth.perturb(src_neutral, "tone_swap", {"index": 0, "to": "5"}, 0)
-    with pytest.raises(SynthError, match="neutral_full: to '5' must be one of"):
-        synth.perturb(src_neutral, "neutral_full", {"index": 1, "to": "5"}, 0)
-
-
 # ---- the manifest rows ---------------------------------------------------------------------------
 
 
@@ -375,37 +118,6 @@ def test_the_id_depends_on_the_family_the_parameters_and_the_seed(src):
     assert synth.perturb(src, "noise", {"snr_db": 10.0}, 0)[2].id in ids
 
 
-def test_rows_round_trip_through_write_and_load_and_the_truth_lines_up(src, tmp_path):
-    made = [
-        synth.perturb(src, "tone_swap", {"index": 1, "to": "4"}, 0),
-        synth.perturb(src, "noise", {"snr_db": 10.0}, 0),
-        synth.perturb(src, "rate", {"factor": 1.25}, 0),
-    ]
-    synth.write_corpus(tmp_path, made)
-
-    rows = manifest.load(tmp_path / "manifest.jsonl")
-    assert rows == [clip for _, _, clip in made]
-    truth = [json.loads(line) for line in (tmp_path / "truth.jsonl").read_text().splitlines()]
-    assert [t["id"] for t in truth] == [c.id for c in rows]
-    for t, (_, f0, _) in zip(truth, made, strict=True):
-        assert t["f0_hz"] == f0
-        assert any(h is None for h in t["f0_hz"]) and any(h is not None for h in t["f0_hz"])
-    for audio, _, clip in made:
-        _, back = evaluate.read_wav(tmp_path / clip.path, clip.id)
-        np.testing.assert_array_equal(back, audio)
-
-
-def test_synthetic_rows_are_gradable_by_evaluate_unchanged(src, tmp_path, pack_toml, calib_json):
-    made = [synth.perturb(src, "noise", {"snr_db": 20.0}, 0), synth.perturb(src, "identity", {}, 0)]
-    synth.write_corpus(tmp_path, made)
-    results = evaluate.run(
-        manifest.load(tmp_path / "manifest.jsonl"), pack_toml, calib_json, None,
-        root=tmp_path, use_cache=False,
-    )  # fmt: skip
-    assert [r.set for r in results] == ["synthetic", "synthetic"]
-    assert all(r.overall is not None for r in results)
-
-
 # ---- determinism and refusals --------------------------------------------------------------------
 
 
@@ -442,47 +154,9 @@ def test_a_noise_recording_can_be_supplied_and_is_looped(src, tmp_path):
 
 def test_output_never_exceeds_full_scale(root, pack_toml):
     loud = write_clip(root, "src-loud", 1.9 * utterance(["4", "1", "3"]), intended=["4", "1", "3"])
-    source = synth.prepare(loud, root=root, pack_toml=pack_toml)
-    audio, _, _ = synth.perturb(source, "noise", {"snr_db": 5.0}, 0)
+    loud_src = source.prepare(loud, root=root, pack_toml=pack_toml)
+    audio, _, _ = synth.perturb(loud_src, "noise", {"snr_db": 5.0}, 0)
     assert np.abs(audio).max() <= 0.99
-
-
-def test_sources_that_would_be_mislabelled_are_refused(root, pack_toml):
-    synthetic = quiet_clip(root, "already-synthetic", ["1", "2"], set="synthetic")
-    with pytest.raises(SynthError, match="already-synthetic.*synthetic"):
-        synth.prepare(synthetic, root=root, pack_toml=pack_toml)
-    wrong = quiet_clip(root, "wrong-tones", ["1", "2"], label="tone_error")
-    with pytest.raises(SynthError, match="wrong-tones.*tone_error.*correct"):
-        synth.prepare(wrong, root=root, pack_toml=pack_toml)
-
-
-def test_a_clip_with_nothing_to_target_is_refused_naming_it(root, pack_toml):
-    silence = write_clip(root, "silent", np.zeros(RATE, dtype=np.float32), intended=["1"])
-    with pytest.raises(SynthError, match="silent.*no syllable"):
-        synth.prepare(silence, root=root, pack_toml=pack_toml)
-
-
-def test_a_missing_wav_is_an_eval_error_naming_the_clip(root, pack_toml):
-    ghost = quiet_clip(root, "ghost", ["1"])
-    (root / ghost.path).unlink()
-    with pytest.raises(evaluate.EvalError, match="ghost.*cannot read"):
-        synth.prepare(ghost, root=root, pack_toml=pack_toml)
-
-
-def test_an_intended_tone_the_pack_lacks_is_refused(root, pack_toml):
-    odd = write_clip(root, "odd-tone", 0.5 * utterance(["1", "2"]), intended=["1", "9"])
-    with pytest.raises(SynthError, match="odd-tone.*tone '9' is not in the pack"):
-        synth.prepare(odd, root=root, pack_toml=pack_toml)
-
-
-def test_prepare_finds_a_span_for_each_syllable_and_uses_the_pack_accent(src, pack_toml):
-    assert src.voice.tones == ("4", "1", "3")
-    assert all(extent is not None for extent in src.voice.extents)
-    starts = [e[0] for e in src.voice.extents]
-    assert starts == sorted(starts)
-    assert src.accent == "cmn-standard" == evaluate.base_accent(pack_toml)
-    for start, end in src.voice.extents:
-        assert end - start >= 5 and np.isfinite(src.voice.st[start:end]).sum() >= 5
 
 
 # ---- the direction check -------------------------------------------------------------------------

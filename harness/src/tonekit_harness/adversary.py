@@ -4,12 +4,14 @@ keep the cases where tonekit is wrong.
 A trial perturbs one source with a random tone-error or nuisance family and asks tonekit to grade
 the result against the source's intended reading, the way `tkh eval` grades a clip: analysed with
 the speaker's register (from their register clips, if the manifest has any; cold otherwise) and
-scored by the same `assess`. That keeps θ, typically fitted on `tkh eval` scores, comparable. The overall score is accepted at or above θ
-(no score, "tone not checked", is a rejection). A find is a false accept (a tone error tonekit
-accepts) or a false reject (a nuisance-only clip, which a listener would accept, that tonekit
-rejects). Graded families have no binary truth, so they are not searched. Finds sit near the
-perceptual boundary, where the label itself is uncertain: they are marked `needs_listen` and never
-become fixtures or move a threshold before DJ has listened to them.
+scored by the same `assess`. That keeps θ, typically fitted on `tkh eval` scores, comparable.
+
+The overall score is accepted at or above θ (no score, "tone not checked", is a rejection). A find
+is a false accept (a tone error tonekit accepts) or a false reject (a nuisance-only clip, which a
+listener would accept, that tonekit rejects). Graded families have no binary truth, so they are not
+searched. Finds sit near the perceptual boundary, where the label itself is uncertain: they are
+marked `needs_listen` and never become fixtures or move a threshold before DJ has listened to
+them.
 """
 
 from __future__ import annotations
@@ -21,9 +23,10 @@ from pathlib import Path
 
 import numpy as np
 
-from . import evaluate, families, synth
+from . import corpus, evaluate, families, source, synth
+from .family import SynthError
 from .manifest import Clip, ManifestError
-from .synth import Source, SynthError
+from .source import Source
 
 BoundOverrides = Mapping[str, Mapping[str, tuple[float, float]]]
 
@@ -61,10 +64,11 @@ def search(
 
     `bounds` maps a family to `{parameter: (lo, hi)}` to narrow the spec's bounds (for a signed
     parameter, a magnitude); anything outside the spec's is a `SynthError`. The search is
-    deterministic in `seed`. Each trial is graded with its source's register (`Source.register_json`,
-    the speaker's, so as `tkh eval` grades that speaker's clips) and each find records whether that
-    register was `given` or `cold`. A trial in which tonekit raises is counted as failed and
-    skipped."""
+    deterministic in `seed`.
+
+    Each trial is graded with its source's register (`Source.register_json`: the speaker's, as
+    `tkh eval` grades that speaker's clips), and each find records whether that register was
+    `given` or `cold`. A trial in which tonekit raises is counted as failed and skipped."""
     if not sources:
         raise SynthError("no sources to search")
     if n_trials < 0:
@@ -110,13 +114,13 @@ def search(
                 },
             }
         )
-        synth.write_wav(out_dir, row, audio)
+        corpus.write_wav(out_dir, row, audio)
         found.append((row, truth, score))
 
     accepts = sorted((f for f in found if f[0].label == "tone_error"), key=_accept_order)
     rejects = sorted((f for f in found if f[0].label == "correct"), key=_reject_order)
     ordered = accepts + rejects
-    synth.write_index(out_dir, [c for c, _, _ in ordered], [t for _, t, _ in ordered])
+    corpus.write_index(out_dir, [c for c, _, _ in ordered], [t for _, t, _ in ordered])
     return Finds([c for c, _, _ in ordered], n_trials, failed)
 
 
@@ -133,7 +137,7 @@ def _reject_order(find: tuple[Clip, list, float | None]) -> tuple[float, str]:
 
 def _run(args: argparse.Namespace) -> int:
     try:
-        sources = synth.load_sources(args.manifest, args.pack, args.calib, args.accent)
+        sources = source.load_sources(args.manifest, args.pack, args.calib, args.accent)
         finds = search(sources, args.trials, None, args.seed, args.theta, out_dir=args.out)
     except (ManifestError, evaluate.EvalError, SynthError, OSError) as e:
         print(f"error: {e}", file=sys.stderr)
