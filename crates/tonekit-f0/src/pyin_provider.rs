@@ -10,8 +10,17 @@ const FRAME_LENGTH: usize = 1024;
 const WIN_LENGTH: usize = FRAME_LENGTH / 2;
 /// Pitch-bin resolution is pYIN's default of 10 bins per semitone.
 const BINS_PER_SEMITONE: f64 = 10.0;
-/// Bins pYIN's pitch-transition kernel spans: `round(35.92 oct/s * 12 * HOP / sr) * 10 + 1`.
-const TRANSITION_WIDTH: usize = 41;
+/// pYIN's default fastest pitch change, in octaves per second.
+const MAX_TRANSITION_RATE: f64 = 35.92;
+
+/// Bins pYIN's pitch-transition kernel spans: the most whole semitones the pitch may move in one
+/// hop, `round(35.92 oct/s · 12 · HOP / sr)`, in bins, plus one (41 at 16 kHz and a 160-sample
+/// hop).
+fn transition_width() -> f64 {
+    let semitones_per_hop =
+        (MAX_TRANSITION_RATE * 12.0 * HOP as f64 / f64::from(SAMPLE_RATE)).round();
+    semitones_per_hop * BINS_PER_SEMITONE + 1.0
+}
 /// Samples the signal is advanced by before pYIN sees it (ruling R24).
 ///
 /// The `pyin` crate mirrors librosa: the YIN template is the *first* `WIN_LENGTH` samples of each
@@ -74,7 +83,7 @@ impl Pyin {
             return false;
         }
         let pitch_bins = (12.0 * BINS_PER_SEMITONE * (fmax / fmin).log2()).floor() + 1.0;
-        pitch_bins > TRANSITION_WIDTH as f64
+        pitch_bins > transition_width()
     }
 }
 
@@ -125,5 +134,15 @@ impl F0Provider for Pyin {
             .collect();
         // Centred framing already gives `pcm.len() / HOP + 1` frames; this only guards the count.
         fit_length(track, n_frames)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_transition_kernel_is_pyins_41_bins() {
+        assert_eq!(transition_width(), 41.0);
     }
 }

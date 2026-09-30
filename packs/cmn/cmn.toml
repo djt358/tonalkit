@@ -1,6 +1,6 @@
 [pack]
 lect = "cmn"
-version = "0.2.0"
+version = "0.3.0"
 tbu = "syllable"
 capabilities = ["register"]
 base_accent = "cmn-standard"

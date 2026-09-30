@@ -52,6 +52,8 @@ use tonekit_core::{Register, HOP, SAMPLE_RATE};
 const REF_HZ: f64 = 55.0;
 /// Harmonics are generated while `h·f0` is below this.
 const MAX_HARMONIC_HZ: f64 = 4000.0;
+/// ...and f0 counts as at least this for that bound (at most 4 000 harmonics).
+const MIN_HARMONIC_F0_HZ: f64 = 1.0;
 const RAMP_MS: f64 = 20.0;
 /// Unvoiced-onset noise sigma, relative to the voiced peak.
 const ONSET_NOISE: f64 = 0.1;
@@ -154,8 +156,10 @@ fn ramp_gain(k: usize, ramp: usize) -> f64 {
     }
 }
 
-/// `sum_{h·f0 < 4 kHz} sin(h·phase)/h`.
+/// `sum_{h·f0 < 4 kHz} sin(h·phase)/h`, with f0 taken as at least 1 Hz so that an absurd contour
+/// (a Chao value far below the floor maps to nearly 0 Hz) cannot ask for millions of harmonics.
 fn harmonic_sum(phase: f64, f0_hz: f64) -> f64 {
+    let f0_hz = f0_hz.max(MIN_HARMONIC_F0_HZ);
     let mut acc = 0.0;
     let mut h = 1.0_f64;
     while h * f0_hz < MAX_HARMONIC_HZ {

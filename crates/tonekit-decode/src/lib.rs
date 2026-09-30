@@ -6,6 +6,8 @@
 //!   log-duration prior, and charges what it leaves unused (hesitations, restarts, extra words)
 //!   as filler per speech frame plus an insertion per nucleus. Candidates compete in one softmax
 //!   with a null "something else was said" competitor.
+//! - Tone evidence is per nucleus (ruling R50): one shape each, on its tone-bearing unit, shared
+//!   by every candidate, the null competitor and the lattice, so no reading chooses its frames.
 //! - [`lattice`] gives one tone-bearing unit per nucleus with per-tone likelihoods and posteriors
 //!   from forward–backward over (previous tone, current tone), so context-dependent realisations
 //!   (the neutral tone, the half third) are scored in context.
@@ -33,9 +35,10 @@ const LOG_CLAMP: f64 = 1.0e6;
 
 /// Scores `candidates` against the utterance in `a`, graded against `g`.
 ///
-/// Each candidate's `llr` is its best path: the sum of its syllables' target LLRs and duration
-/// priors, less `filler_per_frame` for every speech frame and plus `insertion_llr` for every
-/// nucleus that no syllable covers. Each syllable holds exactly one nucleus; only if that places
+/// Each candidate's `llr` is its best path: the sum of its syllables' target LLRs (each on the
+/// shape of the nucleus it holds, the same for every candidate) and duration priors, less
+/// `filler_per_frame` for every speech frame and plus `insertion_llr` for every nucleus that no
+/// syllable covers. Each syllable holds exactly one nucleus; only if that places
 /// no path does a relaxed pass allow syllables without one, which score `unvoiced_syllable_llr`
 /// and are reported `Partial { [Unvoiced] }` (likely misses, ruling R33). A candidate whose
 /// targets cannot all be placed scores `K × unvoiced_syllable_llr` with every syllable at an empty

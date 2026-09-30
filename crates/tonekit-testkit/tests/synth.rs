@@ -287,6 +287,15 @@ fn harmonics_are_one_over_h_and_stop_below_4_khz() {
 }
 
 #[test]
+fn a_pitch_near_zero_still_renders() {
+    // A Chao value far below the floor is a pitch of almost 0 Hz, which once asked for endless
+    // harmonics: the harmonic count is bounded as if f0 were at least 1 Hz.
+    let s = synth(&one_syl(syl(vec![-1.0e6], 20.0, 0.0, 0.0)));
+    assert_eq!(s.pcm.len(), 16 * 420);
+    assert!(s.pcm.iter().all(|x| x.is_finite()));
+}
+
+#[test]
 fn phase_is_accumulated_from_the_instantaneous_f0() {
     // One positive-going zero crossing per cycle of the 1/h harmonic sum, so the crossing count
     // over a gliding pitch must equal ∫f0 dt.

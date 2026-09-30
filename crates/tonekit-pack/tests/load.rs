@@ -84,7 +84,7 @@ fn loads_cmn_with_five_tones_and_two_accents() {
 fn cmn_metadata_and_accessors() {
     let p = cmn();
     assert_eq!(p.lect().0, "cmn");
-    assert_eq!(p.version(), "0.2.0");
+    assert_eq!(p.version(), "0.3.0");
     assert_eq!(p.base_accent(), &AccentId("cmn-standard".into()));
     assert!(p.has_accent(&AccentId("cmn-standard".into())));
     assert!(!p.has_accent(&AccentId("cmn-XX".into())));
@@ -390,7 +390,7 @@ fn rejects_bad_metadata() {
         "heard_threshold = -0.1",
     ));
     assert_invalid(&mutate(CMN_TOML, "lect = \"cmn\"", "lect = \"\""));
-    assert_invalid(&mutate(CMN_TOML, "version = \"0.2.0\"", "version = \"\""));
+    assert_invalid(&mutate(CMN_TOML, "version = \"0.3.0\"", "version = \"\""));
     assert_invalid(&mutate(
         CMN_TOML,
         "base_accent = \"cmn-standard\"",
