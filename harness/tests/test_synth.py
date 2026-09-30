@@ -248,20 +248,89 @@ def test_tkh_synth_skips_an_unusable_source_with_a_warning_and_fails_when_none_i
     src_root.mkdir()
     good = quiet_clip(src_root, "good", ["4", "1", "3"])
     silent = write_clip(src_root, "silent", np.zeros(RATE, dtype=np.float32), intended=["1"])
-    args = ["--pack", str(PACKS / "cmn.toml"), "--per-clip", "1", "--out", str(tmp_path / "o")]
+    pack = ["--pack", str(PACKS / "cmn.toml"), "--per-clip", "1"]
 
     both = write_manifest(src_root / "both.jsonl", [silent, good])
+    args = [*pack, "--out", str(tmp_path / "both-out")]
     assert cli.main(["synth", "--manifest", str(both), *args]) == 0
     captured = capsys.readouterr()
     assert "skipping silent" in captured.err
     assert "synthesised 1 clip from 1 source (1 skipped); written to" in captured.out
 
     only = write_manifest(src_root / "only.jsonl", [silent])
+    args = [*pack, "--out", str(tmp_path / "only-out")]
     assert cli.main(["synth", "--manifest", str(only), *args]) == 1
-    assert "error:" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert "error:" in err and "not empty" not in err
 
 
 def test_tkh_synth_reports_errors_and_exits_non_zero(tmp_path, capsys):
     args = ["--pack", str(PACKS / "cmn.toml"), "--per-clip", "1", "--out", str(tmp_path / "o")]
     assert cli.main(["synth", "--manifest", str(tmp_path / "missing.jsonl"), *args]) == 1
     assert "error:" in capsys.readouterr().err
+
+
+def test_tkh_synth_gives_the_noise_recording_to_the_noise_rows(tmp_path):
+    src_root = tmp_path / "corpus"
+    src_root.mkdir()
+    m = write_manifest(
+        src_root / "manifest.jsonl", [quiet_clip(src_root, "cli-413", ["4", "1", "3"])]
+    )
+    bed = np.random.default_rng(0).standard_normal(4_000).astype(np.float32) * 0.1
+    noise_wav = str(tmp_path / write_clip(tmp_path, "cafe", bed, intended=["1"]).path)
+    out = tmp_path / "out"
+
+    code = cli.main(
+        ["synth", "--manifest", str(m), "--pack", str(PACKS / "cmn.toml"), "--out", str(out),
+         "--per-clip", "4", "--seed", "3", "--noise-wav", noise_wav]
+    )  # fmt: skip
+    assert code == 0
+    rows = manifest.load(out / "manifest.jsonl")
+    noisy = [r for r in rows if r.synthetic["family"] == "noise"]
+    assert len(noisy) == 2  # seed 3 draws the noise family twice in four
+    for r in noisy:
+        assert r.synthetic["params"]["noise_wav"] == noise_wav
+        assert r.condition.noise.startswith("cafe ") and r.condition.noise.endswith(" dB")
+    assert all("noise_wav" not in r.synthetic["params"] for r in rows if r not in noisy)
+
+
+# ---- what tkh synth and tkh adversary share ------------------------------------------------------
+
+
+def command_line(command: str, tmp_path: Path, *extra: str) -> list[str]:
+    """`tkh <command>` on a manifest that does not exist, so a run that gets as far as loading it
+    fails with a different error than the ones these tests look for."""
+    specific = ["--per-clip", "1"] if command == "synth" else ["--trials", "1", "--theta", "0.5"]
+    return [command, "--manifest", str(tmp_path / "missing.jsonl"), "--pack",
+            str(PACKS / "cmn.toml"), "--out", str(tmp_path / "out"), *specific, *extra]  # fmt: skip
+
+
+@pytest.mark.parametrize("command", ["synth", "adversary"])
+def test_a_non_empty_out_is_refused_before_any_work_and_left_alone(command, tmp_path, capsys):
+    out = tmp_path / "out"
+    out.mkdir()
+    (out / "keep.txt").write_text("mine")
+    assert cli.main(command_line(command, tmp_path)) == 1
+    assert "out is not empty" in capsys.readouterr().err
+    assert [p.name for p in out.iterdir()] == ["keep.txt"]
+
+
+@pytest.mark.parametrize("command", ["synth", "adversary"])
+def test_an_unusable_noise_recording_is_an_error_before_any_work(command, tmp_path, capsys):
+    silent = (
+        tmp_path
+        / write_clip(tmp_path, "quiet-bed", np.zeros(4_000, np.float32), intended=["1"]).path
+    )
+    for path, message in [(tmp_path / "nope.wav", "cannot read"), (silent, "is silent")]:
+        assert cli.main(command_line(command, tmp_path, "--noise-wav", str(path))) == 1
+        err = capsys.readouterr().err
+        assert err.startswith("error: noise:") and message in err
+        assert not (tmp_path / "out").exists()  # nothing was made
+
+
+@pytest.mark.parametrize("command", ["synth", "adversary"])
+def test_both_commands_take_a_noise_wav(command):
+    parser = cli.build_parser()
+    args = parser.parse_args(command_line(command, Path("."), "--noise-wav", "bed.wav"))
+    assert args.noise_wav == "bed.wav"
+    assert parser.parse_args(command_line(command, Path("."))).noise_wav is None

@@ -166,10 +166,16 @@ class Family:
         return resolved
 
     def sample(
-        self, voice: Voice, rng: np.random.Generator, bounds: Mapping[str, tuple[float, float]]
+        self,
+        voice: Voice,
+        rng: np.random.Generator,
+        bounds: Mapping[str, tuple[float, float]],
+        paths: Mapping[str, str] | None = None,
     ) -> dict | None:
         """Random valid parameters for this source, uniform within `bounds` (from
-        `resolve_bounds`); None if the source has no syllable the family can target."""
+        `resolve_bounds`); None if the source has no syllable the family can target. `paths` gives
+        the values of the family's optional path parameters (e.g. `noise_wav`); the others stay
+        unset."""
         p: dict = {}
         if self.indexed:
             options = self.syllables(voice)
@@ -187,6 +193,9 @@ class Family:
             if spec.signed and rng.random() < 0.5:
                 x = -x
             p[name] = _tidy(x, lo, hi, spec.signed)
+        for name in self.optional_paths:
+            if paths and name in paths:
+                p[name] = paths[name]
         return p
 
 

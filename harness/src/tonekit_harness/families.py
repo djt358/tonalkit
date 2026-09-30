@@ -75,12 +75,23 @@ def draw(
     rng: np.random.Generator,
     pool: Sequence[Family],
     bounds: Mapping[str, Mapping[str, tuple[float, float]]],
+    paths: Mapping[str, str] | None = None,
 ) -> tuple[Family, dict]:
-    """A random family from `pool` that can perturb `voice` (each equally likely), with random
-    valid parameters within `bounds` (from `resolve_pool_bounds`)."""
-    for i in rng.permutation(len(pool)):
-        family = pool[int(i)]
-        params = family.sample(voice, rng, bounds[family.name])
-        if params is not None:
-            return family, params
+    """A random family from `pool` that can perturb `voice`, with random valid parameters within
+    `bounds` (from `resolve_pool_bounds`); `paths` gives the optional file parameters (see
+    `Family.sample`).
+
+    The class (`Family.label`) is chosen first, each class in `pool` equally likely, then a family
+    within it, each applicable one equally likely. A source that few families of a class apply to
+    (a tone error needs a T3 to flatten or a neutral tone to fill out) is therefore perturbed by
+    that class as often as by any other. A class with no family that applies to `voice` is
+    skipped."""
+    labels = list(dict.fromkeys(f.label for f in pool))
+    for i in rng.permutation(len(labels)):
+        members = [f for f in pool if f.label == labels[int(i)]]
+        for j in rng.permutation(len(members)):
+            family = members[int(j)]
+            params = family.sample(voice, rng, bounds[family.name], paths)
+            if params is not None:
+                return family, params
     raise SynthError("no family can perturb this source")

@@ -4,15 +4,17 @@ they check the search's bookkeeping quickly; the θ = 1.01 test and the CLI run 
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import json
 from pathlib import Path
 
+import numpy as np
 import pytest
 import tonekit_py
 from support import utterance, write_clip, write_manifest
 
-from tonekit_harness import adversary, cli, evaluate, manifest, source, synth
+from tonekit_harness import adversary, cli, evaluate, families, manifest, source, synth
 from tonekit_harness.evaluate import EvalError, Result
 from tonekit_harness.family import SynthError
 
@@ -182,8 +184,9 @@ def test_the_same_seed_finds_the_same_clips_and_another_seed_others(sources, tmp
 def test_parameters_are_uniform_within_the_bounds_and_custom_bounds_narrow_them(
     sources, tmp_path, monkeypatch
 ):
+    fake_perturb(monkeypatch)  # no audio needed to see the parameters: many trials, fast
     scripted(monkeypatch, lambda clip: None)  # every nuisance trial is a find
-    wide = adversary.search(sources, 60, None, seed=3, theta=0.5, out_dir=tmp_path / "w")
+    wide = adversary.search(sources, 300, None, seed=3, theta=0.5, out_dir=tmp_path / "w")
     snr = [c.synthetic["params"]["snr_db"] for c in wide if family_of(c) == "noise"]
     shift = [c.synthetic["params"]["st"] for c in wide if family_of(c) == "register_shift"]
     factor = [c.synthetic["params"]["factor"] for c in wide if family_of(c) == "rate"]
@@ -193,7 +196,7 @@ def test_parameters_are_uniform_within_the_bounds_and_custom_bounds_narrow_them(
     assert all(0.8 <= x <= 1.25 for x in factor)
 
     narrow = adversary.search(
-        sources, 60, {"noise": {"snr_db": (5.0, 6.0)}, "register_shift": {"st": (-1.0, 1.0)}},
+        sources, 300, {"noise": {"snr_db": (5.0, 6.0)}, "register_shift": {"st": (-1.0, 1.0)}},
         seed=3, theta=0.5, out_dir=tmp_path / "n",
     )  # fmt: skip
     snrs = [c.synthetic["params"]["snr_db"] for c in narrow if family_of(c) == "noise"]
@@ -225,6 +228,30 @@ def test_no_sources_or_a_negative_trial_count_is_an_error(sources, tmp_path):
         adversary.search(sources, -1, None, seed=0, theta=0.5, out_dir=tmp_path)
 
 
+def fake_perturb(monkeypatch):
+    """Replace `synth.perturb` with a stand-in that makes the right row without running WORLD."""
+
+    def perturb(src, family, params, seed):
+        fam = families.get(family)
+        p = fam.validate(src.voice, params)
+        return np.zeros(1_600, dtype=np.float32), [None] * 11, synth._row(src, fam, p, seed, 1.0)
+
+    monkeypatch.setattr(synth, "perturb", perturb)
+
+
+def test_a_source_few_tone_errors_apply_to_is_still_searched_evenly(sources, tmp_path, monkeypatch):
+    """T1 T2 T4 has no T3 to flatten and no neutral tone: only `tone_swap` applies. The class is
+    drawn first, so tone errors are still half the trials (a family-uniform draw gave 1 in 4)."""
+    fake_perturb(monkeypatch)
+    scripted(monkeypatch, lambda clip: None)  # nothing is accepted: every nuisance trial is a find
+    bare = dataclasses.replace(
+        sources[0], voice=dataclasses.replace(sources[0].voice, tones=("1", "2", "4"))
+    )
+    finds = adversary.search([bare], 100, None, seed=7, theta=0.5, out_dir=tmp_path)
+    assert finds.trials == 100
+    assert 0.35 <= len(finds) / 100 <= 0.65  # the nuisance share
+
+
 # ---- what is written -----------------------------------------------------------------------------
 
 
@@ -248,6 +275,61 @@ def test_a_search_that_finds_nothing_writes_empty_files(sources, tmp_path):
     assert list(finds) == [] and finds.trials == 0
     assert (tmp_path / "manifest.jsonl").read_text() == ""
     assert (tmp_path / "truth.jsonl").read_text() == ""
+
+
+def test_an_interrupted_search_still_writes_an_index_that_matches_its_wavs(
+    sources, tmp_path, monkeypatch
+):
+    calls = []
+
+    def score(clip):
+        calls.append(clip.id)
+        if len(calls) == 9:
+            raise KeyboardInterrupt
+        return None  # every nuisance trial so far is a find
+
+    scripted(monkeypatch, score)
+    out = tmp_path / "interrupted"
+    with pytest.raises(KeyboardInterrupt):
+        adversary.search(sources, 20, None, seed=1, theta=0.5, out_dir=out)
+
+    rows = manifest.load(out / "manifest.jsonl")
+    truth = [json.loads(line) for line in (out / "truth.jsonl").read_text().splitlines()]
+    wavs = sorted(p.name for p in (out / "wav").iterdir())
+    assert rows and len(rows) < 8  # the finds of the trials that ran
+    assert [t["id"] for t in truth] == [c.id for c in rows]
+    assert wavs == sorted(f"{c.id}.wav" for c in rows)  # no WAV without a row, no row without a WAV
+
+
+def test_a_non_empty_out_is_refused_and_left_as_it_was(sources, tmp_path, monkeypatch):
+    scripted(monkeypatch, lambda clip: None)
+    out = tmp_path / "old"
+    (out / "wav").mkdir(parents=True)
+    (out / "wav" / "stale.wav").write_bytes(b"RIFF")
+    with pytest.raises(SynthError, match=r"old is not empty; .*another --out"):
+        adversary.search(sources, 4, None, seed=0, theta=0.5, out_dir=out)
+    assert sorted(p.name for p in out.rglob("*")) == ["stale.wav", "wav"]  # nothing written
+
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    adversary.search(
+        sources, 0, None, seed=0, theta=0.5, out_dir=empty
+    )  # an empty directory is fine
+    assert (empty / "manifest.jsonl").exists()
+
+
+def test_a_noise_recording_is_used_by_the_noise_trials(sources, tmp_path, monkeypatch):
+    bed = np.random.default_rng(0).standard_normal(4_000).astype(np.float32) * 0.1
+    noise_wav = str(tmp_path / write_clip(tmp_path, "cafe", bed, intended=["1"]).path)
+    monkeypatch.setattr(families, "searched", lambda labels: [families.get("noise")])
+    scripted(monkeypatch, lambda clip: None)
+    finds = adversary.search(
+        sources, 4, None, seed=1, theta=0.5, out_dir=tmp_path / "out", noise_wav=noise_wav
+    )
+    assert len(finds) == 4
+    for c in finds:
+        assert c.synthetic["params"]["noise_wav"] == noise_wav
+        assert c.condition.noise.startswith("cafe ") and c.condition.noise.endswith(" dB")
 
 
 # ---- tkh adversary -------------------------------------------------------------------------------

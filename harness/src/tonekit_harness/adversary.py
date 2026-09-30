@@ -58,13 +58,18 @@ def search(
     theta: float,
     *,
     out_dir: str | Path,
+    noise_wav: str | None = None,
 ) -> Finds:
     """Run `n_trials` random trials over `sources` and write the finds to `out_dir` (WAVs under
-    `wav/`, `manifest.jsonl`, `truth.jsonl`).
+    `wav/`, `manifest.jsonl`, `truth.jsonl`). `out_dir` must be empty or not exist yet
+    (`SynthError` otherwise): stale files would otherwise mix with the new manifest. The manifest
+    and truth are written even if the search is interrupted, listing the finds made so far.
 
     `bounds` maps a family to `{parameter: (lo, hi)}` to narrow the spec's bounds (for a signed
     parameter, a magnitude); anything outside the spec's is a `SynthError`. The search is
-    deterministic in `seed`.
+    deterministic in `seed`. Each trial picks the class (tone error or nuisance) first, each
+    equally likely, then a family within it (see `families.draw`). `noise_wav`, a 16 kHz mono
+    recording, is what the `noise` family adds instead of pink noise.
 
     Each trial is graded with its source's register (`Source.register_json`: the speaker's, as
     `tkh eval` grades that speaker's clips), and each find records whether that register was
@@ -75,52 +80,57 @@ def search(
         raise SynthError(f"n_trials must not be negative, not {n_trials}")
     pool = families.searched(("tone_error", "correct"))
     resolved = families.resolve_pool_bounds(pool, bounds)
+    synth.check_noise_wav(noise_wav)
+    paths = None if noise_wav is None else {"noise_wav": noise_wav}
+    corpus.require_empty(out_dir)
     rng = np.random.default_rng(seed)
     graders: dict[tuple, evaluate.Grader] = {}
 
     found: list[tuple[Clip, list, float | None]] = []
     failed = 0
-    for _ in range(n_trials):
-        src = sources[int(rng.integers(len(sources)))]
-        fam, params = families.draw(src.voice, rng, pool, resolved)
-        audio, truth, clip = synth.perturb(src, fam.name, params, int(rng.integers(2**31)))
-        key = (src.pack_toml, src.calib_json, src.accent)
-        if key not in graders:
-            graders[key] = evaluate.Grader(*key, root=Path("."), cache_dir=None)
-        try:
-            result, _ = graders[key].grade_pcm(clip, audio, src.register_json)
-        except evaluate.EvalError:
-            failed += 1
-            continue
-        score = result.overall
-        accepted = score is not None and score >= theta
-        if fam.label == "tone_error" and accepted:
-            kind = "false_accept"
-        elif fam.label == "correct" and not accepted:
-            kind = "false_reject"
-        else:
-            continue
-        row = clip.model_copy(
-            update={
-                "needs_listen": True,
-                "synthetic": {
-                    **(clip.synthetic or {}),
-                    "adversary": {
-                        "kind": kind,
-                        "score": score,
-                        "theta": theta,
-                        "register": result.register_source,
+    try:
+        for _ in range(n_trials):
+            src = sources[int(rng.integers(len(sources)))]
+            fam, params = families.draw(src.voice, rng, pool, resolved, paths)
+            audio, truth, clip = synth.perturb(src, fam.name, params, int(rng.integers(2**31)))
+            key = (src.pack_toml, src.calib_json, src.accent)
+            if key not in graders:
+                graders[key] = evaluate.Grader(*key, root=Path("."), cache_dir=None)
+            try:
+                result, _ = graders[key].grade_pcm(clip, audio, src.register_json)
+            except evaluate.EvalError:
+                failed += 1
+                continue
+            score = result.overall
+            accepted = score is not None and score >= theta
+            if fam.label == "tone_error" and accepted:
+                kind = "false_accept"
+            elif fam.label == "correct" and not accepted:
+                kind = "false_reject"
+            else:
+                continue
+            row = clip.model_copy(
+                update={
+                    "needs_listen": True,
+                    "synthetic": {
+                        **(clip.synthetic or {}),
+                        "adversary": {
+                            "kind": kind,
+                            "score": score,
+                            "theta": theta,
+                            "register": result.register_source,
+                        },
                     },
-                },
-            }
-        )
-        corpus.write_wav(out_dir, row, audio)
-        found.append((row, truth, score))
-
-    accepts = sorted((f for f in found if f[0].label == "tone_error"), key=_accept_order)
-    rejects = sorted((f for f in found if f[0].label == "correct"), key=_reject_order)
-    ordered = accepts + rejects
-    corpus.write_index(out_dir, [c for c, _, _ in ordered], [t for _, t, _ in ordered])
+                }
+            )
+            corpus.write_wav(out_dir, row, audio)
+            found.append((row, truth, score))
+    finally:
+        # also when interrupted: every WAV written above gets its row
+        accepts = sorted((f for f in found if f[0].label == "tone_error"), key=_accept_order)
+        rejects = sorted((f for f in found if f[0].label == "correct"), key=_reject_order)
+        ordered = accepts + rejects
+        corpus.write_index(out_dir, [c for c, _, _ in ordered], [t for _, t, _ in ordered])
     return Finds([c for c, _, _ in ordered], n_trials, failed)
 
 
@@ -138,10 +148,20 @@ def _reject_order(find: tuple[Clip, list, float | None]) -> tuple[float, str]:
 def _run(args: argparse.Namespace) -> int:
     skipped: list[str] = []
     try:
+        corpus.require_empty(args.out)
+        synth.check_noise_wav(args.noise_wav)
         sources = list(
             source.load_sources(args.manifest, args.pack, args.calib, args.accent, skipped=skipped)
         )
-        finds = search(sources, args.trials, None, args.seed, args.theta, out_dir=args.out)
+        finds = search(
+            sources,
+            args.trials,
+            None,
+            args.seed,
+            args.theta,
+            out_dir=args.out,
+            noise_wav=args.noise_wav,
+        )
     except (ManifestError, evaluate.EvalError, SynthError, OSError) as e:
         print(f"error: {e}", file=sys.stderr)
         return 1

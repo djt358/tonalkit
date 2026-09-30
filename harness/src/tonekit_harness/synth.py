@@ -145,8 +145,24 @@ def add_source_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--pack", required=True, help="language pack TOML (e.g. packs/cmn/cmn.toml)")
     p.add_argument("--calib", help="calibration JSON (default: the pack's own)")
     p.add_argument("--accent", help="accent to grade against (default: the pack's base accent)")
-    p.add_argument("--out", required=True, help="directory for the WAVs, manifest and truth")
+    p.add_argument(
+        "--out",
+        required=True,
+        help="directory for the WAVs, manifest and truth; must be empty or not exist yet",
+    )
     p.add_argument("--seed", type=int, default=0, help="random seed (default 0)")
+    p.add_argument(
+        "--noise-wav",
+        metavar="PATH",
+        help="16 kHz mono recording the noise family adds (looped) instead of pink noise; "
+        "the row's condition.noise names its file stem",
+    )
+
+
+def check_noise_wav(noise_wav: str | None) -> None:
+    """`--noise-wav` must be readable and not silent: checked once, before any work is done."""
+    if noise_wav is not None and not np.any(_noise_bed({"noise_wav": noise_wav})):
+        raise SynthError(f"noise: the noise recording {noise_wav} is silent")
 
 
 def _run(args: argparse.Namespace) -> int:
@@ -155,6 +171,9 @@ def _run(args: argparse.Namespace) -> int:
     try:
         if args.per_clip < 1:
             raise SynthError(f"--per-clip must be at least 1, not {args.per_clip}")
+        corpus.require_empty(args.out)
+        check_noise_wav(args.noise_wav)
+        paths = None if args.noise_wav is None else {"noise_wav": args.noise_wav}
         pool = families.searched(("tone_error", "graded", "correct"))
         bounds = families.resolve_pool_bounds(pool, None)
         rng = np.random.default_rng(args.seed)
@@ -165,7 +184,7 @@ def _run(args: argparse.Namespace) -> int:
         ):
             n_sources += 1
             for _ in range(args.per_clip):
-                fam, params = families.draw(src.voice, rng, pool, bounds)
+                fam, params = families.draw(src.voice, rng, pool, bounds, paths)
                 made.append(perturb(src, fam.name, params, int(rng.integers(2**31))))
         corpus.write_corpus(args.out, made)
     except (ManifestError, evaluate.EvalError, SynthError, OSError) as e:

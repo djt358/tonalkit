@@ -11,11 +11,24 @@ import numpy as np
 from scipy.io import wavfile
 
 from . import manifest
+from .family import SynthError
 from .ingest import TARGET_SR
 from .manifest import Clip
 
 # One perturbed clip: its samples, the f0 truth per 10 ms frame (None where unvoiced), its row.
 Made = tuple[np.ndarray, list[float | None], Clip]
+
+
+def require_empty(out_dir: str | Path) -> None:
+    """Refuse an `out_dir` that already holds anything, so a new manifest can never sit beside
+    stale WAVs (or a stale manifest beside new ones). A directory that does not exist yet, or is
+    empty, is fine."""
+    out = Path(out_dir)
+    if out.is_dir() and any(out.iterdir()):
+        raise SynthError(
+            f"{out} is not empty; refusing to mix new clips with what is there "
+            "(choose another --out, or empty it)"
+        )
 
 
 def write_wav(out_dir: str | Path, clip: Clip, audio: np.ndarray) -> None:
