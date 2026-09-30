@@ -47,7 +47,7 @@ def results(corpus, pack_toml, calib_json, tmp_path_factory) -> list[Result]:
 def test_run_returns_one_result_per_clip_in_manifest_order(corpus, results):
     _, clips = corpus
     assert [r.id for r in results] == [c.id for c in clips]
-    for clip, r in zip(clips, results):
+    for clip, r in zip(clips, results, strict=True):
         assert isinstance(r, Result)
         assert (r.set, r.pair, r.label, r.speaker) == (
             clip.set, clip.pair, clip.label, clip.speaker
@@ -57,7 +57,7 @@ def test_run_returns_one_result_per_clip_in_manifest_order(corpus, results):
 
 def test_each_result_has_a_syllable_per_intended_tone_with_the_right_shapes(corpus, results):
     _, clips = corpus
-    for clip, r in zip(clips, results):
+    for clip, r in zip(clips, results, strict=True):
         assert isinstance(r.intended_rank, int) and r.intended_rank >= 1
         assert isinstance(r.margin_llr, float) and math.isfinite(r.margin_llr)
         assert r.overall is None or 0.0 <= r.overall <= 1.0
@@ -191,6 +191,25 @@ def test_register_clips_give_the_speakers_other_clips_a_given_register(
     after_one, after_two = json.loads(registers[1]), json.loads(registers[2])
     assert set(after_two) == {"floor_st", "median_st", "ceil_st", "n_syllables"}
     assert 0 < after_one["n_syllables"] < after_two["n_syllables"]
+
+
+def test_speaker_registers_chains_each_speakers_register_clips(corpus, pack_toml, calib_json):
+    root, clips = corpus
+    register = [
+        make_clip(
+            root, f"register-{i}", ["1", "2", "3", "4"], set="register", label="n/a", speaker="dj",
+            seed=10 + i,
+        )
+        for i in (1, 2)
+    ]  # fmt: skip
+    other = make_clip(root, "gate-03-correct", ["1", "1", "1"], pair="gate-03", speaker="ann")
+    grader = evaluate.Grader(pack_toml, calib_json, "cmn-standard", root=root, cache_dir=None)
+
+    registers = evaluate.speaker_registers([clips[0], *register, other], grader)
+
+    assert list(registers) == ["dj", "ann"]
+    assert json.loads(registers["dj"])["n_syllables"] > 0
+    assert registers["ann"] is None  # no register clips: analysed cold
 
 
 # ---- cache -------------------------------------------------------------------------------------

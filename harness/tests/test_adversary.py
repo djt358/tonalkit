@@ -1,0 +1,464 @@
+"""The random-search adversary: what counts as a find, the order and files it returns, and that a
+failing trial never stops the search. Most tests replace tonekit's grader with a scripted one, so
+they check the search's bookkeeping quickly; the θ = 1.01 test and the CLI run the real grader."""
+
+from __future__ import annotations
+
+import dataclasses
+import hashlib
+import json
+from pathlib import Path
+
+import numpy as np
+import pytest
+import tonekit_py
+from support import utterance, write_clip, write_manifest
+
+from tonekit_harness import adversary, cli, evaluate, families, manifest, source, synth
+from tonekit_harness.evaluate import EvalError, Result
+from tonekit_harness.family import SynthError
+
+PACKS = Path(__file__).resolve().parents[2] / "packs" / "cmn"
+TONE_ERROR = {"tone_swap", "t3_no_dip", "neutral_full"}
+NUISANCE = {"noise", "register_shift", "rate"}
+
+
+@pytest.fixture(scope="module")
+def sources(tmp_path_factory, pack_toml, calib_json) -> list[source.Source]:
+    root = tmp_path_factory.mktemp("adversary-sources")
+    made = []
+    for cid, tones in [("adv-413", ["4", "1", "3"]), ("adv-152", ["1", "5", "2"])]:
+        clip = write_clip(root, cid, 0.5 * utterance(tones), intended=tones, produced=tones)
+        made.append(source.prepare(clip, root=root, pack_toml=pack_toml, calib_json=calib_json))
+    return made
+
+
+def family_of(clip) -> str:
+    return clip.synthetic["family"]
+
+
+def scripted(monkeypatch, score, calls=None):
+    """Replace the grader: `score(clip)` is each trial's `overall` (or raises EvalError). Each
+    call's (clip, register_json) is appended to `calls`, if given."""
+
+    def grade_pcm(self, clip, pcm, register_json=None):
+        if calls is not None:
+            calls.append((clip, register_json))
+        overall = score(clip)
+        result = Result(
+            id=clip.id, set=clip.set, pair=None, label=clip.label, speaker=clip.speaker,
+            overall=overall, intended_rank=1, margin_llr=0.0, syllables=[],
+            register_source="given" if register_json else "cold",
+        )  # fmt: skip
+        return result, {}
+
+    monkeypatch.setattr(evaluate.Grader, "grade_pcm", grade_pcm)
+
+
+def hashed(clip) -> float:
+    """A stable pseudo-random score in [0, 1) for a clip id."""
+    return int(hashlib.sha256(clip.id.encode()).hexdigest()[:8], 16) / 16**8
+
+
+# ---- the brief's check, with the real grader -----------------------------------------------------
+
+
+def test_theta_above_one_returns_every_nuisance_trial_as_a_false_reject_and_never_raises(
+    sources, tmp_path, monkeypatch
+):
+    tried = []
+    real_perturb = synth.perturb
+
+    def spy(src, family, params, seed):
+        made = real_perturb(src, family, params, seed)
+        tried.append(made[2])
+        return made
+
+    monkeypatch.setattr(synth, "perturb", spy)
+    finds = adversary.search(sources, 12, None, seed=4, theta=1.01, out_dir=tmp_path)
+
+    nuisance = [c for c in tried if family_of(c) in NUISANCE]
+    assert nuisance and any(family_of(c) in TONE_ERROR for c in tried)  # a real mix, not vacuous
+    assert finds.trials == 12 and finds.failed == 0
+    assert sorted(c.id for c in finds) == sorted(c.id for c in nuisance)
+    assert all(c.label == "correct" and c.needs_listen for c in finds)
+    assert finds.false_accepts == 0 and finds.false_rejects == len(nuisance)
+
+
+# ---- what is a find ------------------------------------------------------------------------------
+
+
+def test_a_tone_error_scoring_at_least_theta_is_a_false_accept_and_only_that(
+    sources, tmp_path, monkeypatch
+):
+    scripted(monkeypatch, lambda clip: 0.9)
+    finds = adversary.search(sources, 20, None, seed=1, theta=0.9, out_dir=tmp_path)  # 0.9 >= 0.9
+    assert finds and all(family_of(c) in TONE_ERROR and c.label == "tone_error" for c in finds)
+    assert {c.synthetic["adversary"]["kind"] for c in finds} == {"false_accept"}
+    assert finds.false_accepts == len(finds) and finds.false_rejects == 0
+
+
+def test_a_correct_clip_scoring_below_theta_is_a_false_reject_and_only_that(
+    sources, tmp_path, monkeypatch
+):
+    scripted(monkeypatch, lambda clip: 0.9)
+    finds = adversary.search(sources, 20, None, seed=1, theta=0.91, out_dir=tmp_path)
+    assert finds and all(family_of(c) in NUISANCE and c.label == "correct" for c in finds)
+    assert {c.synthetic["adversary"]["kind"] for c in finds} == {"false_reject"}
+
+
+def test_no_score_counts_as_a_rejection(sources, tmp_path, monkeypatch):
+    scripted(monkeypatch, lambda clip: None)  # "tone not checked"
+    finds = adversary.search(sources, 20, None, seed=1, theta=0.0, out_dir=tmp_path)
+    assert finds and all(c.label == "correct" for c in finds)  # nothing wrong was accepted
+
+
+def test_graded_families_are_never_searched(sources, tmp_path, monkeypatch):
+    scripted(monkeypatch, lambda clip: 0.5)
+    finds = adversary.search(sources, 40, None, seed=2, theta=0.5, out_dir=tmp_path)
+    assert finds.trials == 40
+    assert {family_of(c) for c in finds} <= TONE_ERROR | NUISANCE
+    assert not any(family_of(c) in {"range_compress", "turn_shift", "identity"} for c in finds)
+
+
+def test_finds_are_ordered_and_carry_their_score_and_theta(sources, tmp_path, monkeypatch):
+    scripted(monkeypatch, hashed)
+    finds = adversary.search(sources, 40, None, seed=5, theta=0.5, out_dir=tmp_path)
+
+    kinds = [c.synthetic["adversary"]["kind"] for c in finds]
+    assert "false_accept" in kinds and "false_reject" in kinds
+    assert kinds == sorted(kinds, key=["false_accept", "false_reject"].index)  # accepts first
+    accepts = [c for c in finds if c.label == "tone_error"]
+    rejects = [c for c in finds if c.label == "correct"]
+    assert [(-c.synthetic["adversary"]["score"], c.id) for c in accepts] == sorted(
+        (-c.synthetic["adversary"]["score"], c.id) for c in accepts
+    )  # score descending, ties by id
+    assert [(c.synthetic["adversary"]["score"], c.id) for c in rejects] == sorted(
+        (c.synthetic["adversary"]["score"], c.id) for c in rejects
+    )  # score ascending
+    for c in finds:
+        assert c.synthetic["adversary"]["theta"] == 0.5
+        assert c.synthetic["adversary"]["score"] == pytest.approx(hashed(c))
+        assert c.needs_listen is True
+        assert (c.set, c.source) == ("synthetic", "synthetic-world")
+
+
+def test_an_unscored_reject_sorts_before_every_scored_one(sources, tmp_path, monkeypatch):
+    scripted(monkeypatch, lambda clip: None if hashed(clip) < 0.5 else 0.1)
+    finds = adversary.search(sources, 30, None, seed=6, theta=0.5, out_dir=tmp_path)
+    scores = [c.synthetic["adversary"]["score"] for c in finds]
+    assert None in scores and any(s is not None for s in scores)
+    assert scores == sorted(scores, key=lambda s: -1.0 if s is None else s)
+
+
+# ---- robustness and determinism ------------------------------------------------------------------
+
+
+def test_a_trial_that_fails_inside_tonekit_is_counted_and_skipped(sources, tmp_path, monkeypatch):
+    calls, failed_ids = [], []
+
+    def score(clip):
+        calls.append(clip.id)
+        if len(calls) % 3 == 0:
+            failed_ids.append(clip.id)
+            raise EvalError(f"{clip.id}: tonekit said no")
+        return None
+
+    scripted(monkeypatch, score)
+    finds = adversary.search(sources, 12, None, seed=1, theta=0.5, out_dir=tmp_path)
+    assert finds.trials == 12 and finds.failed == 4 == len(failed_ids)
+    assert finds and not {c.id for c in finds} & set(failed_ids)  # a failed trial leaves no find
+
+
+def test_the_same_seed_finds_the_same_clips_and_another_seed_others(sources, tmp_path, monkeypatch):
+    scripted(monkeypatch, hashed)
+    a = adversary.search(sources, 20, None, seed=9, theta=0.5, out_dir=tmp_path / "a")
+    b = adversary.search(sources, 20, None, seed=9, theta=0.5, out_dir=tmp_path / "b")
+    c = adversary.search(sources, 20, None, seed=10, theta=0.5, out_dir=tmp_path / "c")
+    assert [x.id for x in a] == [x.id for x in b]
+    assert a == b
+    assert [x.id for x in a] != [x.id for x in c]
+    assert (tmp_path / "a/truth.jsonl").read_text() == (tmp_path / "b/truth.jsonl").read_text()
+
+
+def test_parameters_are_uniform_within_the_bounds_and_custom_bounds_narrow_them(
+    sources, tmp_path, monkeypatch
+):
+    fake_perturb(monkeypatch)  # no audio needed to see the parameters: many trials, fast
+    scripted(monkeypatch, lambda clip: None)  # every nuisance trial is a find
+    wide = adversary.search(sources, 300, None, seed=3, theta=0.5, out_dir=tmp_path / "w")
+    snr = [c.synthetic["params"]["snr_db"] for c in wide if family_of(c) == "noise"]
+    shift = [c.synthetic["params"]["st"] for c in wide if family_of(c) == "register_shift"]
+    factor = [c.synthetic["params"]["factor"] for c in wide if family_of(c) == "rate"]
+    assert snr and shift and factor
+    assert all(5 <= x <= 20 for x in snr) and max(snr) - min(snr) > 8
+    assert all(-6 <= x <= 6 for x in shift) and min(shift) < 0 < max(shift)
+    assert all(0.8 <= x <= 1.25 for x in factor)
+
+    narrow = adversary.search(
+        sources, 300, {"noise": {"snr_db": (5.0, 6.0)}, "register_shift": {"st": (-1.0, 1.0)}},
+        seed=3, theta=0.5, out_dir=tmp_path / "n",
+    )  # fmt: skip
+    snrs = [c.synthetic["params"]["snr_db"] for c in narrow if family_of(c) == "noise"]
+    assert snrs and all(5 <= x <= 6 for x in snrs)
+    shifts = [c.synthetic["params"]["st"] for c in narrow if family_of(c) == "register_shift"]
+    assert shifts and all(abs(x) <= 1 for x in shifts)
+
+
+@pytest.mark.parametrize(
+    ("bounds", "message"),
+    [
+        ({"noise": {"snr_db": (0.0, 20.0)}}, r"noise: bounds for snr_db \(0, 20\) must lie inside"),
+        ({"rate": {"factor": (0.9, 1.5)}}, r"rate: bounds for factor .* must lie inside"),
+        ({"rate": {"factor": (1.2, 1.0)}}, r"rate: bounds for factor .* must lie inside"),
+        ({"noise": {"level": (1.0, 2.0)}}, r"noise: no numeric parameter 'level'"),
+        ({"teleport": {}}, r"unknown family 'teleport'"),
+        ({"range_compress": {"factor": (0.5, 0.6)}}, r"range_compress: not searched"),
+    ],
+)
+def test_custom_bounds_outside_the_spec_are_a_synth_error(sources, tmp_path, bounds, message):
+    with pytest.raises(SynthError, match=message):
+        adversary.search(sources, 1, bounds, seed=0, theta=0.5, out_dir=tmp_path)
+
+
+def test_no_sources_or_a_negative_trial_count_is_an_error(sources, tmp_path):
+    with pytest.raises(SynthError, match="no sources"):
+        adversary.search([], 1, None, seed=0, theta=0.5, out_dir=tmp_path)
+    with pytest.raises(SynthError, match="n_trials must not be negative, not -1"):
+        adversary.search(sources, -1, None, seed=0, theta=0.5, out_dir=tmp_path)
+
+
+def fake_perturb(monkeypatch):
+    """Replace `synth.perturb` with a stand-in that makes the right row without running WORLD."""
+
+    def perturb(src, family, params, seed):
+        fam = families.get(family)
+        p = fam.validate(src.voice, params)
+        return np.zeros(1_600, dtype=np.float32), [None] * 11, synth._row(src, fam, p, seed, 1.0)
+
+    monkeypatch.setattr(synth, "perturb", perturb)
+
+
+def test_a_source_few_tone_errors_apply_to_is_still_searched_evenly(sources, tmp_path, monkeypatch):
+    """T1 T2 T4 has no T3 to flatten and no neutral tone: only `tone_swap` applies. The class is
+    drawn first, so tone errors are still half the trials (a family-uniform draw gave 1 in 4)."""
+    fake_perturb(monkeypatch)
+    scripted(monkeypatch, lambda clip: None)  # nothing is accepted: every nuisance trial is a find
+    bare = dataclasses.replace(
+        sources[0], voice=dataclasses.replace(sources[0].voice, tones=("1", "2", "4"))
+    )
+    finds = adversary.search([bare], 100, None, seed=7, theta=0.5, out_dir=tmp_path)
+    assert finds.trials == 100
+    assert 0.35 <= len(finds) / 100 <= 0.65  # the nuisance share
+
+
+# ---- what is written -----------------------------------------------------------------------------
+
+
+def test_finds_are_written_as_wavs_a_manifest_and_truth(sources, tmp_path, monkeypatch, pack_toml):
+    scripted(monkeypatch, hashed)
+    out = tmp_path / "adversarial"
+    finds = adversary.search(sources, 20, None, seed=5, theta=0.5, out_dir=out)
+    assert finds
+
+    rows = manifest.load(out / "manifest.jsonl")
+    assert rows == list(finds)
+    truth = [json.loads(line) for line in (out / "truth.jsonl").read_text().splitlines()]
+    assert [t["id"] for t in truth] == [c.id for c in finds]
+    assert sorted(p.name for p in (out / "wav").iterdir()) == sorted(f"{c.id}.wav" for c in finds)
+    _, pcm = evaluate.read_wav(out / rows[0].path, rows[0].id)
+    assert len(pcm) > 0 and len(truth[0]["f0_hz"]) == len(pcm) // 160 + 1
+
+
+def test_a_search_that_finds_nothing_writes_empty_files(sources, tmp_path):
+    finds = adversary.search(sources, 0, None, seed=0, theta=0.5, out_dir=tmp_path)
+    assert list(finds) == [] and finds.trials == 0
+    assert (tmp_path / "manifest.jsonl").read_text() == ""
+    assert (tmp_path / "truth.jsonl").read_text() == ""
+
+
+def test_an_interrupted_search_still_writes_an_index_that_matches_its_wavs(
+    sources, tmp_path, monkeypatch
+):
+    calls = []
+
+    def score(clip):
+        calls.append(clip.id)
+        if len(calls) == 9:
+            raise KeyboardInterrupt
+        return None  # every nuisance trial so far is a find
+
+    scripted(monkeypatch, score)
+    out = tmp_path / "interrupted"
+    with pytest.raises(KeyboardInterrupt):
+        adversary.search(sources, 20, None, seed=1, theta=0.5, out_dir=out)
+
+    rows = manifest.load(out / "manifest.jsonl")
+    truth = [json.loads(line) for line in (out / "truth.jsonl").read_text().splitlines()]
+    wavs = sorted(p.name for p in (out / "wav").iterdir())
+    assert rows and len(rows) < 8  # the finds of the trials that ran
+    assert [t["id"] for t in truth] == [c.id for c in rows]
+    assert wavs == sorted(f"{c.id}.wav" for c in rows)  # no WAV without a row, no row without a WAV
+
+
+def test_a_non_empty_out_is_refused_and_left_as_it_was(sources, tmp_path, monkeypatch):
+    scripted(monkeypatch, lambda clip: None)
+    out = tmp_path / "old"
+    (out / "wav").mkdir(parents=True)
+    (out / "wav" / "stale.wav").write_bytes(b"RIFF")
+    with pytest.raises(SynthError, match=r"old is not empty; .*another --out"):
+        adversary.search(sources, 4, None, seed=0, theta=0.5, out_dir=out)
+    assert sorted(p.name for p in out.rglob("*")) == ["stale.wav", "wav"]  # nothing written
+
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    adversary.search(
+        sources, 0, None, seed=0, theta=0.5, out_dir=empty
+    )  # an empty directory is fine
+    assert (empty / "manifest.jsonl").exists()
+
+
+def test_a_noise_recording_is_used_by_the_noise_trials(sources, tmp_path, monkeypatch):
+    bed = np.random.default_rng(0).standard_normal(4_000).astype(np.float32) * 0.1
+    noise_wav = str(tmp_path / write_clip(tmp_path, "cafe", bed, intended=["1"]).path)
+    monkeypatch.setattr(families, "searched", lambda labels: [families.get("noise")])
+    scripted(monkeypatch, lambda clip: None)
+    finds = adversary.search(
+        sources, 4, None, seed=1, theta=0.5, out_dir=tmp_path / "out", noise_wav=noise_wav
+    )
+    assert len(finds) == 4
+    for c in finds:
+        assert c.synthetic["params"]["noise_wav"] == noise_wav
+        assert c.condition.noise.startswith("cafe ") and c.condition.noise.endswith(" dB")
+
+
+# ---- tkh adversary -------------------------------------------------------------------------------
+
+
+def test_tkh_adversary_prints_a_summary_and_exits_zero(tmp_path, capsys):
+    src_root = tmp_path / "corpus"
+    src_root.mkdir()
+    clip = write_clip(
+        src_root, "cli-413", 0.5 * utterance(["4", "1", "3"]), intended=["4", "1", "3"],
+        produced=["4", "1", "3"],
+    )  # fmt: skip
+    m = write_manifest(src_root / "manifest.jsonl", [clip])
+    out = tmp_path / "adversarial"
+
+    code = cli.main(
+        ["adversary", "--manifest", str(m), "--pack", str(PACKS / "cmn.toml"),
+         "--calib", str(PACKS / "cmn.calib.json"), "--trials", "4", "--theta", "1.01",
+         "--out", str(out), "--seed", "2"]
+    )  # fmt: skip
+    assert code == 0
+    line = capsys.readouterr().out.strip().splitlines()[-1]
+    assert line.startswith("adversary: 4 trials (0 failed), 0 false accepts, ")
+    assert "false rejects; 1 source (0 skipped); written to" in line and str(out) in line
+    assert (out / "manifest.jsonl").exists() and (out / "truth.jsonl").exists()
+
+
+def test_tkh_adversary_exits_zero_even_when_it_finds_nothing(tmp_path, capsys):
+    src_root = tmp_path / "corpus"
+    src_root.mkdir()
+    clip = write_clip(
+        src_root, "cli-413", 0.5 * utterance(["4", "1", "3"]), intended=["4", "1", "3"],
+        produced=["4", "1", "3"],
+    )  # fmt: skip
+    m = write_manifest(src_root / "manifest.jsonl", [clip])
+    code = cli.main(
+        ["adversary", "--manifest", str(m), "--pack", str(PACKS / "cmn.toml"), "--trials", "0",
+         "--theta", "0.5", "--out", str(tmp_path / "o")]
+    )  # fmt: skip
+    assert code == 0
+    assert "0 trials (0 failed), 0 false accepts, 0 false rejects" in capsys.readouterr().out
+
+
+def test_tkh_adversary_reports_errors_and_exits_non_zero(tmp_path, capsys):
+    code = cli.main(
+        ["adversary", "--manifest", str(tmp_path / "missing.jsonl"), "--pack",
+         str(PACKS / "cmn.toml"), "--trials", "1", "--theta", "0.5", "--out", str(tmp_path / "o")]
+    )  # fmt: skip
+    assert code == 1
+    assert "error:" in capsys.readouterr().err
+
+
+# ---- the speaker's register ----------------------------------------------------------------------
+
+
+@pytest.fixture(scope="module")
+def register_manifest(tmp_path_factory) -> Path:
+    """dj has two register clips and one correct clip; ann has only a correct clip."""
+    root = tmp_path_factory.mktemp("adversary-register")
+    tones = ["1", "2", "3", "4"]
+    clips = [
+        write_clip(
+            root,
+            f"reg-{i}",
+            0.5 * utterance(tones, seed=10 + i),
+            intended=tones,
+            produced=tones,
+            set="register",
+            label="n/a",
+            speaker="dj",
+        )  # fmt: skip
+        for i in (1, 2)
+    ]
+    for cid, speaker in [("dj-413", "dj"), ("ann-413", "ann")]:
+        tones = ["4", "1", "3"]
+        clips.append(
+            write_clip(
+                root, cid, 0.5 * utterance(tones), intended=tones, produced=tones, speaker=speaker
+            )
+        )
+    return write_manifest(root / "manifest.jsonl", clips)
+
+
+def load(manifest_path):
+    return list(
+        source.load_sources(manifest_path, PACKS / "cmn.toml", PACKS / "cmn.calib.json", None)
+    )
+
+
+def test_a_source_carries_its_speakers_register_and_is_analysed_with_it(
+    register_manifest, monkeypatch
+):
+    registers = []  # the register_json of each analyze call, in call order
+    real_analyze = tonekit_py.analyze
+
+    def spy(pcm, sample_rate, register_json=None, f0_json=None):
+        registers.append(register_json)
+        return real_analyze(pcm, sample_rate, register_json, f0_json)
+
+    monkeypatch.setattr(evaluate.tonekit_py, "analyze", spy)
+    by_id = {s.clip.id: s for s in load(register_manifest)}
+
+    dj = json.loads(by_id["dj-413"].register_json)
+    assert set(dj) == {"floor_st", "median_st", "ceil_st", "n_syllables"} and dj["n_syllables"] > 0
+    assert by_id["ann-413"].register_json is None  # no register clips: stays cold
+    # analyze ran reg-1 (cold), reg-2 (after reg-1), then each source's spans with its register
+    assert registers[0] is None and registers[1] is not None
+    assert registers[-2:] == [by_id["dj-413"].register_json, None]
+
+
+def test_the_adversary_grades_each_trial_with_its_sources_register(
+    register_manifest, tmp_path, monkeypatch
+):
+    calls = []
+    scripted(monkeypatch, lambda clip: None, calls)  # every nuisance trial is a find
+    sources = load(register_manifest)
+    finds = adversary.search(sources, 16, None, seed=1, theta=0.5, out_dir=tmp_path)
+
+    registers = {s.clip.id: s.register_json for s in sources}
+    assert {c.synthetic["from"] for c, _ in calls} == {"dj-413", "ann-413"}
+    for clip, register_json in calls:
+        assert register_json == registers[clip.synthetic["from"]]
+    assert finds
+    for find in finds:
+        expected = "given" if find.speaker == "dj" else "cold"
+        assert find.synthetic["adversary"]["register"] == expected
+
+
+def test_the_real_grader_scores_a_dj_trial_against_the_given_register(register_manifest, tmp_path):
+    (dj,) = [s for s in load(register_manifest) if s.clip.speaker == "dj"]
+    finds = adversary.search([dj], 6, None, seed=2, theta=1.01, out_dir=tmp_path)
+    assert finds and {c.synthetic["adversary"]["register"] for c in finds} == {"given"}

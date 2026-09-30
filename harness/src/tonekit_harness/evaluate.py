@@ -78,13 +78,13 @@ class Result:
 # ---- reading and caching ----------------------------------------------------------------------
 
 
-def _read_wav(clip: Clip, root: Path) -> tuple[bytes, np.ndarray]:
-    """The clip's WAV bytes (for the cache key) and its 16 kHz mono samples as float32."""
-    path = root / clip.path
+def read_wav(path: Path, name: str) -> tuple[bytes, np.ndarray]:
+    """The WAV file's bytes (for the cache key) and its 16 kHz mono samples as float32. `name`
+    (a clip id) prefixes every `EvalError`."""
     try:
         data = path.read_bytes()
     except OSError as e:
-        raise EvalError(f"{clip.id}: cannot read {path}: {e.strerror or e}") from e
+        raise EvalError(f"{name}: cannot read {path}: {e.strerror or e}") from e
     try:
         with warnings.catch_warnings():
             # scipy only warns about a file cut short ("Reached EOF prematurely") and returns
@@ -97,13 +97,13 @@ def _read_wav(clip: Clip, root: Path) -> tuple[bytes, np.ndarray]:
             )
             rate, samples = wavfile.read(io.BytesIO(data))
     except (ValueError, struct.error, wavfile.WavFileWarning) as e:
-        raise EvalError(f"{clip.id}: {path} is not a readable WAV file: {e}") from e
+        raise EvalError(f"{name}: {path} is not a readable WAV file: {e}") from e
     if rate != TARGET_SR:
         raise EvalError(
-            f"{clip.id}: {path} is sampled at {rate} Hz, expected {TARGET_SR} Hz (run `tkh ingest`)"
+            f"{name}: {path} is sampled at {rate} Hz, expected {TARGET_SR} Hz (run `tkh ingest`)"
         )
     if samples.ndim != 1:
-        raise EvalError(f"{clip.id}: {path} is not mono (run `tkh ingest`)")
+        raise EvalError(f"{name}: {path} is not mono (run `tkh ingest`)")
     return data, to_float32(samples)
 
 
@@ -159,7 +159,7 @@ def _write_cached(path: Path, text: str) -> None:
 # ---- grading ----------------------------------------------------------------------------------
 
 
-def _base_accent(pack_toml: str) -> str:
+def base_accent(pack_toml: str) -> str:
     try:
         pack = tomllib.loads(pack_toml)
     except tomllib.TOMLDecodeError as e:
@@ -175,8 +175,21 @@ def _measured_kind(measured: str | dict) -> str:
     return measured if isinstance(measured, str) else next(iter(measured))
 
 
+def analyze_pcm(name: str, pcm: np.ndarray, register_json: str | None = None) -> str:
+    """`tonekit_py.analyze` of 16 kHz samples; a tonekit failure is an `EvalError` naming `name`."""
+    try:
+        return tonekit_py.analyze(pcm, TARGET_SR, register_json)
+    except ValueError as e:
+        raise EvalError(f"{name}: {e}") from e
+
+
+def grading_target(accent: str) -> dict:
+    """The tonekit `GradingTarget` JSON object for `accent`: no imprint style."""
+    return {"accent": accent, "style": None, "style_weight": 0.0}
+
+
 @dataclass
-class _Grader:
+class Grader:
     pack_toml: str
     calib_json: str | None
     accent: str
@@ -184,25 +197,30 @@ class _Grader:
     cache_dir: Path | None  # None: no cache
 
     def analysis(self, clip: Clip, register_json: str | None) -> str:
-        wav, pcm = _read_wav(clip, self.root)
+        wav, pcm = read_wav(self.root / clip.path, clip.id)
         entry = None
         if self.cache_dir is not None:
             entry = self.cache_dir / f"{_cache_key(wav, register_json)}.json"
             if (text := _read_cached(entry)) is not None:
                 return text
-        try:
-            text = tonekit_py.analyze(pcm, TARGET_SR, register_json)
-        except ValueError as e:
-            raise EvalError(f"{clip.id}: {e}") from e
+        text = analyze_pcm(clip.id, pcm, register_json)
         if entry is not None:
             _write_cached(entry, text)
         return text
 
     def grade(self, clip: Clip, register_json: str | None) -> tuple[Result, dict]:
         """The clip's `Result` and the raw assessment (whose `register_update` chains registers)."""
-        analysis_json = self.analysis(clip, register_json)
+        return self.assess(clip, self.analysis(clip, register_json))
+
+    def grade_pcm(
+        self, clip: Clip, pcm: np.ndarray, register_json: str | None = None
+    ) -> tuple[Result, dict]:
+        """Like `grade`, for samples in memory: `clip.path` is not read and nothing is cached."""
+        return self.assess(clip, analyze_pcm(clip.id, pcm, register_json))
+
+    def assess(self, clip: Clip, analysis_json: str) -> tuple[Result, dict]:
         request = {
-            "grading": {"accent": self.accent, "style": None, "style_weight": 0.0},
+            "grading": grading_target(self.accent),
             "intended": json.loads(to_candidate_json(clip.intended)),
             "distractors": [json.loads(to_candidate_json(d)) for d in clip.distractors],
             "external": [],
@@ -243,6 +261,34 @@ class _Grader:
         return result, assessment
 
 
+def _chain_registers(
+    clips: list[Clip], grader: Grader
+) -> tuple[dict[str, str | None], dict[str, Result]]:
+    """Each speaker's register after their `register` clips, and those clips' results.
+
+    A speaker's register clips are graded in manifest order, each analysed with the register
+    learnt from the ones before it; a clip that measured nothing teaches nothing. A speaker with
+    no register clips maps to None."""
+    by_id: dict[str, Result] = {}
+    registers: dict[str, str | None] = {}
+    for speaker in dict.fromkeys(c.speaker for c in clips):
+        register_json: str | None = None
+        for clip in (c for c in clips if c.speaker == speaker and c.set == "register"):
+            result, assessment = grader.grade(clip, register_json)
+            by_id[clip.id] = result
+            update = assessment["register_update"]
+            if update["n_syllables"] > 0:  # nothing measured: there is nothing to learn from
+                register_json = _canonical(update)
+        registers[speaker] = register_json
+    return registers, by_id
+
+
+def speaker_registers(clips: list[Clip], grader: Grader) -> dict[str, str | None]:
+    """Each speaker's register as tonekit `Register` JSON (None if they have no register clips or
+    none measured anything): what `run` analyses that speaker's other clips with."""
+    return _chain_registers(clips, grader)[0]
+
+
 def run(
     clips: list[Clip],
     pack_toml: str,
@@ -265,26 +311,15 @@ def run(
             raise EvalError(f"duplicate clip id {clip.id!r}")
         seen.add(clip.id)
 
-    grader = _Grader(
+    grader = Grader(
         pack_toml=pack_toml,
         calib_json=calib_json,
-        accent=accent or _base_accent(pack_toml),
+        accent=accent or base_accent(pack_toml),
         root=Path(root),
         cache_dir=Path(cache_dir or DEFAULT_CACHE_DIR) if use_cache else None,
     )
 
-    by_id: dict[str, Result] = {}
-    registers: dict[str, str | None] = {}
-    for speaker in dict.fromkeys(c.speaker for c in clips):
-        register_json: str | None = None
-        for clip in (c for c in clips if c.speaker == speaker and c.set == "register"):
-            result, assessment = grader.grade(clip, register_json)
-            by_id[clip.id] = result
-            update = assessment["register_update"]
-            if update["n_syllables"] > 0:  # nothing measured: there is nothing to learn from
-                register_json = _canonical(update)
-        registers[speaker] = register_json
-
+    registers, by_id = _chain_registers(clips, grader)
     for clip in clips:
         if clip.id not in by_id:
             by_id[clip.id] = grader.grade(clip, registers[clip.speaker])[0]

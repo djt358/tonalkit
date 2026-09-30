@@ -79,6 +79,13 @@ def load(path: str | Path) -> list[Clip]:
     return clips
 
 
+def write(path: str | Path, clips: list[Clip]) -> None:
+    """Write `clips` as a JSONL manifest that `load` reads back; the directory is created."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("".join(c.model_dump_json() + "\n" for c in clips), encoding="utf-8")
+
+
 def to_candidate_json(c: Candidate) -> str:
     """The tonekit candidate JSON for `c`; missing or empty labels become null."""
     targets = [
