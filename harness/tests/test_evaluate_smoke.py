@@ -47,7 +47,7 @@ def results(corpus, pack_toml, calib_json, tmp_path_factory) -> list[Result]:
 def test_run_returns_one_result_per_clip_in_manifest_order(corpus, results):
     _, clips = corpus
     assert [r.id for r in results] == [c.id for c in clips]
-    for clip, r in zip(clips, results):
+    for clip, r in zip(clips, results, strict=True):
         assert isinstance(r, Result)
         assert (r.set, r.pair, r.label, r.speaker) == (
             clip.set, clip.pair, clip.label, clip.speaker
@@ -57,7 +57,7 @@ def test_run_returns_one_result_per_clip_in_manifest_order(corpus, results):
 
 def test_each_result_has_a_syllable_per_intended_tone_with_the_right_shapes(corpus, results):
     _, clips = corpus
-    for clip, r in zip(clips, results):
+    for clip, r in zip(clips, results, strict=True):
         assert isinstance(r.intended_rank, int) and r.intended_rank >= 1
         assert isinstance(r.margin_llr, float) and math.isfinite(r.margin_llr)
         assert r.overall is None or 0.0 <= r.overall <= 1.0

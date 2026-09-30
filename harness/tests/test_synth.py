@@ -209,7 +209,7 @@ def test_tkh_synth_writes_a_corpus_evaluate_can_grade(tmp_path, pack_toml, calib
          "--seed", "3"]
     )  # fmt: skip
     assert code == 0
-    assert "8 clips" in capsys.readouterr().out  # 2 correct sources x 4
+    assert "8 clips from 2 sources (0 skipped)" in capsys.readouterr().out  # 2 correct sources x 4
 
     rows = manifest.load(out / "manifest.jsonl")
     assert len(rows) == 8 and len({r.id for r in rows}) == 8
@@ -246,7 +246,8 @@ def test_tkh_synth_skips_an_unusable_source_with_a_warning_and_fails_when_none_i
     both = write_manifest(src_root / "both.jsonl", [silent, good])
     assert cli.main(["synth", "--manifest", str(both), *args]) == 0
     captured = capsys.readouterr()
-    assert "skipping silent" in captured.err and "synthesised 1 clip from 1 source" in captured.out
+    assert "skipping silent" in captured.err
+    assert "synthesised 1 clip from 1 source (1 skipped); written to" in captured.out
 
     only = write_manifest(src_root / "only.jsonl", [silent])
     assert cli.main(["synth", "--manifest", str(only), *args]) == 1

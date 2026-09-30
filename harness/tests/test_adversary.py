@@ -271,7 +271,7 @@ def test_tkh_adversary_prints_a_summary_and_exits_zero(tmp_path, capsys):
     assert code == 0
     line = capsys.readouterr().out.strip().splitlines()[-1]
     assert line.startswith("adversary: 4 trials (0 failed), 0 false accepts, ")
-    assert "false rejects" in line and str(out) in line
+    assert "false rejects; 1 source (0 skipped); written to" in line and str(out) in line
     assert (out / "manifest.jsonl").exists() and (out / "truth.jsonl").exists()
 
 
@@ -332,7 +332,9 @@ def register_manifest(tmp_path_factory) -> Path:
 
 
 def load(manifest_path):
-    return source.load_sources(manifest_path, PACKS / "cmn.toml", PACKS / "cmn.calib.json", None)
+    return list(
+        source.load_sources(manifest_path, PACKS / "cmn.toml", PACKS / "cmn.calib.json", None)
+    )
 
 
 def test_a_source_carries_its_speakers_register_and_is_analysed_with_it(

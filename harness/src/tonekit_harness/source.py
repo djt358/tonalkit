@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import sys
+from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -18,6 +19,7 @@ from .manifest import Clip
 from .voice import PackTones, Voice
 
 MIN_VOICED_FRAMES = 5  # a syllable needs this many voiced frames to be redrawn (50 ms)
+MAX_GAP_FRAMES = 2  # unvoiced frames a voiced core tolerates inside itself (20 ms)
 MIN_REGISTER_ST = 4.0  # tonekit's minimum register width, expanded symmetrically
 
 
@@ -51,6 +53,21 @@ def register_bounds(voiced_st: np.ndarray) -> tuple[float, float]:
     return floor, ceil
 
 
+def voiced_core(voiced: np.ndarray, max_gap: int = MAX_GAP_FRAMES) -> tuple[int, int] | None:
+    """The voiced core [start, end) of a syllable's frames: the run with the most voiced frames,
+    where voiced frames at most `max_gap` unvoiced frames apart belong to the same run. None if
+    that run has fewer than `MIN_VOICED_FRAMES` voiced frames. A stray voiced frame at the edge of
+    the span (noise, a neighbour's tail) is a run of its own, so it never stretches the core."""
+    frames = np.flatnonzero(voiced)
+    if len(frames) == 0:
+        return None
+    runs = np.split(frames, np.flatnonzero(np.diff(frames) > max_gap + 1) + 1)
+    run = max(runs, key=len)  # the first, on a tie
+    if len(run) < MIN_VOICED_FRAMES:
+        return None
+    return int(run[0]), int(run[-1]) + 1
+
+
 def _extents(
     clip: Clip,
     pcm: np.ndarray,
@@ -65,7 +82,7 @@ def _extents(
     tonekit decodes the clip against its own intended reading (analysed with the speaker's
     register, so the same way the grader will see it) to say where each syllable is. A decoded span
     can include silence or a neighbour's tail, and WORLD calls some noise voiced, so the core is
-    the run from the first to the last frame that both WORLD and tonekit's pitch tracker call
+    the longest run (`voiced_core`) of frames that both WORLD and tonekit's pitch tracker call
     voiced within the span."""
     analysis_json = evaluate.analyze_pcm(clip.id, pcm, register_json)
     analysis = json.loads(analysis_json)
@@ -90,11 +107,8 @@ def _extents(
     extents: list[tuple[int, int] | None] = []
     for syllable in syllables:
         start, end = syllable["span"]["start_frame"], syllable["span"]["end_frame"]
-        frames = np.flatnonzero(voiced[start:end])
-        if len(frames) < MIN_VOICED_FRAMES:
-            extents.append(None)
-        else:
-            extents.append((start + int(frames[0]), start + int(frames[-1]) + 1))
+        core = voiced_core(voiced[start:end])
+        extents.append(None if core is None else (start + core[0], start + core[1]))
     return extents
 
 
@@ -155,12 +169,21 @@ def prepare(
 
 
 def load_sources(
-    manifest_path: str | Path, pack: str | Path, calib: str | Path | None, accent: str | None
-) -> list[Source]:
-    """`prepare` every non-synthetic clip labelled `correct` in the manifest, each with its
-    speaker's register (chained from their `register` clips exactly as `tkh eval` does; cold if
-    they have none). A clip with nothing to perturb is skipped with a warning; it is an error if
-    none can be perturbed."""
+    manifest_path: str | Path,
+    pack: str | Path,
+    calib: str | Path | None,
+    accent: str | None,
+    *,
+    skipped: list[str] | None = None,
+) -> Iterator[Source]:
+    """`prepare` every non-synthetic clip labelled `correct` in the manifest, one at a time (a
+    generator: a source is analysed when the caller asks for it, and can be dropped once used),
+    each with its speaker's register (chained from their `register` clips exactly as `tkh eval`
+    does; cold if they have none).
+
+    A clip with nothing to perturb is skipped with a warning on stderr; its message is appended to
+    `skipped`, if given, so the caller can report how many. It is an error (`SynthError`, raised
+    when the generator is exhausted) if no clip could be perturbed."""
     manifest_path = Path(manifest_path)
     clips = manifest.load(manifest_path)
     pack_toml = Path(pack).read_text(encoding="utf-8")
@@ -173,22 +196,25 @@ def load_sources(
         cache_dir=None,
     )
     registers = evaluate.speaker_registers(clips, grader)
-    candidates = [c for c in clips if c.label == "correct" and c.set != "synthetic"]
-    sources = []
-    for clip in candidates:
+    found = 0
+    for clip in clips:
+        if clip.label != "correct" or clip.set == "synthetic":
+            continue
         try:
-            sources.append(
-                prepare(
-                    clip,
-                    root=manifest_path.parent,
-                    pack_toml=pack_toml,
-                    calib_json=calib_json,
-                    accent=accent,
-                    register_json=registers[clip.speaker],
-                )
+            src = prepare(
+                clip,
+                root=manifest_path.parent,
+                pack_toml=pack_toml,
+                calib_json=calib_json,
+                accent=accent,
+                register_json=registers[clip.speaker],
             )
         except SynthError as e:
             print(f"warning: skipping {e}", file=sys.stderr)
-    if not sources:
+            if skipped is not None:
+                skipped.append(str(e))
+            continue
+        found += 1
+        yield src
+    if not found:
         raise SynthError(f"{manifest_path}: no clip labelled 'correct' can be perturbed")
-    return sources

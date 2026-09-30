@@ -122,7 +122,8 @@ def _row(src: Source, fam: families.Family, p: dict, seed: int) -> Clip:
 # ---- tkh synth --------------------------------------------------------------------------------
 
 
-def _plural(n: int, noun: str) -> str:
+def plural(n: int, noun: str) -> str:
+    """`n` `noun`(s), for the summary lines."""
     return f"{n} {noun}{'' if n == 1 else 's'}"
 
 
@@ -139,15 +140,20 @@ def add_source_args(p: argparse.ArgumentParser) -> None:
 
 
 def _run(args: argparse.Namespace) -> int:
+    skipped: list[str] = []
+    n_sources = 0
     try:
         if args.per_clip < 1:
             raise SynthError(f"--per-clip must be at least 1, not {args.per_clip}")
-        sources = source.load_sources(args.manifest, args.pack, args.calib, args.accent)
         pool = families.searched(("tone_error", "graded", "correct"))
         bounds = families.resolve_pool_bounds(pool, None)
         rng = np.random.default_rng(args.seed)
         made = []
-        for src in sources:
+        # one source at a time: its analysis is dropped once its perturbations are made
+        for src in source.load_sources(
+            args.manifest, args.pack, args.calib, args.accent, skipped=skipped
+        ):
+            n_sources += 1
             for _ in range(args.per_clip):
                 fam, params = families.draw(src.voice, rng, pool, bounds)
                 made.append(perturb(src, fam.name, params, int(rng.integers(2**31))))
@@ -156,8 +162,8 @@ def _run(args: argparse.Namespace) -> int:
         print(f"error: {e}", file=sys.stderr)
         return 1
     print(
-        f"synthesised {_plural(len(made), 'clip')} from {_plural(len(sources), 'source')}; "
-        f"written to {args.out}"
+        f"synthesised {plural(len(made), 'clip')} from {plural(n_sources, 'source')} "
+        f"({len(skipped)} skipped); written to {args.out}"
     )
     return 0
 

@@ -136,8 +136,11 @@ def _reject_order(find: tuple[Clip, list, float | None]) -> tuple[float, str]:
 
 
 def _run(args: argparse.Namespace) -> int:
+    skipped: list[str] = []
     try:
-        sources = source.load_sources(args.manifest, args.pack, args.calib, args.accent)
+        sources = list(
+            source.load_sources(args.manifest, args.pack, args.calib, args.accent, skipped=skipped)
+        )
         finds = search(sources, args.trials, None, args.seed, args.theta, out_dir=args.out)
     except (ManifestError, evaluate.EvalError, SynthError, OSError) as e:
         print(f"error: {e}", file=sys.stderr)
@@ -145,7 +148,7 @@ def _run(args: argparse.Namespace) -> int:
     print(
         f"adversary: {finds.trials} trials ({finds.failed} failed), "
         f"{finds.false_accepts} false accepts, {finds.false_rejects} false rejects; "
-        f"written to {args.out}"
+        f"{synth.plural(len(sources), 'source')} ({len(skipped)} skipped); written to {args.out}"
     )
     return 0
 
