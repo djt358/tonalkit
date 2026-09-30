@@ -21,8 +21,17 @@ cat "$headers"/*.h | grep -Eo '\b(uniffi|ffi)_tonekit[A-Za-z0-9_]*\(' | tr -d '(
 # instead of feeding the awk pipeline, and its exit status is checked: without that capture, a
 # failing `nm` (missing, or an unreadable archive) made the script exit silently, with no message
 # saying that `nm` was the problem.
-if ! nm -g "$lib" >"$tmp/nm.out" 2>"$tmp/nm.err"; then
-    echo "check-ffi-symbols: \`nm -g $lib\` failed:" >&2
+#
+# Apple's `nm` (llvm-nm) also reads the LLVM bitcode that Rust's prebuilt standard library embeds
+# in its objects, and an Xcode whose LLVM is older than rustc's can't parse it ("Unknown attribute
+# kind (86) (Producer: 'LLVM22...' Reader: 'LLVM APPLE_1_1500...')"). The symbols checked here are
+# in the Mach-O code, not the bitcode, so the bitcode reader is switched off where `nm` has one.
+nm_flags=(-g)
+if nm --help 2>&1 | grep -q -- '--no-llvm-bc'; then
+    nm_flags+=(--no-llvm-bc)
+fi
+if ! nm "${nm_flags[@]}" "$lib" >"$tmp/nm.out" 2>"$tmp/nm.err"; then
+    echo "check-ffi-symbols: \`nm ${nm_flags[*]} $lib\` failed:" >&2
     sed 's/^/  /' "$tmp/nm.err" >&2
     exit 1
 fi

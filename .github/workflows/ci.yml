@@ -115,6 +115,14 @@ jobs:
             echo "=== retry: -scheme TonekitSmoke-Package ===" | tee -a "$log"
             xcodebuild test -scheme TonekitSmoke-Package -destination "$destination" | tee -a "$log"
           fi
+      - name: Report a Swift test failure as an annotation
+        if: failure()
+        run: |
+          log=build/xcodebuild-test.log
+          [ -f "$log" ] || exit 0
+          { grep -E 'error:|Undefined symbol|Failing tests|failed \(' "$log" | head -n 30; echo '---'; tail -n 15 "$log"; } |
+            sed -e 's/%/%25/g' | awk '{ printf "%s%%0A", $0 }' >build/swift-tail.txt
+          echo "::error title=Swift tests failed::$(cat build/swift-tail.txt)"
       - name: Latency on the Simulator (informational)
         if: always()
         run: grep -E 'measured \[Time|TONEKIT_LATENCY' build/xcodebuild-test.log || true
