@@ -108,7 +108,7 @@ def read_wav(path: Path, name: str) -> tuple[bytes, np.ndarray]:
     return data, to_float32(samples)
 
 
-def _tonekit_py_version() -> str:
+def tonekit_py_version() -> str:
     try:
         return metadata.version("tonekit-py")
     except metadata.PackageNotFoundError:
@@ -124,7 +124,7 @@ def _tonekit_py_fingerprint() -> str:
     for f in sorted(p for p in package.iterdir() if p.suffix in {".so", ".pyd", ".dylib"}):
         h.update(f.name.encode())
         h.update(f.read_bytes())
-    return f"{_tonekit_py_version()}+{h.hexdigest()}"
+    return f"{tonekit_py_version()}+{h.hexdigest()}"
 
 
 def _cache_key(wav: bytes, register_json: str | None, f0_identity: str | None = None) -> str:
@@ -380,7 +380,7 @@ def _run(args: argparse.Namespace) -> int:
                 "calibration": str(args.calib) if args.calib else "the pack's own",
                 "accent": args.accent or "the pack's base accent",
                 "clips": ", ".join(f"{name} {n}" for name, n in per_set.items()),
-                "tonekit-py": _tonekit_py_version(),
+                "tonekit-py": tonekit_py_version(),
             },
         )
     except (ManifestError, EvalError, metrics.MetricsError, OSError) as e:
