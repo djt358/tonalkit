@@ -329,9 +329,10 @@ impl<'a> Decoder<'a> {
     /// The candidate's best path, its LLR (the path score) and its syllables, each judged in its
     /// context; `keys` is its [`Decoder::plan`]. `posterior` is left at 0 for the caller to fill.
     ///
-    /// A syllable with a nucleus is judged on the nucleus's shape and reported at the span its
-    /// path gives it; one without (relaxed pass only) is a likely miss: `unvoiced_syllable_llr`,
-    /// `Partial { [Unvoiced] }`.
+    /// A syllable with a nucleus is judged on the nucleus's shape and reported at the nucleus's
+    /// TBU, where that shape was measured (the lattice's span for it, whatever boundary pair the
+    /// path took); one without (relaxed pass only) is a likely miss at its path's span:
+    /// `unvoiced_syllable_llr`, `Partial { [Unvoiced] }`.
     pub(crate) fn score(
         &mut self,
         cand: &Candidate,
@@ -346,14 +347,13 @@ impl<'a> Decoder<'a> {
         let mut syllables = Vec::with_capacity(path.syllables.len());
         for ((&(i, j), target), ctx) in path.syllables.iter().zip(&cand.targets).zip(&ctxs) {
             let (from, to) = (self.bounds[i], self.bounds[j]);
-            let span = TbuSpan {
-                start_frame: from,
-                end_frame: to,
-            };
             let fit = match self.filler.nucleus_in(from, to) {
-                Some(n) => self.scorer.fit(n, span, target, ctx)?,
+                Some(n) => self.scorer.fit(n, target, ctx)?,
                 None => SyllableFit {
-                    span,
+                    span: TbuSpan {
+                        start_frame: from,
+                        end_frame: to,
+                    },
                     judgement: missed(target, unvoiced),
                 },
             };

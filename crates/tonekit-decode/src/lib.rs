@@ -38,7 +38,8 @@ const LOG_CLAMP: f64 = 1.0e6;
 /// Each candidate's `llr` is its best path: the sum of its syllables' target LLRs (each on the
 /// shape of the nucleus it holds, the same for every candidate) and duration priors, less
 /// `filler_per_frame` for every speech frame and plus `insertion_llr` for every nucleus that no
-/// syllable covers. Each syllable holds exactly one nucleus; only if that places
+/// syllable covers. A syllable's `span` is its nucleus's TBU, as in the lattice: the frames its
+/// judgement was measured on, not the boundary pair its path took. Each syllable holds exactly one nucleus; only if that places
 /// no path does a relaxed pass allow syllables without one, which score `unvoiced_syllable_llr`
 /// and are reported `Partial { [Unvoiced] }` (likely misses, ruling R33). A candidate whose
 /// targets cannot all be placed scores `K × unvoiced_syllable_llr` with every syllable at an empty

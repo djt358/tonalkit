@@ -473,7 +473,8 @@ Inputs: boundary candidates B (sorted frames), speech region, candidates of any 
   if unvoiced or too short. Every candidate, the null competitor and the lattice score these same
   shapes: a reading cannot choose the frames its tone is judged on, so a wrong tone cannot bend
   the evidence its way (by reaching into a pause's pitch-tracker bleed, say). Boundary pairs set
-  only the duration prior and what is left over as filler and insertions.
+  only the duration prior and what is left over as filler and insertions; a syllable holding
+  nucleus n is reported at n's TBU, where its evidence was measured.
 - **Per candidate with K targets,** a DP over (boundary index, syllables consumed):
   - A *syllable* edge (b_i → b_j, target k) holding nucleus n scores
     `LLR(shape_n, target_k, ctx_k) + dur(b_j − b_i)`. Here `ctx_k` = previous *target* tone,

@@ -18,8 +18,8 @@
 use std::collections::BTreeMap;
 
 use tonekit_core::{
-    Analysis, AssessError, GradingTarget, MeasureIssue, Measured, SyllableFit, TbuSpan,
-    ToneJudgement, ToneTarget,
+    Analysis, AssessError, GradingTarget, MeasureIssue, Measured, SyllableFit, ToneJudgement,
+    ToneTarget,
 };
 use tonekit_pack::{logsumexp, Expectation, LanguagePack, TargetContext};
 use tonekit_shape::Extracted;
@@ -257,16 +257,17 @@ impl<'a> Scorer<'a> {
         }
     }
 
-    /// The syllable at `span` holding nucleus `nucleus`, judged as `target` in `ctx`: `judge` on
-    /// the nucleus's shape, or [`unmeasured`] if it has none.
+    /// The syllable holding nucleus `nucleus`, judged as `target` in `ctx`: `judge` on the
+    /// nucleus's shape, or [`unmeasured`] if it has none. Its span is the nucleus's TBU, the frames
+    /// that shape was measured on (whichever boundary pair the path gave the syllable).
     pub(crate) fn fit(
         &self,
         nucleus: usize,
-        span: TbuSpan,
         target: &ToneTarget,
         ctx: &TargetContext,
     ) -> Result<SyllableFit, AssessError> {
-        let judgement = match &self.tbus[nucleus].segment {
+        let tbu = &self.tbus[nucleus];
+        let judgement = match &tbu.segment {
             Ok(ex) => {
                 let issues = merged_issues(&self.a.issues, &ex.issues);
                 self.pack
@@ -275,7 +276,10 @@ impl<'a> Scorer<'a> {
             }
             Err(issue) => unmeasured(target, *issue, self.unvoiced_llr),
         };
-        Ok(SyllableFit { span, judgement })
+        Ok(SyllableFit {
+            span: tbu.span.clone(),
+            judgement,
+        })
     }
 }
 
@@ -391,11 +395,6 @@ mod tests {
             moved(ctx(2, Some("3"), true)),
             ctx(2, Some("1"), true),
         ];
-        // The syllable's span is the caller's; the evidence is the nucleus's.
-        let span = TbuSpan {
-            start_frame: 3,
-            end_frame: 9,
-        };
         let mut s = Scorer::new(&a, &pack, &g, &tbus);
         for (n, tbu) in tbus.iter().enumerate() {
             let ex = tbu.segment.as_ref().unwrap();
@@ -409,9 +408,9 @@ mod tests {
                     // Twice: once computed, once from the cache.
                     assert_eq!(s.llr(n, key).unwrap().to_bits(), want.to_bits());
                     assert_eq!(s.llr(n, key).unwrap().to_bits(), want.to_bits());
-                    let fit = s.fit(n, span.clone(), t, c).unwrap();
+                    let fit = s.fit(n, t, c).unwrap();
                     assert_eq!(fit.judgement.llr_target.to_bits(), want.to_bits());
-                    assert_eq!(fit.span, span);
+                    assert_eq!(fit.span, tbu.span);
                 }
             }
         }
@@ -424,7 +423,6 @@ mod tests {
         let (t, c) = (target("4", None), ctx(0, None, true));
         let mut a = marked(hand(&[&[5.0, 1.0]]));
         let tbus = tbus(&a);
-        let span = tbus[0].span.clone();
         let warm = {
             let mut s = Scorer::new(&a, &pack, &g, &tbus);
             let k = s.key(&t, &c).unwrap();
@@ -435,7 +433,7 @@ mod tests {
         let k = s.key(&t, &c).unwrap();
         let cold = s.llr(0, k).unwrap();
         assert_ne!(cold, warm);
-        let fit = s.fit(0, span, &t, &c).unwrap();
+        let fit = s.fit(0, &t, &c).unwrap();
         assert_eq!(fit.judgement.llr_target, cold);
         assert_eq!(
             fit.judgement.measured,
@@ -461,7 +459,8 @@ mod tests {
         ] {
             assert_eq!(s.llr(0, key), Ok(-3.0));
         }
-        let fit = s.fit(0, tbus[0].span.clone(), &t, &c).unwrap();
+        let fit = s.fit(0, &t, &c).unwrap();
+        assert_eq!(fit.span, tbus[0].span);
         assert_eq!(fit.judgement, unmeasured(&t, MeasureIssue::Unvoiced, -3.0));
         assert_eq!(fit.judgement.expected, t.tone);
         assert!(fit.judgement.loglik.is_empty() && fit.judgement.heard.is_none());
