@@ -4,9 +4,11 @@ The families' sampling logic, on a hand-made voice, is in test_families.py."""
 
 from __future__ import annotations
 
+import json
+
 import numpy as np
 import pytest
-from synth_support import core, semitones
+from synth_support import HOP, core, semitones
 
 from tonekit_harness import synth
 from tonekit_harness.family import SynthError
@@ -156,19 +158,50 @@ def test_out_of_bounds_or_invalid_parameters_are_a_synth_error(src, family, para
         synth.perturb(src, family, params, 0)
 
 
-def test_every_bound_is_inclusive(src):
-    for family, params in [
+@pytest.mark.parametrize(
+    ("family", "params"),
+    [
         ("range_compress", {"factor": 0.4}),
         ("range_compress", {"factor": 0.8}),
         ("turn_shift", {"index": 2, "ms": -40.0}),
         ("turn_shift", {"index": 2, "ms": 120.0}),
+        ("turn_shift", {"index": 2, "ms": -120.0}),
+        ("turn_shift", {"index": 2, "ms": 40.0}),
+        ("onset_shift", {"index": 0, "chao": -0.5}),
+        ("onset_shift", {"index": 0, "chao": 1.5}),
+        ("offset_shift", {"index": 0, "chao": -1.5}),
+        ("offset_shift", {"index": 0, "chao": 0.5}),
         ("noise", {"snr_db": 5.0}),
         ("noise", {"snr_db": 20.0}),
         ("register_shift", {"st": 6.0}),
+        ("register_shift", {"st": -6.0}),
         ("rate", {"factor": 0.8}),
         ("rate", {"factor": 1.25}),
-    ]:
-        synth.perturb(src, family, params, 0)
+    ],
+)
+def test_every_bound_is_inclusive(src, family, params):
+    """The value at either end is accepted as given: recorded in the row as it was, not clamped,
+    rounded or moved."""
+    audio, truth, row = synth.perturb(src, family, params, 0)
+    recorded = row.synthetic["params"]
+    assert row.synthetic["family"] == family
+    assert {name: recorded[name] for name in params} == params
+    assert len(audio) > 0 and len(truth) == len(audio) // HOP + 1
+
+
+def test_a_numpy_integer_index_is_accepted_and_recorded_as_a_plain_int(src):
+    params = {"index": np.int64(1), "to": "4"}
+    audio, _, row = synth.perturb(src, "tone_swap", params, 0)
+    assert row.synthetic["params"] == {"index": 1, "to": "4"}
+    assert type(row.synthetic["params"]["index"]) is int
+    json.dumps(row.synthetic)  # a numpy integer would not serialise
+    again = synth.perturb(src, "tone_swap", {"index": 1, "to": "4"}, 0)
+    assert row == again[2]
+    np.testing.assert_array_equal(audio, again[0])
+    with pytest.raises(SynthError, match="index np.int64\\(7\\) is not a syllable"):
+        synth.perturb(src, "tone_swap", {"index": np.int64(7), "to": "2"}, 0)
+    _, _, numpy_float = synth.perturb(src, "range_compress", {"factor": np.float32(0.5)}, 0)
+    assert numpy_float.synthetic["params"] == {"factor": 0.5}
 
 
 def test_the_neutral_tone_is_never_a_tone_swap_source_or_target(src_neutral):

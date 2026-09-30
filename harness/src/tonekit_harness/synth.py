@@ -67,7 +67,10 @@ def perturb(src: Source, family: str, params: dict, seed: int) -> Made:
 
     `params` are the family's (see `families`); out-of-bounds values are a `SynthError`. All
     families, `identity` included, pass through WORLD, so they are comparable. The same `seed`
-    gives the same audio."""
+    gives the same audio.
+
+    If the result would peak above `PEAK` it is turned down to it; the row's
+    `synthetic["limiter_gain"]` is that gain (1.0 when the limiter did not act)."""
     fam = families.get(family)
     p = fam.validate(src.voice, params)
     rng = np.random.default_rng(seed)
@@ -88,14 +91,15 @@ def perturb(src: Source, family: str, params: dict, seed: int) -> Made:
     y = world.synthesise(resynth, n_samples)
     y = fam.audio(y, _voiced_samples(hz > 0, n_samples), p, rng, _noise_bed(p))
     peak = float(np.abs(y).max())
-    if peak > PEAK:
-        y = y * np.float32(PEAK / peak)
+    gain = PEAK / peak if peak > PEAK else 1.0
+    if gain < 1.0:
+        y = y * np.float32(gain)
 
     truth = [None if h == 0.0 else float(h) for h in hz]
-    return y, truth, _row(src, fam, p, seed)
+    return y, truth, _row(src, fam, p, seed, gain)
 
 
-def _row(src: Source, fam: families.Family, p: dict, seed: int) -> Clip:
+def _row(src: Source, fam: families.Family, p: dict, seed: int, limiter_gain: float) -> Clip:
     key = json.dumps({"params": p, "seed": seed}, sort_keys=True, separators=(",", ":"))
     cid = f"{src.clip.id}~{fam.name}~{hashlib.sha256(key.encode()).hexdigest()[:8]}"
     produced = fam.produced(src.voice, p)
@@ -115,7 +119,13 @@ def _row(src: Source, fam: families.Family, p: dict, seed: int) -> Clip:
         produced_tones=src.clip.produced_tones if produced is None else produced,
         condition=condition,
         source="synthetic-world",
-        synthetic={"from": src.clip.id, "family": fam.name, "params": p, "seed": seed},
+        synthetic={
+            "from": src.clip.id,
+            "family": fam.name,
+            "params": p,
+            "seed": seed,
+            "limiter_gain": limiter_gain,
+        },
     )
 
 

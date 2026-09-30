@@ -81,6 +81,7 @@ def test_the_row_says_what_was_done_and_inherits_nothing_that_permits_calibratio
         "family": "tone_swap",
         "params": {"index": 1, "to": "4"},
         "seed": 7,
+        "limiter_gain": 1.0,  # the peak limiter did not act
     }
     assert row.intended == src.clip.intended
     assert row.produced_tones == ["4", "4", "3"]
@@ -152,11 +153,17 @@ def test_a_noise_recording_can_be_supplied_and_is_looped(src, tmp_path):
         synth.perturb(src, "noise", {"snr_db": 10.0, "noise_wav": str(tmp_path / "no.wav")}, 0)
 
 
-def test_output_never_exceeds_full_scale(root, pack_toml):
+def test_output_never_exceeds_full_scale_and_the_limiter_gain_is_recorded(root, pack_toml, src):
     loud = write_clip(root, "src-loud", 1.9 * utterance(["4", "1", "3"]), intended=["4", "1", "3"])
     loud_src = source.prepare(loud, root=root, pack_toml=pack_toml)
-    audio, _, _ = synth.perturb(loud_src, "noise", {"snr_db": 5.0}, 0)
+    audio, _, row = synth.perturb(loud_src, "noise", {"snr_db": 5.0}, 0)
     assert np.abs(audio).max() <= 0.99
+    gain = row.synthetic["limiter_gain"]
+    assert 0.0 < gain < 1.0  # the limiter turned the clip down, and the row says by how much
+    # undoing the recorded gain recovers the unlimited peak, which was above full scale
+    assert np.abs(audio).max() / gain > 0.99
+    # a quiet clip is left alone: unit gain
+    assert synth.perturb(src, "noise", {"snr_db": 5.0}, 0)[2].synthetic["limiter_gain"] == 1.0
 
 
 # ---- the direction check -------------------------------------------------------------------------

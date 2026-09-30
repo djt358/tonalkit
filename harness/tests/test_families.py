@@ -7,7 +7,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from tonekit_harness import families
+from tonekit_harness import families, graded
 from tonekit_harness.families import PackTones, Voice
 
 PACKS = Path(__file__).resolve().parents[2] / "packs" / "cmn"
@@ -52,3 +52,37 @@ def test_a_signed_parameter_is_a_magnitude_with_either_sign(voice):
     ms = np.array(draws(voice, "turn_shift", {"ms": (60.0, 100.0)})["ms"])
     assert np.all((60.0 <= np.abs(ms)) & (np.abs(ms) <= 100.0))
     assert (ms < 0).sum() > 40 and (ms > 0).sum() > 40
+
+
+# ---- the turning point of a tone with more than three knots --------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("knots", "index"),
+    [
+        ((2.0, 1.0, 4.0), 1),  # T3: the dip
+        ((3.0, 1.0, 2.0, 4.0), 1),  # a low, then a rise: the low is the turn, not the middle
+        ((1.0, 4.0, 3.0, 2.0), 1),  # rises to a high, then falls
+        ((4.0, 3.0, 5.0, 2.0), 2),  # the peak, though the first interior knot is a shallower dip
+        ((1.0, 2.0, 3.0, 4.0), 2),  # no interior extremum: the middle knot, as for three knots
+        ((1.0, 3.0, 5.0), 1),
+    ],
+)
+def test_the_turning_knot_is_the_interior_extremum(knots, index):
+    assert graded.turning_knot(knots) == index
+
+
+def test_turn_shift_moves_the_turning_point_of_a_four_knot_contour():
+    """A made-up tone that falls to a low at its second knot and then rises: shifting the turn by
+    +-80 ms moves that low, not the third knot."""
+    pack = PackTones("xx", {"a": (3.0, 1.0, 2.0, 4.0)})
+    voice = Voice(
+        tones=("a",), extents=((5, 45),), st=np.full(60, 15.0), floor=10.0, ceil=20.0, pack=pack
+    )
+    fam = families.get("turn_shift")
+    low = {}
+    for ms in (-80.0, 80.0):
+        contour = fam.contour(voice, fam.validate(voice, {"index": 0, "ms": ms}))
+        low[ms] = int(np.nanargmin(contour[5:45]))
+        assert contour[5:45][low[ms]] == pytest.approx(10.0)  # Chao 1, the floor: the same low
+    assert (low[80.0] - low[-80.0]) * 10 == pytest.approx(160, abs=20)  # frames of 10 ms

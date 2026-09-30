@@ -17,6 +17,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+from numbers import Integral, Real
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -120,11 +121,12 @@ class Family:
         index = params.get("index")
         if self.indexed:
             ok = self.syllables(voice)
-            if isinstance(index, bool) or not isinstance(index, int) or index not in ok:
+            # any integer type (a numpy index from a search loop is fine); recorded as a plain int
+            if isinstance(index, bool) or not isinstance(index, Integral) or index not in ok:
                 raise self._fail(
                     f"index {index!r} is not a syllable this family can target (targetable: {ok})"
                 )
-            out["index"] = index
+            out["index"] = int(index)
         if self.takes_to:
             ok_tones = self.choices(voice, index)
             if params["to"] not in ok_tones:
@@ -132,7 +134,7 @@ class Family:
             out["to"] = params["to"]
         for name, bound in self.bounds.items():
             x = params[name]
-            if isinstance(x, bool) or not isinstance(x, (int, float)) or not np.isfinite(x):
+            if isinstance(x, bool) or not isinstance(x, Real) or not np.isfinite(x):
                 raise self._fail(f"{name} {x!r} is not a finite number")
             if not bound.contains(x):
                 raise self._fail(f"{name} {x:g} is outside {bound}")

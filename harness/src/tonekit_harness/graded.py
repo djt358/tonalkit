@@ -3,12 +3,25 @@ binary truth to search against."""
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 
 import numpy as np
 
 from .family import Bound, Family
 from .voice import HOP_MS, KNOT_MARGIN, Voice, render
+
+
+def turning_knot(knots: Sequence[float]) -> int:
+    """The index of the interior knot at the contour's turning point: the interior extremum (a
+    knot where the contour changes direction), the most pronounced one if there are several. A
+    contour with no interior extremum (monotone) has its middle knot."""
+    best, best_height = len(knots) // 2, 0.0
+    for j in range(1, len(knots) - 1):
+        before, after = knots[j] - knots[j - 1], knots[j + 1] - knots[j]
+        height = abs(after - before)  # how sharply the direction changes there
+        if before * after < 0 and height > best_height:
+            best, best_height = j, height
+    return best
 
 
 class RangeCompress(Family):
@@ -37,7 +50,8 @@ class _KnotShift(Family):
 
 
 class TurnShift(_KnotShift):
-    """The turning point (the middle knot of a tone with an interior knot) moved in time."""
+    """The turning point (the interior extremum of a tone with an interior knot, see
+    `turning_knot`) moved in time."""
 
     name = "turn_shift"
     bounds = {"ms": Bound(40.0, 120.0, signed=True)}
@@ -50,7 +64,7 @@ class TurnShift(_KnotShift):
         knots = self.knots(voice, p)
         start, end = voice.extents[p["index"]]  # type: ignore[misc]
         times = np.linspace(0.0, 1.0, len(knots))
-        j = len(knots) // 2
+        j = turning_knot(knots)
         shifted = times[j] + p["ms"] / ((end - start - 1) * HOP_MS)
         times[j] = np.clip(shifted, times[j - 1] + KNOT_MARGIN, times[j + 1] - KNOT_MARGIN)
         return render(voice, p["index"], knots, times)
