@@ -141,3 +141,39 @@ def test_a_provider_failure_names_the_clip(tmp_path, pack_toml, calib_json, monk
         evaluate.run(
             [clip], pack_toml, calib_json, None, root=tmp_path, use_cache=False, f0="swift-f0"
         )
+
+
+@pytest.mark.parametrize(
+    "constant", ["GRID_VOICED", "RESAMPLE_VERSION", "F0_MIN_HZ", "F0_MAX_HZ", "QUIET_PEAK_DBFS"]
+)
+def test_the_harnesss_own_track_rules_are_part_of_the_providers_cache_identity(
+    corpus, pack_toml, calib_json, tmp_path, monkeypatch, constant
+):
+    """Changing the band, the voiced threshold, the gain rule or the resampler must not reuse an
+    analysis cached under the old rules."""
+    root, clips = corpus
+    args = (clips[:1], pack_toml, calib_json, None)
+    evaluate.run(*args, root=root, cache_dir=tmp_path, f0="swift-f0")
+    before = pitch_tracks.provider_identity("swift-f0")
+    (first,) = tmp_path.glob("*.json")
+    monkeypatch.setattr(pitch_tracks, constant, getattr(pitch_tracks, constant) + 1)
+    assert pitch_tracks.provider_identity("swift-f0") != before
+    evaluate.run(*args, root=root, cache_dir=tmp_path, f0="swift-f0")
+    assert len(list(tmp_path.glob("*.json"))) == 2 and first.exists()
+
+
+def test_the_identity_names_the_package_version_and_every_rule():
+    identity = pitch_tracks.provider_identity("swift-f0")
+    assert identity.startswith("swift-f0 ")
+    for text in ("band 50-600", "grid_voiced 0.9", "gain -35dBFS", "resample "):
+        assert text in identity
+
+
+def test_the_package_version_is_read_once(monkeypatch):
+    pitch_tracks.provider_identity("swift-f0")
+
+    def boom(name):
+        raise AssertionError("the package metadata was read again")
+
+    monkeypatch.setattr(pitch_tracks.metadata, "version", boom)
+    pitch_tracks.provider_identity("swift-f0")

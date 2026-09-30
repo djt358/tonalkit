@@ -210,3 +210,49 @@ def test_an_unknown_provider_is_a_value_error_naming_the_known_ones():
         pitch_tracks.provider_track("crepe", np.zeros(1600, dtype=np.float32))
     with pytest.raises(ValueError, match="unknown f0 provider 'crepe'"):
         pitch_tracks.provider_identity("crepe")
+
+
+# ---- SwiftF0's input gain ----------------------------------------------------------------------
+
+
+def voiced_frames(pcm: np.ndarray) -> np.ndarray:
+    return np.array([h is not None for h in track_hz(swiftf0_track(pcm))])
+
+
+def dilate(mask: np.ndarray, frames: int = 1) -> np.ndarray:
+    padded = np.pad(mask, frames)
+    return np.array([padded[i : i + 2 * frames + 1].any() for i in range(len(mask))])
+
+
+def test_a_very_quiet_clip_is_voiced_where_the_same_clip_at_normal_level_is():
+    """SwiftF0 does not normalise its input (its README: scale a recording peaking below about
+    -35 dBFS first); the harness applies that rule so a quiet clip is not handicapped."""
+    normal = utterance(["4", "1", "3"])
+    quiet = (normal * 10 ** (-44 / 20)).astype(np.float32)  # peaks near -50 dBFS
+    assert 20 * np.log10(np.abs(quiet).max()) == pytest.approx(-50.0, abs=0.5)
+    loud, soft = voiced_frames(normal), voiced_frames(quiet)
+    assert loud.sum() > 60  # the reference really is voiced
+    assert not (loud & ~dilate(soft)).any()  # nothing voiced at normal level is lost when quiet
+    assert not (soft & ~dilate(loud)).any()  # and nothing appears
+
+
+def test_a_clip_above_the_threshold_is_fed_unchanged():
+    normal = utterance(["4", "1", "3"])
+    assert 20 * np.log10(np.abs(normal).max()) > pitch_tracks.QUIET_PEAK_DBFS
+    assert np.array_equal(pitch_tracks.swiftf0_input(normal), normal)
+    threshold = 10 ** (pitch_tracks.QUIET_PEAK_DBFS / 20)
+    at = np.array([0.0, threshold, -0.5 * threshold], dtype=np.float32)
+    assert np.array_equal(
+        pitch_tracks.swiftf0_input(at), at
+    )  # a peak at the threshold is not quiet
+
+
+def test_the_gain_rule_scales_only_quiet_clips_to_a_peak_of_half():
+    quiet = np.array([0.0, 0.004, -0.008, 0.002], dtype=np.float32)  # peak -42 dBFS
+    fed = pitch_tracks.swiftf0_input(quiet)
+    assert np.abs(fed).max() == pytest.approx(0.5)
+    np.testing.assert_allclose(fed, quiet / 0.008 * 0.5)
+    silence = np.zeros(100, dtype=np.float32)
+    assert np.array_equal(pitch_tracks.swiftf0_input(silence), silence)  # no peak, no gain
+    loud = np.array([0.0, 0.3, -0.2], dtype=np.float32)
+    assert np.array_equal(pitch_tracks.swiftf0_input(loud), loud)

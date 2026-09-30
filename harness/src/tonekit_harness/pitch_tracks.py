@@ -33,6 +33,15 @@ F0_MAX_HZ = 600.0
 SWIFTF0_VOICED = 0.5
 GRID_VOICED = 0.9
 
+# SwiftF0 does not normalise its input. Its README says to scale a recording that peaks below about
+# -35 dBFS, for example to a peak of 0.5, so `swiftf0_input` does that (for SwiftF0 only).
+QUIET_PEAK_DBFS = -35.0
+QUIET_TARGET_PEAK = 0.5
+
+# Bump when `resample` changes what it returns for the same frames: it is part of the provider's
+# cache identity, so analyses cached under the old resampler are not reused.
+RESAMPLE_VERSION = 1
+
 
 def _hz(frames: Sequence[dict]) -> list[float | None]:
     """The pitch of each F0Track frame, `None` unless it is a finite positive number (the frames
@@ -106,8 +115,18 @@ def resample(
     ]
 
 
+@cache
+def _swiftf0_version() -> str:
+    return metadata.version("swift-f0")
+
+
 def _swiftf0_identity() -> str:
-    return f"swift-f0 {metadata.version('swift-f0')}"
+    """The package version and every harness rule that shapes the track, so a change to any of them
+    is a different provider for the analysis cache."""
+    return (
+        f"swift-f0 {_swiftf0_version()}; band {F0_MIN_HZ:g}-{F0_MAX_HZ:g}; "
+        f"grid_voiced {GRID_VOICED:g}; gain {QUIET_PEAK_DBFS:g}dBFS; resample {RESAMPLE_VERSION}"
+    )
 
 
 @cache
@@ -119,11 +138,22 @@ def _detector():
     return SwiftF0(threads=1, spin=False)
 
 
-def swiftf0_track(pcm: np.ndarray) -> str:
-    """SwiftF0's f0 for 16 kHz mono `pcm`, on tonekit's grid, as `F0Track` JSON with the provider
-    `"swift-f0 <version>"` (see `resample`)."""
+def swiftf0_input(pcm: np.ndarray) -> np.ndarray:
+    """What SwiftF0 is fed: `pcm` as it is, unless it is quiet (`0 < peak < QUIET_PEAK_DBFS`), when
+    it is scaled to a peak of `QUIET_TARGET_PEAK`, as SwiftF0's README asks. tonekit itself always
+    gets the original samples."""
     pcm = np.asarray(pcm, dtype=np.float32)
-    found = _detector().detect(pcm, SAMPLE_RATE, fmin=F0_MIN_HZ, fmax=F0_MAX_HZ)
+    peak = float(np.abs(pcm).max()) if pcm.size else 0.0
+    if 0.0 < peak < 10.0 ** (QUIET_PEAK_DBFS / 20.0):
+        return (pcm / peak * QUIET_TARGET_PEAK).astype(np.float32)
+    return pcm
+
+
+def swiftf0_track(pcm: np.ndarray) -> str:
+    """SwiftF0's f0 for 16 kHz mono `pcm`, on tonekit's grid, as `F0Track` JSON whose provider is
+    the provider identity (`"swift-f0 <version>; ..."`; see `resample`, `swiftf0_input`)."""
+    pcm = np.asarray(pcm, dtype=np.float32)
+    found = _detector().detect(swiftf0_input(pcm), SAMPLE_RATE, fmin=F0_MIN_HZ, fmax=F0_MAX_HZ)
     frames = resample(found.timestamps, found.pitch_hz, found.confidence, len(pcm) // HOP + 1)
     return json.dumps({"frames": frames, "provider": _swiftf0_identity()})
 
