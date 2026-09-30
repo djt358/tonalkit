@@ -17,7 +17,9 @@ def test_gpe_counts_frames_voiced_in_both_whose_error_exceeds_20_percent():
 def test_gpe_is_relative_to_the_truth_and_exactly_20_percent_is_not_an_error():
     assert gpe([120.0], [100.0]) == 0.0  # |120 - 100| / 100 = 0.2 exactly
     assert gpe([80.0], [100.0]) == 0.0  # 0.2 again, below
-    assert gpe([100.0], [80.0]) == 1.0  # 20 / 80 = 0.25: the denominator is the truth, not the estimate
+    assert (
+        gpe([100.0], [80.0]) == 1.0
+    )  # 20 / 80 = 0.25: the denominator is the truth, not the estimate
     assert gpe([79.0], [100.0]) == 1.0  # 0.21
 
 
@@ -57,11 +59,18 @@ def test_unequal_lengths_are_a_value_error_naming_both(metric):
 
 def test_counts_pool_over_clips_so_the_rates_are_frame_weighted():
     a = count([100.0, 130.0], [100.0, 100.0])  # 2 frames, both voiced in 2, one gross error
-    b = count([None, 100.0, 100.0], [100.0, 100.0, None])  # 3 frames, both voiced in 1, voicing differs in 2
+    b = count(
+        [None, 100.0, 100.0], [100.0, 100.0, None]
+    )  # 3 frames, both voiced in 1, voicing differs in 2
     assert (a.frames, a.both_voiced, a.gross_errors, a.voicing_errors) == (2, 2, 1, 0)
     assert (b.frames, b.both_voiced, b.gross_errors, b.voicing_errors) == (3, 1, 0, 2)
     pooled = a + b
-    assert (pooled.frames, pooled.both_voiced, pooled.gross_errors, pooled.voicing_errors) == (5, 3, 1, 2)
+    assert (pooled.frames, pooled.both_voiced, pooled.gross_errors, pooled.voicing_errors) == (
+        5,
+        3,
+        1,
+        2,
+    )
     assert pooled.gpe == pytest.approx(1 / 3)  # not the mean of 1/2 and 0
     assert pooled.vde == pytest.approx(2 / 5)
 

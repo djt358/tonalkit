@@ -63,7 +63,8 @@ def test_an_unvoiced_frames_pitch_never_reaches_the_grid():
 
 def test_a_voiced_neighbour_supplies_the_pitch_when_the_other_bracketing_frame_is_unvoiced():
     # 50 ms is 1/8 of the way from frame 3 (48 ms, confidence 1.0) to frame 4 (64 ms, confidence
-    # 0.4, unvoiced by SwiftF0's own rule): 0.875 + 0.125 * 0.4 = 0.925 is voiced, at frame 3's pitch
+    # 0.4, unvoiced by SwiftF0's own rule): 0.875 + 0.125 * 0.4 = 0.925 is voiced, at frame 3's
+    # pitch
     hz = [100.0, 100.0, 100.0, 130.0, 300.0]
     frame = resample(swift_times(5), hz, [1.0, 1.0, 1.0, 1.0, 0.4], n_frames=6)[5]
     assert frame["hz"] == pytest.approx(130.0)

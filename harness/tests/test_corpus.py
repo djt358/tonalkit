@@ -57,7 +57,10 @@ def test_read_truth_gives_each_clips_f0_by_id(src, tmp_path):
     [
         ("{not json\n", r"truth\.jsonl:1: invalid JSON"),
         ('{"id": "a"}\n', r"truth\.jsonl:1: expected an id and f0_hz"),
-        ('{"id": "a", "f0_hz": [100.0, null]}\n{"id": "a", "f0_hz": []}\n', r"truth\.jsonl:2: duplicate id 'a'"),
+        (
+            '{"id": "a", "f0_hz": [100.0, null]}\n{"id": "a", "f0_hz": []}\n',
+            r"truth\.jsonl:2: duplicate id 'a'",
+        ),
     ],
 )
 def test_read_truth_reports_a_bad_line_with_its_position(tmp_path, text, message):

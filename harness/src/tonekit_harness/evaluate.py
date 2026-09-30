@@ -204,7 +204,7 @@ class Grader:
     accent: str
     root: Path
     cache_dir: Path | None  # None: no cache
-    f0: str | None = None  # an f0 provider's name (`pitch_tracks.PROVIDERS`); None: tonekit's pYIN
+    f0: str | None = None  # a name in `pitch_tracks.EXTERNAL_PROVIDERS`; None: tonekit's own pYIN
 
     def analysis(self, clip: Clip, register_json: str | None) -> str:
         wav, pcm = read_wav(self.root / clip.path, clip.id)
@@ -315,14 +315,13 @@ def run(
 
     `accent` defaults to the pack's `base_accent`. Each clip's `path` is relative to `root`.
     Analyses are cached under `cache_dir` (default `DEFAULT_CACHE_DIR`) unless `use_cache` is
-    false. `f0` names the pitch provider whose track tonekit analyses (`pitch_tracks.PROVIDERS`);
-    None is tonekit's own pYIN. Raises `EvalError` (naming the clip) if a clip cannot be read or
-    graded, or if `f0` is not a known provider.
+    false. `f0` names the pitch provider whose track tonekit analyses (one of
+    `pitch_tracks.EXTERNAL_PROVIDERS`); None is tonekit's own pYIN. Raises `EvalError` (naming
+    the clip) if a clip cannot be read or graded, or if `f0` is not a known provider.
     """
-    if f0 is not None and f0 not in pitch_tracks.PROVIDERS:
-        raise EvalError(
-            f"unknown f0 provider {f0!r} (known: {', '.join(pitch_tracks.PROVIDERS)})"
-        )
+    if f0 is not None and f0 not in pitch_tracks.EXTERNAL_PROVIDERS:
+        known = ", ".join(pitch_tracks.EXTERNAL_PROVIDERS)
+        raise EvalError(f"unknown f0 provider {f0!r} (known: {known})")
     seen: set[str] = set()
     for clip in clips:
         if clip.id in seen:

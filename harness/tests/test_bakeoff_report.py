@@ -31,9 +31,15 @@ def synthetic_result() -> Bakeoff:
     return Bakeoff(
         synthetic={
             "clean": Group(2, {"pyin": Counts(100, 80, 8, 5), "swift-f0": Counts(100, 90, 1, 2)}),
-            "noise ~5 dB": Group(1, {"pyin": Counts(50, 10, 1, 20), "swift-f0": Counts(50, 20, 5, 30)}),
-            "noise ~10 dB": Group(1, {"pyin": Counts(50, 10, 5, 20), "swift-f0": Counts(50, 20, 10, 30)}),
-            "noise ~20 dB": Group(1, {"pyin": Counts(10, 0, 0, 10), "swift-f0": Counts(10, 0, 0, 10)}),
+            "noise ~5 dB": Group(
+                1, {"pyin": Counts(50, 10, 1, 20), "swift-f0": Counts(50, 20, 5, 30)}
+            ),
+            "noise ~10 dB": Group(
+                1, {"pyin": Counts(50, 10, 5, 20), "swift-f0": Counts(50, 20, 10, 30)}
+            ),
+            "noise ~20 dB": Group(
+                1, {"pyin": Counts(10, 0, 0, 10), "swift-f0": Counts(10, 0, 0, 10)}
+            ),
         },
         gate=None,
     )
@@ -57,7 +63,8 @@ def test_the_synthetic_table_has_a_row_per_condition_and_provider(tmp_path):
 
 def test_the_observation_names_the_lower_gpe_per_condition_with_ties_and_gaps(tmp_path):
     text = render(tmp_path, synthetic_result())
-    # clean: 0.100 against 0.011; noise 5 dB: 0.100 against 0.250; noise 10 dB: 0.5 both; noise 20 dB: no frame
+    # clean: 0.100 against 0.011; noise 5 dB: 0.100 against 0.250; noise 10 dB: 0.5 both;
+    # noise 20 dB: no frame voiced in both
     assert (
         "Lower GPE, by condition: clean swift-f0; noise ~5 dB pyin; noise ~10 dB tie; "
         "noise ~20 dB n/a." in text
@@ -73,7 +80,10 @@ def test_the_report_says_how_the_tracks_were_measured(tmp_path):
 def test_the_gate_table_and_verdict(tmp_path):
     both = Bakeoff(synthetic=None, gate={"pyin": PASSING, "swift-f0": FAILING})
     text = render(tmp_path, both)
-    assert "| Provider | Correct-accept | Wrong-accept | S1 | Median threshold | Candidate-ID accuracy |" in text
+    assert (
+        "| Provider | Correct-accept | Wrong-accept | S1 | Median threshold "
+        "| Candidate-ID accuracy |" in text
+    )
     assert "S1 (leave-one-pair-out): pyin PASS, swift-f0 FAIL." in text
     assert "| pyin | 1.000 (3/3) | 0.000 (0/3) | PASS |" in text
     assert "| swift-f0 | 1.000 (3/3) | 1.000 (3/3) | FAIL |" in text
@@ -84,9 +94,7 @@ def test_candidate_id_accuracy_is_shown_when_there_are_diag_minimal_clips(tmp_pa
     with_minimal = gate_scores([0.9, 0.8, 0.85], [0.1, 0.2, 0.15], n_minimal=4)
     text = render(tmp_path, Bakeoff(synthetic=None, gate={"pyin": with_minimal}))
     assert "0.750 (3/4)" in text
-    assert "n/a (no clips)" in render(
-        tmp_path, Bakeoff(synthetic=None, gate={"pyin": PASSING})
-    )
+    assert "n/a (no clips)" in render(tmp_path, Bakeoff(synthetic=None, gate={"pyin": PASSING}))
 
 
 def test_both_sections_and_the_run_context_appear_in_order(tmp_path):
@@ -98,4 +106,3 @@ def test_both_sections_and_the_run_context_appear_in_order(tmp_path):
 
 def test_the_output_is_deterministic(tmp_path):
     assert render(tmp_path, synthetic_result()) == render(tmp_path, synthetic_result())
-

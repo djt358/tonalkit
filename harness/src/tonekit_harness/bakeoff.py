@@ -110,6 +110,8 @@ def _synthetic(
     directory: Path, pack_toml: str, calib_json: str | None, accent: str | None, cache_dir
 ) -> dict[str, Group]:
     clips = manifest.load(directory / "manifest.jsonl")
+    if not clips:
+        raise BakeoffError(f"{directory / 'manifest.jsonl'} has no clips")
     truth = corpus.read_truth(directory)
     grader = evaluate.Grader(
         pack_toml, calib_json, accent or evaluate.base_accent(pack_toml), directory, cache_dir
@@ -133,17 +135,22 @@ def _synthetic(
 
 
 def _gate(
-    manifest_path: Path, pack_toml: str, calib_json: str | None, accent: str | None,
-    cache_dir, use_cache: bool,
-) -> dict[str, GateScores]:  # fmt: skip
+    manifest_path: Path, pack_toml: str, calib_json: str | None, accent: str | None, cache_dir
+) -> dict[str, GateScores]:
     clips = manifest.load(manifest_path)
     n_minimal = sum(c.set == "diag_minimal" for c in clips)
     scores = {}
     for provider, f0 in PROVIDERS.items():
         results = evaluate.run(
-            clips, pack_toml, calib_json, accent,
-            root=manifest_path.parent, cache_dir=cache_dir, use_cache=use_cache, f0=f0,
-        )  # fmt: skip
+            clips,
+            pack_toml,
+            calib_json,
+            accent,
+            root=manifest_path.parent,
+            cache_dir=cache_dir,
+            use_cache=cache_dir is not None,
+            f0=f0,
+        )
         scores[provider] = GateScores(
             metrics.loo_gate(results), metrics.candidate_id_accuracy(results), n_minimal
         )
@@ -174,11 +181,7 @@ def run(
             if synthetic is None
             else _synthetic(Path(synthetic), pack_toml, calib_json, accent, cache)
         ),
-        gate=(
-            None
-            if gate is None
-            else _gate(Path(gate), pack_toml, calib_json, accent, cache_dir, use_cache)
-        ),
+        gate=(None if gate is None else _gate(Path(gate), pack_toml, calib_json, accent, cache)),
     )
 
 
@@ -191,7 +194,8 @@ def _context(args: argparse.Namespace) -> dict[str, str]:
         context["synthetic corpus"] = str(args.synthetic)
     if args.gate:
         context["gate manifest"] = str(args.gate)
-    swift = f"{pitch_tracks.provider_identity('swift-f0')} on onnxruntime {metadata.version('onnxruntime')}"
+    onnx = metadata.version("onnxruntime")
+    swift = f"{pitch_tracks.provider_identity('swift-f0')} on onnxruntime {onnx}"
     context |= {
         "pack": str(args.pack),
         "calibration": str(args.calib) if args.calib else "the pack's own",
@@ -232,7 +236,12 @@ def _run(args: argparse.Namespace) -> int:
         )
         bakeoff_report.write(args.report, result, context=_context(args))
     except (
-        BakeoffError, ManifestError, evaluate.EvalError, SynthError, metrics.MetricsError, OSError
+        BakeoffError,
+        ManifestError,
+        evaluate.EvalError,
+        SynthError,
+        metrics.MetricsError,
+        OSError,
     ) as e:
         print(f"error: {e}", file=sys.stderr)
         return 1

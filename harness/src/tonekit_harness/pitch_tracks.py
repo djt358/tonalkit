@@ -63,7 +63,8 @@ def resample(
     confidence: Sequence[float],
     n_frames: int,
 ) -> list[dict]:
-    """SwiftF0's frames on the 10 ms grid, as F0Track frames `{"hz": float | None, "voiced_p": float}`.
+    """SwiftF0's frames (at least one) on the 10 ms grid, as F0Track frames
+    `{"hz": float | None, "voiced_p": float}`.
 
     `timestamps` (seconds) are the frames' centres: SwiftF0's frame k is centred at k * 256
     samples, 16 ms apart. For the grid frame at time t, between SwiftF0 frames a and b:
@@ -95,7 +96,9 @@ def resample(
     nearest = np.where(w > 0.5, hi, lo)
     voiced = covered & (voiced_p >= GRID_VOICED) & usable[nearest]
     both = usable[lo] & usable[hi]
-    semitones = np.where(both, (1.0 - w) * st[lo] + w * st[hi], np.where(usable[lo], st[lo], st[hi]))
+    semitones = np.where(
+        both, (1.0 - w) * st[lo] + w * st[hi], np.where(usable[lo], st[lo], st[hi])
+    )
     grid_hz = 55.0 * 2.0 ** (semitones / 12.0)
     return [
         {"hz": float(h) if v else None, "voiced_p": float(np.clip(p, 0.0, 1.0))}
@@ -131,7 +134,7 @@ def swiftf0_track(pcm: np.ndarray) -> str:
 _PROVIDERS: dict[str, tuple[Callable[[], str], Callable[[np.ndarray], str]]] = {
     "swift-f0": (_swiftf0_identity, swiftf0_track),
 }
-PROVIDERS = tuple(_PROVIDERS)
+EXTERNAL_PROVIDERS = tuple(_PROVIDERS)  # the names `evaluate.run(f0=...)` takes
 
 
 def _provider(name: str):
@@ -139,7 +142,7 @@ def _provider(name: str):
         return _PROVIDERS[name]
     except KeyError:
         raise ValueError(
-            f"unknown f0 provider {name!r} (known: {', '.join(PROVIDERS)})"
+            f"unknown f0 provider {name!r} (known: {', '.join(EXTERNAL_PROVIDERS)})"
         ) from None
 
 

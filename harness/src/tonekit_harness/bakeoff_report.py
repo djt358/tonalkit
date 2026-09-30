@@ -7,7 +7,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from . import report
+from . import pitch_metrics, pitch_tracks, report
 from .metrics import CA_MIN, WA_MAX
 
 if TYPE_CHECKING:
@@ -19,12 +19,13 @@ _METHOD = (
     "Each clip's f0 is compared frame by frame, on tonekit's 10 ms grid, with the exact f0 that "
     "WORLD was given. **pyin** is tonekit's own track as its Analysis holds it, after octave "
     "repair (the raw pYIN track is not exposed to Python). **swift-f0** is SwiftF0's track "
-    "searched over 50-600 Hz and resampled onto the grid as tonekit receives it, before octave "
-    "repair: a grid frame is voiced where the interpolated confidence is at least 0.9. GPE is "
-    "the fraction of frames voiced in both whose pitch is more than 20% off; VDE is the "
-    "fraction of all frames whose voicing differs. Frames are pooled over the clips of a "
-    "condition. A noise clip is in the bucket of its SNR (`noise ~N dB`, the nearest of 5, 10 "
-    "and 20 dB); every other clip is clean."
+    f"searched over {pitch_tracks.F0_MIN_HZ:g}-{pitch_tracks.F0_MAX_HZ:g} Hz and resampled onto "
+    "the grid as tonekit receives it, before octave repair: a grid frame is voiced where the "
+    f"interpolated confidence is at least {pitch_tracks.GRID_VOICED:g}. GPE is the fraction of "
+    f"frames voiced in both whose pitch is more than {pitch_metrics.GROSS_ERROR:.0%} off; "
+    "VDE is the fraction of all frames whose voicing differs. Frames are pooled over the clips "
+    "of a condition. A noise clip is in the bucket of its SNR (`noise ~N dB`, the nearest of 5, "
+    "10 and 20 dB); every other clip is clean."
 )
 
 

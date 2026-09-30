@@ -28,7 +28,9 @@ def old_cache_key(wav: bytes, register_json: str | None) -> str:
     return h.hexdigest()
 
 
-def test_without_a_provider_the_cache_key_is_what_it_always_was(corpus, pack_toml, calib_json, tmp_path):
+def test_without_a_provider_the_cache_key_is_what_it_always_was(
+    corpus, pack_toml, calib_json, tmp_path
+):
     root, clips = corpus
     evaluate.run(clips[:1], pack_toml, calib_json, None, root=root, cache_dir=tmp_path)
     (entry,) = tmp_path.glob("*.json")
@@ -44,7 +46,9 @@ def test_f0_none_and_no_argument_are_the_same_run(corpus, pack_toml, calib_json)
     assert explicit == plain
 
 
-def test_a_named_provider_hands_its_track_to_analyze_as_f0_json(corpus, pack_toml, calib_json, monkeypatch):
+def test_a_named_provider_hands_its_track_to_analyze_as_f0_json(
+    corpus, pack_toml, calib_json, monkeypatch
+):
     root, clips = corpus
     seen: list[str | None] = []
     real = evaluate.tonekit_py.analyze
@@ -65,7 +69,9 @@ def test_a_named_provider_hands_its_track_to_analyze_as_f0_json(corpus, pack_tom
 
 def test_swift_f0_grades_a_support_clip(corpus, pack_toml, calib_json):
     root, clips = corpus
-    results = evaluate.run(clips, pack_toml, calib_json, None, root=root, use_cache=False, f0="swift-f0")
+    results = evaluate.run(
+        clips, pack_toml, calib_json, None, root=root, use_cache=False, f0="swift-f0"
+    )
     assert [r.id for r in results] == [c.id for c in clips]
     correct = [r for r in results if r.label == "correct"]
     assert all(r.overall is not None and 0.0 <= r.overall <= 1.0 for r in correct)
@@ -82,7 +88,10 @@ def test_the_provider_joins_the_cache_key_and_its_entries_are_reused(
     swift = evaluate.run(*args, root=root, cache_dir=tmp_path, f0="swift-f0")
     entries = sorted(tmp_path.glob("*.json"))
     assert len(entries) == 2 and pyin_entry in entries  # one entry per provider for the same audio
-    assert json.loads(next(e for e in entries if e != pyin_entry).read_text())["f0"]["provider"] == "external"
+    assert (
+        json.loads(next(e for e in entries if e != pyin_entry).read_text())["f0"]["provider"]
+        == "external"
+    )
 
     def boom(*a, **k):
         raise AssertionError("the provider ran although its analysis is cached")
@@ -109,7 +118,9 @@ def test_a_register_chain_uses_the_provider_too(tmp_path, pack_toml, calib_json)
         make_clip(tmp_path, "reg-1", ["1", "2", "3"], set="register", label="n/a"),
         make_clip(tmp_path, "gate-a", ["4", "1", "3"], pair="p1"),
     ]
-    results = evaluate.run(clips, pack_toml, calib_json, None, root=tmp_path, use_cache=False, f0="swift-f0")
+    results = evaluate.run(
+        clips, pack_toml, calib_json, None, root=tmp_path, use_cache=False, f0="swift-f0"
+    )
     assert [r.register_source for r in results] == ["cold", "given"]
 
 
@@ -127,4 +138,6 @@ def test_a_provider_failure_names_the_clip(tmp_path, pack_toml, calib_json, monk
 
     monkeypatch.setattr(pitch_tracks, "provider_track", broken)
     with pytest.raises(EvalError, match="boom-clip: the model exploded"):
-        evaluate.run([clip], pack_toml, calib_json, None, root=tmp_path, use_cache=False, f0="swift-f0")
+        evaluate.run(
+            [clip], pack_toml, calib_json, None, root=tmp_path, use_cache=False, f0="swift-f0"
+        )

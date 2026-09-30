@@ -64,7 +64,11 @@ def read_truth(out_dir: str | Path) -> dict[str, list[float | None]]:
             obj = json.loads(line)
         except json.JSONDecodeError as e:
             raise SynthError(f"{where}: invalid JSON: {e}") from e
-        if not (isinstance(obj, dict) and isinstance(obj.get("id"), str) and isinstance(obj.get("f0_hz"), list)):
+        if not (
+            isinstance(obj, dict)
+            and isinstance(obj.get("id"), str)
+            and isinstance(obj.get("f0_hz"), list)
+        ):
             raise SynthError(f"{where}: expected an id and f0_hz")
         if obj["id"] in truth:
             raise SynthError(f"{where}: duplicate id {obj['id']!r}")
