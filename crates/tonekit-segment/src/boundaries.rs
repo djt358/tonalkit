@@ -1,6 +1,6 @@
 use tonekit_core::{EnergyTrack, F0Track, FrameRange, Nucleus};
 
-use crate::region::floor_db;
+use crate::region::speech_frames;
 use crate::smooth::{frame, local_extrema, smoothed_db, Extremum};
 use crate::SegmentParams;
 
@@ -29,9 +29,10 @@ pub fn boundaries(
 /// 1. the region edges;
 /// 2. the frame of minimum smoothed dB between each pair of adjacent `nuclei` (the middle of a
 ///    flat minimum);
-/// 3. the edges of interior pauses (ruling R27): wherever the frame dB crosses the speech
-///    threshold (p10 dB plus `p.speech_margin_db`) inside the region, the loud frame beside the
-///    crossing, i.e. the first frame of a loud run entering it and the last frame leaving it.
+/// 3. the edges of interior pauses (ruling R27): wherever frames turn from speech to non-speech
+///    or back inside the region ([`speech_frames`](crate::speech_frames): strictly above p10 dB
+///    plus `p.speech_margin_db`), the loud frame beside the crossing, i.e. the first frame of a
+///    loud run entering it and the last frame leaving it.
 ///    That is the frame whose window straddles the syllable edge. These do not depend on
 ///    voicing. The steepest crossing first;
 /// 4. voicing edges: the frames where `hz.is_some()` changes (the first frame of the new state;
@@ -77,24 +78,23 @@ pub fn boundaries_with(
         }
     }
 
-    // 3. Pause edges: the first and last frame of each run of frames above the speech threshold,
-    // steepest first. Frame dB is used as it stands (as for the region itself): the 5-frame
-    // average smears an edge 2-3 frames into the silence, and in a short pause it would put the
-    // leaving and entering crossings a frame apart.
-    if let Some(threshold) = floor_db(e).map(|floor| floor + p.speech_margin_db) {
-        let db = |i: usize| e.db.get(i).copied().filter(|d| d.is_finite());
-        let loud = |i: usize| db(i).is_some_and(|d| d > threshold);
-        let mut edges: Vec<(usize, f32)> = (start.saturating_add(1)..end.min(e.db.len()))
-            .filter(|&i| loud(i - 1) != loud(i))
-            .map(|i| {
-                let jump = (db(i).unwrap_or(0.0) - db(i - 1).unwrap_or(0.0)).abs();
-                (if loud(i) { i } else { i - 1 }, jump)
-            })
-            .collect();
-        edges.sort_by(|a, b| b.1.total_cmp(&a.1).then(a.0.cmp(&b.0)));
-        for (at, _) in edges {
-            try_add(&mut kept, at, cap);
-        }
+    // 3. Pause edges: the first and last frame of each run of speech frames, steepest first.
+    // Frame dB is used as it stands (as for the region itself): the 5-frame average smears an
+    // edge 2-3 frames into the silence, and in a short pause it would put the leaving and
+    // entering crossings a frame apart.
+    let speech = speech_frames(e, p);
+    let db = |i: usize| e.db.get(i).copied().filter(|d| d.is_finite());
+    let loud = |i: usize| speech.get(i).copied().unwrap_or(false);
+    let mut edges: Vec<(usize, f32)> = (start.saturating_add(1)..end.min(e.db.len()))
+        .filter(|&i| loud(i - 1) != loud(i))
+        .map(|i| {
+            let jump = (db(i).unwrap_or(0.0) - db(i - 1).unwrap_or(0.0)).abs();
+            (if loud(i) { i } else { i - 1 }, jump)
+        })
+        .collect();
+    edges.sort_by(|a, b| b.1.total_cmp(&a.1).then(a.0.cmp(&b.0)));
+    for (at, _) in edges {
+        try_add(&mut kept, at, cap);
     }
 
     // 4. Voicing edges (R32: pitched or not), biggest voiced_p jump first (earliest first among

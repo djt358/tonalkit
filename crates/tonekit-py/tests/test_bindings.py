@@ -58,6 +58,16 @@ def test_analyze_accepts_a_given_register(pcm):
     assert "ColdStartRegister" not in analysis["issues"]  # 40 syllables: no longer cold
 
 
+def test_an_unusable_register_is_replaced_by_a_cold_start(pcm, analysis_json):
+    # I1: a corrupted persisted register (here the ceiling below the floor) must not stop grading.
+    register = {"floor_st": 24.0, "median_st": 17.5, "ceil_st": 9.0, "n_syllables": 40}
+    analysis = json.loads(tonekit_py.analyze(pcm, RATE, register_json=json.dumps(register)))
+    assert analysis["register_source"] == "ColdStart"
+    assert "InvalidRegister" in analysis["issues"]
+    assert "ColdStartRegister" in analysis["issues"]
+    assert analysis["register"] == json.loads(analysis_json)["register"]
+
+
 def test_analyze_accepts_an_external_f0_track(pcm, analysis_json, pack_toml, calib_json):
     """Feeding the analysis's own f0 back as an External track grades the same (R43 sanitising
     is a no-op on a clean track), and reports the provider as "external"."""
@@ -169,6 +179,11 @@ def test_empty_audio_is_a_value_error():
         tonekit_py.analyze(np.zeros(0, dtype=np.float32), RATE)
 
 
+def test_audio_over_thirty_seconds_is_a_value_error():
+    with pytest.raises(ValueError, match=r"audio is 30\.01 s long; at most 30 s can be assessed"):
+        tonekit_py.analyze(np.zeros(30 * RATE + 160, dtype=np.float32), RATE)
+
+
 def test_a_bad_pack_is_a_value_error(analysis_json, calib_json):
     request = json.dumps(request_413())
     with pytest.raises(ValueError, match="pack"):
@@ -212,6 +227,11 @@ def test_assess_errors_carry_the_assess_error_text(analysis_json, pack_toml, cal
     accent["grading"]["accent"] = "cmn-nowhere"
     with pytest.raises(ValueError, match="pack error"):
         tonekit_py.assess(analysis_json, pack_toml, calib_json, json.dumps(accent))
+
+    no_targets = request_413()
+    no_targets["intended"] = candidate("intended", [])
+    with pytest.raises(ValueError, match="invalid request: candidate intended has no targets"):
+        tonekit_py.assess(analysis_json, pack_toml, calib_json, json.dumps(no_targets))
 
 
 def test_malformed_json_is_a_value_error_that_names_the_argument(

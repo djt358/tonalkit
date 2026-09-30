@@ -450,6 +450,22 @@ fn an_empty_wav_exits_1() {
 }
 
 #[test]
+fn a_wav_over_thirty_seconds_exits_1() {
+    // R52: like empty audio, a well-formed WAV the library will not analyse.
+    let dir = TempDir::new().unwrap();
+    let wav = dir.path().join("long.wav");
+    write_f32_wav(&wav, 16_000, &vec![0.0; 30 * 16_000 + 160]);
+    let out = assess(&wav, &["--json"]);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(
+        stderr(&out).contains("audio is 30.01 s long; at most 30 s can be assessed"),
+        "{}",
+        stderr(&out)
+    );
+    assert!(stdout(&out).is_empty());
+}
+
+#[test]
 fn unknown_accents_and_tones_exit_1_naming_the_culprit() {
     let (_dir, wav) = fixture_dir();
 

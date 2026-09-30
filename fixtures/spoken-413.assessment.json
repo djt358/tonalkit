@@ -2,7 +2,7 @@
   "schema": "tonekit.assessment.v1",
   "intended": "intended",
   "intended_rank": 1,
-  "margin_llr": 1.957206,
+  "margin_llr": 1.9830225,
   "syllables": [
     {
       "expected": "4",

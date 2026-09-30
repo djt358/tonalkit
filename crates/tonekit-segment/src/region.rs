@@ -54,19 +54,27 @@ pub fn speech_threshold(e: &EnergyTrack, p: &SegmentParams) -> f32 {
     floor_db(e).map_or(f32::INFINITY, |floor| floor + p.speech_margin_db)
 }
 
-/// The stretch of `e` that holds speech: from the first to the last frame above
-/// [`speech_threshold`], half-open (`end` is one past the last such frame).
-///
-/// Pauses between syllables stay inside the region. `None` if fewer than 5 frames exceed the
-/// threshold (silence, a click, or a constant hum).
-pub fn speech_region(e: &EnergyTrack, p: &SegmentParams) -> Option<FrameRange> {
+/// Which frames of `e` are speech: finite and strictly above [`speech_threshold`]. The one test
+/// for speech, shared by the speech region, the pause edges among the boundaries and the
+/// decoder's filler.
+pub fn speech_frames(e: &EnergyTrack, p: &SegmentParams) -> Vec<bool> {
     let threshold = speech_threshold(e, p);
-    let loud: Vec<usize> =
-        e.db.iter()
-            .enumerate()
-            .filter(|&(_, &d)| d.is_finite() && d > threshold)
-            .map(|(i, _)| i)
-            .collect();
+    e.db.iter()
+        .map(|&d| d.is_finite() && d > threshold)
+        .collect()
+}
+
+/// The stretch of `e` that holds speech: from the first to the last [speech frame](speech_frames),
+/// half-open (`end` is one past the last such frame).
+///
+/// Pauses between syllables stay inside the region. `None` if fewer than 5 frames are speech
+/// (silence, a click, or a constant hum).
+pub fn speech_region(e: &EnergyTrack, p: &SegmentParams) -> Option<FrameRange> {
+    let loud: Vec<usize> = speech_frames(e, p)
+        .into_iter()
+        .enumerate()
+        .filter_map(|(i, speech)| speech.then_some(i))
+        .collect();
     let (&first, &last) = (loud.first()?, loud.last()?);
     (loud.len() >= MIN_SPEECH_FRAMES).then(|| FrameRange {
         start: frame(first),

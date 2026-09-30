@@ -6,6 +6,8 @@
 //!   log-duration prior, and charges what it leaves unused (hesitations, restarts, extra words)
 //!   as filler per speech frame plus an insertion per nucleus. Candidates compete in one softmax
 //!   with a null "something else was said" competitor.
+//! - Tone evidence is per nucleus (ruling R50): one shape each, on its tone-bearing unit, shared
+//!   by every candidate, the null competitor and the lattice, so no reading chooses its frames.
 //! - [`lattice`] gives one tone-bearing unit per nucleus with per-tone likelihoods and posteriors
 //!   from forward–backward over (previous tone, current tone), so context-dependent realisations
 //!   (the neutral tone, the half third) are scored in context.
@@ -17,6 +19,7 @@
 mod cache;
 mod closed;
 mod duration;
+mod evidence;
 mod lattice;
 mod null;
 
@@ -32,9 +35,11 @@ const LOG_CLAMP: f64 = 1.0e6;
 
 /// Scores `candidates` against the utterance in `a`, graded against `g`.
 ///
-/// Each candidate's `llr` is its best path: the sum of its syllables' target LLRs and duration
-/// priors, less `filler_per_frame` for every speech frame and plus `insertion_llr` for every
-/// nucleus that no syllable covers. Each syllable holds exactly one nucleus; only if that places
+/// Each candidate's `llr` is its best path: the sum of its syllables' target LLRs (each on the
+/// shape of the nucleus it holds, the same for every candidate) and duration priors, less
+/// `filler_per_frame` for every speech frame and plus `insertion_llr` for every nucleus that no
+/// syllable covers. A syllable's `span` is its nucleus's TBU, as in the lattice: the frames its
+/// judgement was measured on, not the boundary pair its path took. Each syllable holds exactly one nucleus; only if that places
 /// no path does a relaxed pass allow syllables without one, which score `unvoiced_syllable_llr`
 /// and are reported `Partial { [Unvoiced] }` (likely misses, ruling R33). A candidate whose
 /// targets cannot all be placed scores `K × unvoiced_syllable_llr` with every syllable at an empty
@@ -44,9 +49,9 @@ const LOG_CLAMP: f64 = 1.0e6;
 /// sorted by llr, highest first (ties keep the caller's order).
 ///
 /// Errors (the candidates and the grading are checked before any audio is scored):
-/// - `Pack { "empty candidate set" }` for no candidates;
+/// - `InvalidRequest { "empty candidate set" }` for no candidates;
 /// - `DuplicateCandidate` for a repeated id;
-/// - `Pack { "candidate <id> has no targets" }` for a candidate with no targets;
+/// - `InvalidRequest { "candidate <id> has no targets" }` for a candidate with no targets;
 /// - `UnknownTone` for a target or lexical-variant tone outside the pack's inventory;
 /// - `Pack` for anything the pack rejects (unknown accent, bad variant weights, bad style, a
 ///   tone it cannot realise in a context the decode needs).
@@ -58,13 +63,14 @@ pub fn decode(
 ) -> Result<DecodeResult, AssessError> {
     check_candidates(pack, candidates)?;
     check_grading(pack, g)?;
-    let mut decoder = Decoder::new(a, pack, g);
+    let tbus = evidence::tbus(a);
+    let mut decoder = Decoder::new(a, pack, g, &tbus);
     let plans = candidates
         .iter()
         .map(|cand| decoder.plan(cand))
         .collect::<Result<Vec<_>, _>>()?;
 
-    let null_llr = null::null_llr(&lattice::build(a, pack, g)?);
+    let null_llr = null::null_llr(&lattice::build(a, pack, g, &tbus)?);
     let mut scores = Vec::with_capacity(candidates.len());
     for (cand, plan) in candidates.iter().zip(&plans) {
         scores.push(decoder.score(cand, plan)?);
@@ -98,13 +104,13 @@ pub fn lattice(
     g: &GradingTarget,
 ) -> Result<ToneLattice, AssessError> {
     check_grading(pack, g)?;
-    lattice::build(a, pack, g)
+    lattice::build(a, pack, g, &evidence::tbus(a))
 }
 
 /// The caller-input checks of [`decode`] that need no grading, in candidate order.
 fn check_candidates(pack: &LanguagePack, candidates: &[Candidate]) -> Result<(), AssessError> {
     if candidates.is_empty() {
-        return Err(AssessError::Pack {
+        return Err(AssessError::InvalidRequest {
             message: "empty candidate set".into(),
         });
     }
@@ -115,7 +121,7 @@ fn check_candidates(pack: &LanguagePack, candidates: &[Candidate]) -> Result<(),
             });
         }
         if cand.targets.is_empty() {
-            return Err(AssessError::Pack {
+            return Err(AssessError::InvalidRequest {
                 message: format!("candidate {} has no targets", cand.id.0),
             });
         }
@@ -175,8 +181,8 @@ pub(crate) fn count_u32(n: usize) -> u32 {
 #[cfg(test)]
 pub(crate) mod test_support {
     use tonekit_core::{
-        AccentId, Analysis, EnergyTrack, F0Frame, F0Track, GradingTarget, RegisterSource, ToneId,
-        ToneTarget,
+        AccentId, Analysis, EnergyTrack, F0Frame, F0Track, FrameRange, GradingTarget, Nucleus,
+        RegisterSource, ToneId, ToneTarget,
     };
     use tonekit_pack::{LanguagePack, TargetContext};
     use tonekit_testkit::{chao_to_hz, register_for};
@@ -276,6 +282,27 @@ pub(crate) mod test_support {
             voiced_st: Vec::new(),
             issues: Vec::new(),
         }
+    }
+
+    /// `a`, from [`hand`] or [`hand_with`], with a nucleus in the middle of each syllable,
+    /// boundaries at their edges and the speech region from the first syllable to the last.
+    pub(crate) fn marked(mut a: Analysis) -> Analysis {
+        let frames = u32::try_from(a.f0.frames.len()).unwrap();
+        let n = (frames - LEAD) / (SYLLABLE + GAP);
+        let starts: Vec<u32> = (0..n).map(|k| LEAD + k * (SYLLABLE + GAP)).collect();
+        a.nuclei = starts
+            .iter()
+            .map(|&s| Nucleus {
+                frame: s + SYLLABLE / 2,
+                strength_db: 20.0,
+            })
+            .collect();
+        a.boundaries = starts.iter().flat_map(|&s| [s, s + SYLLABLE]).collect();
+        a.speech = starts.first().map(|&first| FrameRange {
+            start: first,
+            end: starts[starts.len() - 1] + SYLLABLE,
+        });
+        a
     }
 }
 

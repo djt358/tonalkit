@@ -12,7 +12,7 @@ use tonekit_core::{
 use tonekit_decode::{decode, lattice};
 use tonekit_f0::{energy, repair_octaves, F0Provider, Pyin};
 use tonekit_pack::LanguagePack;
-use tonekit_segment::{boundaries, nuclei, speech_region, speech_threshold, SegmentParams};
+use tonekit_segment::{boundaries, nuclei, speech_frames, speech_region, SegmentParams};
 use tonekit_shape::voiced_semitones;
 use tonekit_testkit::{register_for, synth, SynthSpec, SynthSyllable};
 
@@ -347,17 +347,17 @@ fn duplicate_candidate_ids_error() {
 }
 
 #[test]
-fn empty_candidate_set_and_empty_candidate_error() {
+fn empty_candidate_set_and_empty_candidate_are_invalid_requests() {
     let a = quiet(40);
     assert_eq!(
         decode(&a, &cmn(), &std_g(), &[]),
-        Err(AssessError::Pack {
+        Err(AssessError::InvalidRequest {
             message: "empty candidate set".into()
         })
     );
     assert_eq!(
         decode(&a, &cmn(), &std_g(), &[c("x", &["1"]), c("nil", &[])]),
-        Err(AssessError::Pack {
+        Err(AssessError::InvalidRequest {
             message: "candidate nil has no targets".into()
         })
     );
@@ -447,10 +447,13 @@ fn a_single_candidate_is_the_known_count_case() {
 }
 
 #[test]
-fn candidate_llr_is_the_sum_of_its_path() {
-    // llr = Σ (judge's llr_target + dur) − filler_per_frame × speech frames outside syllables
-    // + insertion_llr × nuclei outside syllables, with dur = −(ln(d/r))²/(2σ²) and r the median
-    // inter-nucleus interval.
+fn candidate_llr_is_its_tone_evidence_plus_the_best_placement() {
+    // llr = Σ judge's llr_target (each on the shape of the nucleus the syllable holds, reported at
+    // that nucleus's TBU, R50) + the best placement of the syllables on boundary pairs, which only
+    // the accounting decides: Σ dur(pair) − filler_per_frame × speech frames outside syllables +
+    // insertion_llr × nuclei outside syllables, with dur = −(ln(d/r))²/(2σ²) and r the median
+    // inter-nucleus interval, each pair a 60–800 ms span holding its syllable's nucleus and no
+    // other. The placement is found here by trying every one.
     let pack = cmn();
     let d = pack.calibration().decode.clone();
     let a = analysis_of(&three(vec![
@@ -471,13 +474,10 @@ fn candidate_llr_is_the_sum_of_its_path() {
         c("short", &["1"]),
     ];
     let r = decode(&a, &pack, &std_g(), &cands).unwrap();
+    let l = lattice(&a, &pack, &std_g()).unwrap();
 
-    let threshold = speech_threshold(&a.energy, &SegmentParams::default());
-    let speech = |from: u32, to: u32| {
-        (from..to)
-            .filter(|&f| a.energy.db[f as usize] >= threshold)
-            .count() as f64
-    };
+    let is_speech = speech_frames(&a.energy, &SegmentParams::default());
+    let speech = |from: u32, to: u32| (from..to).filter(|&f| is_speech[f as usize]).count() as f64;
     let mut frames: Vec<u32> = a.nuclei.iter().map(|n| n.frame).collect();
     frames.sort_unstable();
     let mut gaps: Vec<u32> = frames.windows(2).map(|w| w[1] - w[0]).collect();
@@ -485,29 +485,77 @@ fn candidate_llr_is_the_sum_of_its_path() {
     assert_eq!(gaps.len() % 2, 1, "{frames:?}");
     let rate_s = f64::from(gaps[gaps.len() / 2]) * 0.01;
     let sigma = f64::from(d.dur_sigma);
-    let filler = f64::from(d.filler_per_frame);
-    let insertion = f64::from(d.insertion_llr);
+    let dur = |frames: u32| {
+        let x = (f64::from(frames) * 0.01 / rate_s).ln();
+        -x * x / (2.0 * sigma * sigma)
+    };
+    let (filler, insertion) = (f64::from(d.filler_per_frame), f64::from(d.insertion_llr));
     let n_frames = a.energy.db.len() as u32;
     let nuclei = |from: u32, to: u32| frames.iter().filter(|&&f| from <= f && f < to).count();
     let left_over =
         |from: u32, to: u32| -filler * speech(from, to) + insertion * nuclei(from, to) as f64;
+    let mut bounds = a.boundaries.clone();
+    bounds.sort_unstable();
+    bounds.dedup();
+
+    /// The best score of placing syllables `k..` (each on one of its `options`) from frame `at`.
+    fn place(
+        k: usize,
+        at: u32,
+        options: &[Vec<(u32, u32)>],
+        score: &dyn Fn(u32, u32) -> f64,
+        left_over: &dyn Fn(u32, u32) -> f64,
+        end: u32,
+    ) -> f64 {
+        if k == options.len() {
+            return left_over(at, end);
+        }
+        options[k]
+            .iter()
+            .filter(|&&(from, _)| from >= at)
+            .map(|&(from, to)| {
+                left_over(at, from)
+                    + score(from, to)
+                    + place(k + 1, to, options, score, left_over, end)
+            })
+            .fold(f64::NEG_INFINITY, f64::max)
+    }
 
     for cand in &r.candidates {
-        let mut want = 0.0;
-        let mut at = 0;
-        let mut covered = 0;
-        for s in &cand.syllables {
-            let (from, to) = (s.span.start_frame, s.span.end_frame);
-            let x = (f64::from(to - from) * 0.01 / rate_s).ln();
-            want += f64::from(s.judgement.llr_target) - x * x / (2.0 * sigma * sigma);
-            want += left_over(at, from);
-            covered += nuclei(from, to);
-            at = to;
-        }
-        want += left_over(at, n_frames);
+        // Each syllable sits at the TBU of a distinct nucleus, and is judged on its shape.
+        let held: Vec<u32> = cand
+            .syllables
+            .iter()
+            .map(|s| {
+                let tbu = l.tbus.iter().position(|t| t.span == s.span).expect("a TBU");
+                assert_eq!(nuclei(s.span.start_frame, s.span.end_frame), 1);
+                frames[tbu]
+            })
+            .collect();
+        assert!(held.windows(2).all(|w| w[0] < w[1]), "{}", cand.id.0);
+        let options: Vec<Vec<(u32, u32)>> = held
+            .iter()
+            .map(|&f| {
+                let mut pairs = Vec::new();
+                for (i, &from) in bounds.iter().enumerate() {
+                    for &to in &bounds[i + 1..] {
+                        let ok = from <= f && f < to && nuclei(from, to) == 1;
+                        if ok && (6..=80).contains(&(to - from)) {
+                            pairs.push((from, to));
+                        }
+                    }
+                }
+                pairs
+            })
+            .collect();
+        let evidence: f64 = cand
+            .syllables
+            .iter()
+            .map(|s| f64::from(s.judgement.llr_target))
+            .sum();
+        let score = |from: u32, to: u32| dur(to - from);
+        let want = evidence + place(0, 0, &options, &score, &left_over, n_frames);
         approx::assert_abs_diff_eq!(f64::from(cand.llr), want, epsilon = 1e-4);
-        // Every syllable holds exactly one nucleus (a strict path exists for each candidate).
-        assert_eq!(covered, cand.syllables.len(), "{}", cand.id.0);
     }
     // The hesitation's nucleus is an insertion for the three-syllable spellings.
     let spell = r.candidates.iter().find(|x| x.id.0 == "spell").unwrap();
@@ -651,4 +699,50 @@ fn whisper_has_no_nuclei_and_is_not_measured() {
         assert_eq!((s.span.start_frame, s.span.end_frame), (start, start));
     }
     assert_eq!(r.null_llr, 0.0);
+}
+
+// --- Ruling R50: one shape per nucleus, for every candidate ------------------------------------
+
+#[test]
+fn every_candidate_is_judged_on_the_shapes_the_lattice_reports() {
+    // Spoken 4-1-3. Right or wrong, each reading is judged on the shape the lattice reports for
+    // the nucleus under each syllable: no target gets to choose the frames that suit it, so a
+    // wrong tone scores against the syllable as spoken.
+    let pack = cmn();
+    let a = analysis_of(&three(vec![vec![5., 1.], vec![5., 5.], vec![2., 1., 4.]]));
+    let l = lattice(&a, &pack, &std_g()).unwrap();
+    assert_eq!(l.tbus.len(), 3);
+    let cands = [
+        c("413", &["4", "1", "3"]),
+        c("423", &["4", "2", "3"]),
+        c("213", &["2", "1", "3"]),
+        c("414", &["4", "1", "4"]),
+    ];
+    let r = decode(&a, &pack, &std_g(), &cands).unwrap();
+    let llr = |id: &str, k: usize| {
+        let cand = r.candidates.iter().find(|x| x.id.0 == id).unwrap();
+        cand.syllables[k].judgement.llr_target
+    };
+    for cand in &r.candidates {
+        let targets = &cands.iter().find(|x| x.id == cand.id).unwrap().targets;
+        for (k, (fit, tbu)) in cand.syllables.iter().zip(&l.tbus).enumerate() {
+            let ctx = tonekit_pack::TargetContext {
+                index: k as u32,
+                count: 3,
+                prev: k.checked_sub(1).map(|p| targets[p].tone.clone()),
+                phrase_final: k == 2,
+            };
+            let shape = tbu.shape.as_ref().expect("every syllable is voiced");
+            let want = pack.judge(&std_g(), shape, &targets[k], &ctx, &[]).unwrap();
+            assert_eq!(fit.judgement, want, "{} syllable {k}", cand.id.0);
+            assert_eq!(fit.span, tbu.span, "{} syllable {k}", cand.id.0);
+        }
+    }
+    // The substituted syllables score against the background, below the spoken tones.
+    for (id, k) in [("423", 1), ("213", 0), ("414", 2)] {
+        assert!(
+            llr(id, k) < 0.0 && llr(id, k) < llr("413", k),
+            "{id}: {r:#?}"
+        );
+    }
 }

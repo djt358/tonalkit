@@ -333,6 +333,71 @@ fn neural_with_zero_weight_changes_nothing_but_is_basis() {
 }
 
 #[test]
+fn a_neural_probability_that_is_not_a_number_is_ignored_and_flagged() {
+    // I1: a NaN p used to make p_correct NaN (JSON null) even at β_nn = 0.
+    let w = FusionWeights {
+        beta_neural: 1.0,
+        ..seed()
+    };
+    for bad in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+        let a = fuse_syllable(&fit(1.0, Measured::Full), &[neural(bad)], &w);
+        assert_abs_diff_eq!(a.p_correct, sigmoid(1.0), epsilon = 1e-6);
+        assert_eq!(a.basis, vec![EvidenceKind::Acoustic]);
+        assert_eq!(
+            a.measured,
+            Measured::Partial {
+                issues: vec![MeasureIssue::InvalidEvidence]
+            }
+        );
+        // Good neural evidence beside it still counts.
+        let a = fuse_syllable(&fit(1.0, Measured::Full), &[neural(bad), neural(0.8)], &w);
+        assert_abs_diff_eq!(a.p_correct, sigmoid(1.0 + logit(0.8)), epsilon = 1e-5);
+        assert_eq!(a.basis, vec![EvidenceKind::Acoustic, EvidenceKind::Neural]);
+    }
+    // The flag joins the acoustic caveats once; an unmeasured syllable stays unmeasured.
+    let partial = Measured::Partial {
+        issues: vec![MeasureIssue::LowSnr],
+    };
+    let a = fuse_syllable(
+        &fit(1.0, partial),
+        &[neural(f32::NAN), neural(f32::NAN)],
+        &w,
+    );
+    assert_eq!(
+        a.measured,
+        Measured::Partial {
+            issues: vec![MeasureIssue::LowSnr, MeasureIssue::InvalidEvidence]
+        }
+    );
+    let a = fuse_syllable(&fit(-3.0, unmeasured()), &[neural(f32::NAN)], &w);
+    assert_eq!(a.measured, unmeasured());
+    assert!(a.basis.is_empty());
+    assert_abs_diff_eq!(a.p_correct, sigmoid(0.0), epsilon = 1e-6);
+}
+
+#[test]
+fn overall_never_skips_a_syllable_that_is_not_a_number() {
+    // I1: `f32::min` skips NaN, so a syllable graded NaN (here by weights that are not numbers,
+    // which a pack refuses but `assemble` can be handed) vanished from `overall`. It counts as a
+    // miss instead.
+    let w = FusionWeights {
+        beta_acoustic: f32::NAN,
+        ..seed()
+    };
+    let r = decoded(
+        vec![cand(
+            "a",
+            2.0,
+            vec![fit(3.0, Measured::Full), fit(3.0, Measured::Full)],
+        )],
+        0.0,
+    );
+    let out = assemble(&r, &id("a"), &[], &w, 0.0, vec![], register()).unwrap();
+    assert!(out.syllables.iter().all(|s| s.p_correct.is_nan()));
+    assert_eq!(out.overall, Some(0.0));
+}
+
+#[test]
 fn neural_probability_is_clamped_away_from_zero_and_one() {
     let w = FusionWeights {
         beta_neural: 1.0,
@@ -617,21 +682,16 @@ fn a_correct_single_candidate_reading_has_a_positive_margin() {
 }
 
 #[test]
-fn intended_candidate_missing_is_a_pack_error() {
+fn intended_candidate_missing_is_an_invalid_request() {
+    let missing = || {
+        Err(AssessError::InvalidRequest {
+            message: "intended candidate missing".into(),
+        })
+    };
     let r = decoded(vec![cand("a", 2.0, vec![fit(0.0, Measured::Full)])], 0.0);
-    assert_eq!(
-        run(&r, "nope", &[]),
-        Err(AssessError::Pack {
-            message: "intended candidate missing".into()
-        })
-    );
+    assert_eq!(run(&r, "nope", &[]), missing());
     let empty = decoded(vec![], 0.0);
-    assert_eq!(
-        run(&empty, "a", &[]),
-        Err(AssessError::Pack {
-            message: "intended candidate missing".into()
-        })
-    );
+    assert_eq!(run(&empty, "a", &[]), missing());
 }
 
 #[test]

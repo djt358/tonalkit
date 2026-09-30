@@ -14,67 +14,23 @@
 //! ```
 //!
 //! and the context-marginalised likelihood of TBU `i` is
-//! `loglik_i(c) = logsumexp_p(ln γ_{i−1}(p) + e_i(p, c))` (`e_0(c)` at `i = 0`).
+//! `loglik_i(c) = logsumexp_p(ln α̂_{i−1}(p) + e_i(p, c))` (`e_0(c)` at `i = 0`), where
+//! `α̂_{i−1} ∝ exp(α_{i−1})` is the previous tone's posterior given the TBUs up to it only. The full
+//! posterior `γ_{i−1}` would already hold TBU `i`'s own evidence (through `β_{i−1}`) and count it
+//! twice.
 
 use tonekit_core::{
-    Analysis, AssessError, GradingTarget, LatticeTbu, MeasureIssue, Measured, TbuSpan, ToneId,
-    ToneLattice, ToneShape,
+    Analysis, AssessError, GradingTarget, LatticeTbu, MeasureIssue, Measured, ToneId, ToneLattice,
+    ToneShape,
 };
 use tonekit_pack::{logsumexp, LanguagePack, TargetContext};
 
-use crate::cache::{extract_span, merged_issues};
+use crate::cache::merged_issues;
+use crate::evidence::Tbu;
 use crate::{clamp_log, count_u32, pack_err};
 
 /// Schema string carried by every [`ToneLattice`].
 pub(crate) const SCHEMA: &str = "tonekit.lattice.v1";
-
-/// The TBU of each nucleus: from the nearest boundary strictly before the nucleus frame to the
-/// nearest boundary strictly after it.
-///
-/// - With no boundary before (after) the nucleus, the TBU starts (ends) at `lo_edge` (`hi_edge`),
-///   widened if need be so the nucleus frame stays inside.
-/// - Neighbouring TBUs that would overlap — nuclei sharing both bounds, or a nucleus sitting on a
-///   boundary — are cut at the frame midway between their nuclei (rounded up, so each nucleus
-///   stays inside its own TBU).
-///
-/// `nuclei` and `bounds` are frame positions in any order; the TBUs follow the nuclei in time, one
-/// per distinct nucleus frame, and never overlap.
-pub(crate) fn tbu_spans(
-    nuclei: &[u32],
-    bounds: &[u32],
-    lo_edge: u32,
-    hi_edge: u32,
-) -> Vec<TbuSpan> {
-    let mut frames = nuclei.to_vec();
-    frames.sort_unstable();
-    frames.dedup();
-    let mut spans: Vec<TbuSpan> = frames
-        .iter()
-        .map(|&f| TbuSpan {
-            start_frame: bounds
-                .iter()
-                .copied()
-                .filter(|&b| b < f)
-                .max()
-                .unwrap_or(lo_edge.min(f)),
-            end_frame: bounds
-                .iter()
-                .copied()
-                .filter(|&b| b > f)
-                .min()
-                .unwrap_or(hi_edge.max(f.saturating_add(1))),
-        })
-        .collect();
-    for q in 1..spans.len() {
-        if spans[q - 1].end_frame > spans[q].start_frame {
-            let (left, right) = (frames[q - 1], frames[q]);
-            let cut = left + (right - left).div_ceil(2);
-            spans[q - 1].end_frame = cut;
-            spans[q].start_frame = cut;
-        }
-    }
-    spans
-}
 
 /// Log-emissions of one TBU. `None` is unmeasured (0 for every state). Otherwise, for TBU 0 the
 /// table holds `e_0(c)` (length `t`, no previous tone); for later TBUs `e_i(p, c)` at `p·t + c`.
@@ -117,27 +73,19 @@ pub(crate) fn forward_backward(log_prior: &[f64], emissions: &[Emission]) -> Mar
         }
     }
 
-    // ln γ_i(c), normalised per TBU.
+    // ln γ_i(c) and ln α̂_i(c), normalised per TBU.
     let log_gamma: Vec<Vec<f64>> = (0..n)
-        .map(|i| {
-            let joint: Vec<f64> = (0..t).map(|c| alpha[i][c] + beta[i][c]).collect();
-            let z = logsumexp(joint.iter().copied());
-            if z.is_finite() {
-                joint.iter().map(|v| v - z).collect()
-            } else {
-                // Unreachable with finite emissions and a positive prior; stay well-defined.
-                vec![-(t as f64).ln(); t]
-            }
-        })
+        .map(|i| normalised(&(0..t).map(|c| alpha[i][c] + beta[i][c]).collect::<Vec<_>>()))
         .collect();
+    let log_forward: Vec<Vec<f64>> = alpha.iter().map(|row| normalised(row)).collect();
     // An unmeasured TBU's emission is 0 in every context, so its marginal is exactly 0 (the
-    // logsumexp would give ln Σγ, 0 only up to rounding).
+    // logsumexp would give ln Σα̂, 0 only up to rounding).
     let loglik = (0..n)
         .map(|i| match (&emissions[i], i) {
             (None, _) => vec![0.0; t],
             (Some(_), 0) => (0..t).map(|c| e(0, 0, c)).collect(),
             (Some(_), _) => (0..t)
-                .map(|c| logsumexp((0..t).map(|p| log_gamma[i - 1][p] + e(i, p, c))))
+                .map(|c| logsumexp((0..t).map(|p| log_forward[i - 1][p] + e(i, p, c))))
                 .collect(),
         })
         .collect();
@@ -146,6 +94,17 @@ pub(crate) fn forward_backward(log_prior: &[f64], emissions: &[Emission]) -> Mar
         .map(|row| row.iter().map(|v| v.exp()).collect())
         .collect();
     Marginals { posterior, loglik }
+}
+
+/// Log-values shifted to sum to 1 in probability; uniform if they cannot be (unreachable with
+/// finite emissions and a positive prior, but kept well-defined).
+fn normalised(log_values: &[f64]) -> Vec<f64> {
+    let z = logsumexp(log_values.iter().copied());
+    if z.is_finite() {
+        log_values.iter().map(|v| v - z).collect()
+    } else {
+        vec![-(log_values.len() as f64).ln(); log_values.len()]
+    }
 }
 
 /// The calibrated log-likelihood of every (previous, current) tone pair for TBU `i` of `n`.
@@ -181,24 +140,19 @@ fn emission(
     Ok(table)
 }
 
-/// The open lattice of `a` (grading already validated by the caller).
+/// The open lattice of `a` on its nuclei's evidence `tbus` ([`crate::evidence::tbus`]; grading
+/// already validated by the caller).
 pub(crate) fn build(
     a: &Analysis,
     pack: &LanguagePack,
     g: &GradingTarget,
+    tbus: &[Tbu],
 ) -> Result<ToneLattice, AssessError> {
-    let nuclei: Vec<u32> = a.nuclei.iter().map(|n| n.frame).collect();
-    let (lo_edge, hi_edge) = match &a.speech {
-        Some(r) => (r.start, r.end),
-        None => (0, count_u32(a.f0.frames.len())),
-    };
-    let spans = tbu_spans(&nuclei, &a.boundaries, lo_edge, hi_edge);
-    let n = spans.len();
-
+    let n = tbus.len();
     let mut units = Vec::with_capacity(n);
     let mut emissions = Vec::with_capacity(n);
-    for (i, span) in spans.into_iter().enumerate() {
-        match extract_span(a, span.start_frame, span.end_frame) {
+    for (i, tbu) in tbus.iter().enumerate() {
+        match &tbu.segment {
             Ok(ex) => {
                 let issues = merged_issues(&a.issues, &ex.issues);
                 emissions.push(Some(emission(pack, g, &ex.shape, &issues, i, n)?));
@@ -207,11 +161,15 @@ pub(crate) fn build(
                 } else {
                     Measured::Partial { issues }
                 };
-                units.push((span, measured, Some(ex.shape)));
+                units.push((tbu.span.clone(), measured, Some(ex.shape.clone())));
             }
             Err(issue) => {
                 emissions.push(None);
-                units.push((span, Measured::NotMeasured { issue }, None));
+                units.push((
+                    tbu.span.clone(),
+                    Measured::NotMeasured { issue: *issue },
+                    None,
+                ));
             }
         }
     }
@@ -243,106 +201,13 @@ pub(crate) fn build(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::{cmn, hand_with, std_g, GAP, LEAD, SYLLABLE};
-    use tonekit_core::{FrameRange, Nucleus};
+    use crate::evidence::tbus;
+    use crate::test_support::{cmn, hand, hand_with, marked, std_g};
 
     const EPS: f64 = 1e-9;
 
-    fn span(start_frame: u32, end_frame: u32) -> TbuSpan {
-        TbuSpan {
-            start_frame,
-            end_frame,
-        }
-    }
-
     fn ln(v: &[f64]) -> Vec<f64> {
         v.iter().map(|p| p.ln()).collect()
-    }
-
-    // --- TBU spans --------------------------------------------------------------------------
-
-    #[test]
-    fn tbus_take_the_nearest_boundaries_on_either_side() {
-        let bounds = [20, 23, 33, 45, 48, 51, 76, 82, 108];
-        assert_eq!(
-            tbu_spans(&[31, 65, 102], &bounds, 20, 108),
-            vec![span(23, 33), span(51, 76), span(82, 108)]
-        );
-        // A nucleus on a boundary is bounded by the ones strictly before and after it.
-        assert_eq!(tbu_spans(&[48], &bounds, 20, 108), vec![span(45, 51)]);
-    }
-
-    #[test]
-    fn tbus_fall_back_to_the_region_edges() {
-        assert_eq!(tbu_spans(&[30], &[40, 60], 10, 90), vec![span(10, 40)]);
-        assert_eq!(tbu_spans(&[70], &[40, 60], 10, 90), vec![span(60, 90)]);
-        assert_eq!(tbu_spans(&[70], &[], 10, 90), vec![span(10, 90)]);
-        // The fallback never leaves the nucleus outside its TBU.
-        assert_eq!(tbu_spans(&[5], &[], 10, 90), vec![span(5, 90)]);
-    }
-
-    #[test]
-    fn nuclei_sharing_both_bounds_split_midway() {
-        // 30 and 50 both sit between boundaries 20 and 70: split at 40.
-        assert_eq!(
-            tbu_spans(&[50, 30], &[20, 70], 0, 100),
-            vec![span(20, 40), span(40, 70)]
-        );
-        // Three in one gap: cuts at 35 and 55.
-        assert_eq!(
-            tbu_spans(&[30, 40, 70], &[20, 80], 0, 100),
-            vec![span(20, 35), span(35, 55), span(55, 80)]
-        );
-        // Only the run that shares bounds is split.
-        assert_eq!(
-            tbu_spans(&[10, 30, 50], &[20, 70], 0, 100),
-            vec![span(0, 20), span(20, 40), span(40, 70)]
-        );
-    }
-
-    #[test]
-    fn tbus_never_overlap_when_a_nucleus_sits_on_a_boundary() {
-        // 40 is both a nucleus and a boundary: its TBU is (20, 60), and 50's is (40, 60).
-        assert_eq!(
-            tbu_spans(&[40, 50], &[20, 40, 60], 0, 100),
-            vec![span(20, 45), span(45, 60)]
-        );
-        // A nucleus on a boundary right after its neighbour's nucleus.
-        assert_eq!(
-            tbu_spans(&[30, 40], &[20, 40, 60], 0, 100),
-            vec![span(20, 35), span(35, 60)]
-        );
-    }
-
-    #[test]
-    fn every_nucleus_stays_inside_its_own_tbu() {
-        // Odd and unit spacings round the cut up; a repeated nucleus is one TBU.
-        assert_eq!(
-            tbu_spans(&[30, 45], &[20, 70], 0, 100),
-            vec![span(20, 38), span(38, 70)]
-        );
-        assert_eq!(
-            tbu_spans(&[30, 31], &[20, 70], 0, 100),
-            vec![span(20, 31), span(31, 70)]
-        );
-        assert_eq!(tbu_spans(&[30, 30], &[20, 70], 0, 100), vec![span(20, 70)]);
-        for (nuclei, bounds) in [
-            (vec![5, 12, 13, 40, 41, 90], vec![10, 13, 40, 60]),
-            (vec![0, 1, 2], vec![]),
-            (vec![50, 20, 80], vec![20, 50, 80]),
-        ] {
-            let spans = tbu_spans(&nuclei, &bounds, 0, 100);
-            let mut sorted = nuclei.clone();
-            sorted.sort_unstable();
-            sorted.dedup();
-            assert_eq!(spans.len(), sorted.len());
-            for (s, &f) in spans.iter().zip(&sorted) {
-                assert!(s.start_frame <= f && f < s.end_frame, "{f} in {s:?}");
-            }
-            for pair in spans.windows(2) {
-                assert!(pair[0].end_frame <= pair[1].start_frame, "{spans:?}");
-            }
-        }
     }
 
     // --- Forward–backward -------------------------------------------------------------------
@@ -425,15 +290,30 @@ mod tests {
         for row in &mut posterior {
             row.iter_mut().for_each(|v| *v /= total);
         }
+        // The previous tone's distribution given the TBUs up to it only: enumerate the prefixes.
+        let forward = |i: usize| -> Vec<f64> {
+            let mut f = vec![0.0; t];
+            for code in 0..t.pow(i as u32 + 1) {
+                let seq: Vec<usize> = (0..=i).map(|j| code / t.pow(j as u32) % t).collect();
+                f[seq[i]] += (0..=i)
+                    .map(|j| prior[seq[j]] * e(j, seq[j.saturating_sub(1)], seq[j]).exp())
+                    .product::<f64>();
+            }
+            let z: f64 = f.iter().sum();
+            f.iter().map(|v| v / z).collect()
+        };
         let loglik = (0..n)
             .map(|i| {
                 (0..t)
                     .map(|c| match i {
                         0 => e(0, 0, c),
-                        _ => (0..t)
-                            .map(|p| posterior[i - 1][p] * e(i, p, c).exp())
-                            .sum::<f64>()
-                            .ln(),
+                        _ => {
+                            let before = forward(i - 1);
+                            (0..t)
+                                .map(|p| before[p] * e(i, p, c).exp())
+                                .sum::<f64>()
+                                .ln()
+                        }
                     })
                     .collect()
             })
@@ -480,19 +360,34 @@ mod tests {
     }
 
     #[test]
-    fn loglik_marginalises_the_previous_tone_with_its_posterior() {
+    fn loglik_marginalises_the_previous_tone_with_its_forward_posterior() {
         let prior = ln(&[0.5, 0.5]);
         let second = vec![-4.0, 0.0, -1.0, -2.0];
         let m = forward_backward(&prior, &[Some(vec![0.0, -1.0]), Some(second.clone())]);
-        let g0 = &m.posterior[0];
+        // TBU 0's tone given TBU 0 alone: prior × e_0, normalised.
+        let z = 0.5 + 0.5 * (-1f64).exp();
+        let f0 = [0.5 / z, 0.5 * (-1f64).exp() / z];
         for c in 0..2 {
-            let want = (g0[0] * second[c].exp() + g0[1] * second[2 + c].exp()).ln();
-            assert!((m.loglik[1][c] - want).abs() < 1e-9);
+            let want = (f0[0] * second[c].exp() + f0[1] * second[2 + c].exp()).ln();
+            assert!((m.loglik[1][c] - want).abs() < 1e-12);
         }
-        // The posterior of TBU 0 already sees TBU 1: B at TBU 0 explains TBU 1 better on the
-        // whole (−1, −2 vs −4, 0 → logsumexp −0.69 vs 0.018), so it moves off e_0 alone.
-        let alone = forward_backward(&prior, &[Some(vec![0.0, -1.0])]);
-        assert!((g0[0] - alone.posterior[0][0]).abs() > 1e-3);
+        // Not its full posterior, which already sees TBU 1: B at TBU 0 explains TBU 1 better on
+        // the whole (−1, −2 vs −4, 0 → logsumexp −0.69 vs 0.018), so γ_0 moves off e_0 alone, and
+        // weighting by it would count TBU 1's evidence twice (final review M7).
+        assert!((m.posterior[0][0] - f0[0]).abs() > 1e-3);
+    }
+
+    #[test]
+    fn a_tbu_s_own_evidence_does_not_pick_its_context() {
+        // A=0, B=1, uniform prior. TBU 0 says nothing; TBU 1's shape fits B only after A. γ_0
+        // leans to A because of TBU 1, but TBU 1's likelihood of B weighs A and B as TBU 0 left
+        // them, even.
+        let prior = ln(&[0.5, 0.5]);
+        let second = vec![-4.0, 0.0, -4.0, -4.0];
+        let m = forward_backward(&prior, &[Some(vec![0.0, 0.0]), Some(second)]);
+        assert!(m.posterior[0][0] > 0.6, "{m:?}");
+        let want_b = (0.5f64 + 0.5 * (-4f64).exp()).ln();
+        assert!((m.loglik[1][1] - want_b).abs() < 1e-12, "{m:?}");
     }
 
     #[test]
@@ -518,25 +413,16 @@ mod tests {
     /// Hand-built 2 / 4 / 1 syllables, the middle one whispered (speech with no pitch), with
     /// nuclei at their middles, boundaries at their edges and the speech region around them.
     fn two_unvoiced_one() -> Analysis {
-        let mut a = hand_with(&[
+        marked(hand_with(&[
             (&[3.0, 5.0], true),
             (&[5.0, 1.0], false),
             (&[5.0, 5.0], true),
-        ]);
-        let starts: Vec<u32> = (0..3).map(|k| LEAD + k * (SYLLABLE + GAP)).collect();
-        a.nuclei = starts
-            .iter()
-            .map(|&s| Nucleus {
-                frame: s + SYLLABLE / 2,
-                strength_db: 20.0,
-            })
-            .collect();
-        a.boundaries = starts.iter().flat_map(|&s| [s, s + SYLLABLE]).collect();
-        a.speech = Some(FrameRange {
-            start: starts[0],
-            end: starts[2] + SYLLABLE,
-        });
-        a
+        ]))
+    }
+
+    /// The lattice of `a` on its own evidence.
+    fn built(a: &Analysis, pack: &LanguagePack, g: &GradingTarget) -> ToneLattice {
+        build(a, pack, g, &tbus(a)).unwrap()
     }
 
     fn context(index: u32, prev: Option<&ToneId>, phrase_final: bool) -> TargetContext {
@@ -551,7 +437,7 @@ mod tests {
     #[test]
     fn lattice_emissions_are_scored_in_context() {
         let (pack, g) = (cmn(), std_g());
-        let l = build(&two_unvoiced_one(), &pack, &g).unwrap();
+        let l = built(&two_unvoiced_one(), &pack, &g);
         let spans: Vec<(u32, u32)> = l
             .tbus
             .iter()
@@ -579,10 +465,11 @@ mod tests {
         assert!(l.tbus[1].shape.is_none());
         assert!(l.tbus[1].loglik.iter().all(|&v| v == 0.0));
 
-        // TBU 2: phrase-final, its emission marginalised over TBU 1's posterior.
+        // TBU 2: phrase-final, its emission marginalised over TBU 1's tone as the TBUs up to it
+        // have it: with nothing heard at TBU 1, that is the prior.
         let last = l.tbus[2].shape.as_ref().unwrap();
         for (c, tone) in tones.iter().enumerate() {
-            let want = logsumexp(tones.iter().zip(&l.tbus[1].posterior).map(|(prev, &p)| {
+            let want = logsumexp(tones.iter().zip(pack.prior()).map(|(prev, &p)| {
                 let ctx = context(2, Some(prev), true);
                 f64::from(p).ln() + f64::from(pack.tone_loglik(&g, last, tone, &ctx, &[]).unwrap())
             }));
@@ -599,11 +486,53 @@ mod tests {
     }
 
     #[test]
+    fn a_neutral_tone_weighs_the_previous_tone_by_what_came_before_it() {
+        // A half-third then a neutral tone at Chao 4. The pack expects a different "5" after each
+        // of T1-T4, so TBU 1's likelihood mixes over TBU 0's tone, weighted by TBU 0's forward
+        // posterior (prior × its own likelihood), not by its full posterior, which already leans
+        // on TBU 1 (final review M7).
+        let (pack, g) = (cmn(), std_g());
+        let l = built(&marked(hand(&[&[2.0, 1.0], &[4.0]])), &pack, &g);
+        let tones = pack.inventory();
+        let first: Vec<f64> = pack
+            .prior()
+            .iter()
+            .zip(&l.tbus[0].loglik)
+            .map(|(&p, &ll)| f64::from(p).ln() + f64::from(ll))
+            .collect();
+        let z = logsumexp(first.iter().copied());
+        let shape = l.tbus[1].shape.as_ref().unwrap();
+        let mixed = |log_weight: &dyn Fn(usize) -> f64, c: usize| {
+            logsumexp(tones.iter().enumerate().map(|(p, prev)| {
+                let ctx = TargetContext {
+                    index: 1,
+                    count: 2,
+                    prev: Some(prev.clone()),
+                    phrase_final: true,
+                };
+                let ll = pack.tone_loglik(&g, shape, &tones[c], &ctx, &[]).unwrap();
+                log_weight(p) + f64::from(ll)
+            }))
+        };
+        let forward = |p: usize| first[p] - z;
+        for c in 0..tones.len() {
+            let want = mixed(&forward, c);
+            assert!((f64::from(l.tbus[1].loglik[c]) - want).abs() < 1e-4, "{c}");
+        }
+        let neutral = tones.iter().position(|t| t.0 == "5").unwrap();
+        let full = |p: usize| f64::from(l.tbus[0].posterior[p]).ln();
+        assert!(
+            (mixed(&full, neutral) - mixed(&forward, neutral)).abs() > 1e-3,
+            "the two weightings agree here, so this test shows nothing"
+        );
+    }
+
+    #[test]
     fn analysis_issues_mark_measured_tbus_partial() {
         let (pack, g) = (cmn(), std_g());
         let mut a = two_unvoiced_one();
         a.issues.push(MeasureIssue::LowSnr);
-        let l = build(&a, &pack, &g).unwrap();
+        let l = built(&a, &pack, &g);
         let partial = Measured::Partial {
             issues: vec![MeasureIssue::LowSnr],
         };
@@ -611,7 +540,7 @@ mod tests {
         assert_eq!(l.tbus[2].measured, partial);
         assert!(matches!(l.tbus[1].measured, Measured::NotMeasured { .. }));
         // The widened tolerances change the likelihoods.
-        let clean = build(&two_unvoiced_one(), &pack, &g).unwrap();
+        let clean = built(&two_unvoiced_one(), &pack, &g);
         assert_ne!(l.tbus[0].loglik, clean.tbus[0].loglik);
     }
 
@@ -620,7 +549,7 @@ mod tests {
         let (pack, g) = (cmn(), std_g());
         let mut a = two_unvoiced_one();
         a.nuclei.clear();
-        let l = build(&a, &pack, &g).unwrap();
+        let l = built(&a, &pack, &g);
         assert!(l.tbus.is_empty());
         assert_eq!(l.schema, SCHEMA);
     }

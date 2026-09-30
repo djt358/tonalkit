@@ -325,6 +325,21 @@ fn assess_error_messages_and_roundtrip() {
         .to_string(),
         "pack error: bad"
     );
+    assert_eq!(
+        AssessError::TooLong {
+            seconds: 30.01,
+            max: 30.0
+        }
+        .to_string(),
+        "audio is 30.01 s long; at most 30 s can be assessed"
+    );
+    assert_eq!(
+        AssessError::InvalidRequest {
+            message: "empty candidate set".into()
+        }
+        .to_string(),
+        "invalid request: empty candidate set"
+    );
     for e in [
         AssessError::EmptyAudio,
         AssessError::UnknownTone {
@@ -333,8 +348,26 @@ fn assess_error_messages_and_roundtrip() {
         AssessError::DuplicateCandidate {
             id: CandidateId("c".into()),
         },
+        AssessError::TooLong {
+            seconds: 31.5,
+            max: 30.0,
+        },
+        AssessError::InvalidRequest {
+            message: "intended candidate missing".into(),
+        },
     ] {
         roundtrip(&e);
         let _: &dyn std::error::Error = &e;
+    }
+}
+
+#[test]
+fn measure_issues_serialise_by_name() {
+    for (issue, name) in [
+        (MeasureIssue::InvalidRegister, "\"InvalidRegister\""),
+        (MeasureIssue::InvalidEvidence, "\"InvalidEvidence\""),
+    ] {
+        assert_eq!(serde_json::to_string(&issue).unwrap(), name);
+        roundtrip(&issue);
     }
 }

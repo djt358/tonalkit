@@ -10,7 +10,8 @@ use std::path::Path;
 use serde_json::Value;
 use tonekit::{
     AccentId, AssessError, AssessRequest, Candidate, CandidateId, F0Frame, F0Track, GradingTarget,
-    Lect, MeasureIssue, Measured, ToneId, ToneTarget, UtteranceAssessment,
+    Lect, MeasureIssue, Measured, Register, RegisterSource, ToneId, ToneTarget,
+    UtteranceAssessment,
 };
 use tonekit_ffi::{analyze, assess, decode, lattice, Pack};
 
@@ -227,6 +228,29 @@ fn analyze_rejects_what_the_facade_rejects() {
         analyze(vec![0.0; 4_800], 44_100, None, None).unwrap_err(),
         AssessError::UnsupportedSampleRate { got: 44_100 }
     );
+    assert_eq!(
+        analyze(vec![0.0; 30 * RATE as usize + 160], RATE, None, None).unwrap_err(),
+        AssessError::TooLong {
+            seconds: 30.01,
+            max: 30.0
+        }
+    );
+}
+
+#[test]
+fn an_unusable_register_is_replaced_not_an_error() {
+    // I1: a corrupted persisted register must not stop grading.
+    let inverted = Register {
+        floor_st: 20.0,
+        median_st: 15.0,
+        ceil_st: 10.0,
+        n_syllables: 40,
+    };
+    let analysis = analyze(fixture_pcm(), RATE, Some(inverted), None).unwrap();
+    assert_eq!(analysis.register_source, RegisterSource::ColdStart);
+    assert!(analysis.issues.contains(&MeasureIssue::InvalidRegister));
+    let cold = analyze(fixture_pcm(), RATE, None, None).unwrap();
+    assert_eq!(analysis.register, cold.register);
 }
 
 #[test]
@@ -262,9 +286,27 @@ fn assess_errors_are_errors_not_panics() {
         ..request_413()
     };
     assert!(matches!(
-        assess(analysis, pack, duplicate),
+        assess(analysis.clone(), pack.clone(), duplicate),
         Err(AssessError::DuplicateCandidate { .. })
     ));
+
+    // M4: request errors are not pack errors.
+    let no_targets = AssessRequest {
+        intended: candidate("intended", &[], &[]),
+        ..request_413()
+    };
+    assert_eq!(
+        assess(analysis.clone(), pack.clone(), no_targets).unwrap_err(),
+        AssessError::InvalidRequest {
+            message: "candidate intended has no targets".into()
+        }
+    );
+    assert_eq!(
+        decode(analysis, pack, standard(), Vec::new()).unwrap_err(),
+        AssessError::InvalidRequest {
+            message: "empty candidate set".into()
+        }
+    );
 }
 
 // ---- a given register and an external f0 track --------------------------------------------

@@ -467,13 +467,19 @@ w_k = max(x.voiced_weights[k], 0.25), except inside the pack's unvoiced_ok regio
 
 Inputs: boundary candidates B (sorted frames), speech region, candidates of any lengths.
 
-- **Segment cache:** a ToneShape for each boundary pair (b_i, b_j) spanning 60–800 ms (a
-  `MeasureIssue` if unvoiced or too short).
+- **Syllable evidence (R50):** each nucleus n has one ToneShape, `shape_n`, extracted once on
+  its TBU (the nearest boundary candidates around it, as in §7.3) from the nucleus's own voiced
+  run (its contiguous voiced frames, gaps of ≤ 2 frames bridged as in R32), or a `MeasureIssue`
+  if unvoiced or too short. Every candidate, the null competitor and the lattice score these same
+  shapes: a reading cannot choose the frames its tone is judged on, so a wrong tone cannot bend
+  the evidence its way (by reaching into a pause's pitch-tracker bleed, say). Boundary pairs set
+  only the duration prior and what is left over as filler and insertions; a syllable holding
+  nucleus n is reported at n's TBU, where its evidence was measured.
 - **Per candidate with K targets,** a DP over (boundary index, syllables consumed):
-  - A *syllable* edge (b_i → b_j, target k) scores `LLR(shape_ij, target_k, ctx_k) + dur(b_j − b_i)`.
-    Here `ctx_k` = previous *target* tone, index, count, and `phrase_final = (k = K−1)`. Its span
-    [b_i, b_j) must contain exactly one nucleus, so a target can neither hide on a sliver of a
-    syllable nor straddle two.
+  - A *syllable* edge (b_i → b_j, target k) holding nucleus n scores
+    `LLR(shape_n, target_k, ctx_k) + dur(b_j − b_i)`. Here `ctx_k` = previous *target* tone,
+    index, count, and `phrase_final = (k = K−1)`. Its span [b_i, b_j) must contain exactly one
+    nucleus, so a target can neither hide on a sliver of a syllable nor straddle two.
   - A *gap* edge (b_i → b_j) costs `filler_per_frame × speech frames in (b_i, b_j)`, while
     silent frames are free, and adds `insertion_llr` for each nucleus it covers (an inserted
     syllable). This covers hesitations, restarts and extra words.
@@ -487,8 +493,8 @@ Inputs: boundary candidates B (sorted frames), speech region, candidates of any 
   - **No path:** the candidate's K syllables sit at an empty span at the speech-region start and
     score `K × unvoiced_syllable_llr`. They're `NotMeasured(Unvoiced)` ("tone not checked",
     `overall = None`) only if the analysis has no nuclei; otherwise they're `Partial(Unvoiced)`.
-- `dur(d) = logN(d; ln r, 0.4) − logN(r; ln r, 0.4)`, where r = median inter-nucleus interval
-  (default 220 ms).
+- `dur(d) = −(ln(d/r))² / (2·dur_sigma²)`: 0 at d = r and symmetric in log-duration, where
+  r = median inter-nucleus interval (default 220 ms) and `dur_sigma` = 0.4.
 - **Null hypothesis ("something else was said"):**
   `null_llr = Σ_tbu [max_t loglik_t − logsumexp_t(ln prior_t + loglik_t)]` over the open lattice
   (§7.3). That is the best free choice of tone per nucleus, which is always ≥ 0. Candidate

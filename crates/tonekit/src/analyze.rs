@@ -14,6 +14,12 @@ const CLIPPED_ABOVE: f32 = 0.01;
 const LOW_SNR_BELOW_DB: f32 = 10.0;
 /// Provider name reported for a caller-supplied f0 track.
 const EXTERNAL: &str = "external";
+/// The longest input `analyze` accepts, in seconds (ruling R52): the dense pYIN's memory grows
+/// with the length (about 500 MB at 120 s), which an iOS app cannot afford unbounded.
+const MAX_SECONDS: u32 = 30;
+/// A given register claiming more syllables than this is corrupted: 1 000 syllables a day for 27
+/// years. Believing it would freeze the register, since each merge moves it `u/(n+u)` of the way.
+const MAX_REGISTER_SYLLABLES: u32 = 10_000_000;
 
 /// Where the f0 track comes from.
 #[derive(Clone, Debug)]
@@ -63,6 +69,17 @@ fn sanitised(track: &F0Track) -> F0Track {
     }
 }
 
+/// Whether a caller's register can be graded against: every level finite, the ceiling above the
+/// floor, and a believable syllable count. Anything else (a corrupted persisted register, most
+/// likely) would grade every syllable wrongly and be persisted again through `register_update`.
+fn usable(r: &Register) -> bool {
+    [r.floor_st, r.median_st, r.ceil_st]
+        .iter()
+        .all(|v| v.is_finite())
+        && r.ceil_st > r.floor_st
+        && r.n_syllables <= MAX_REGISTER_SYLLABLES
+}
+
 /// Analyses one utterance of 16 kHz mono `pcm`, once, for any number of `decode`, `lattice` and
 /// `assess` calls.
 ///
@@ -74,14 +91,18 @@ fn sanitised(track: &F0Track) -> F0Track {
 ///    must never be mixed): speech region, then nuclei and candidate boundaries inside it. No
 ///    region means no nuclei and no boundaries.
 /// 4. **Register**: `register` if given (`Given`), flagged `ColdStartRegister` while it is
-///    [cold](is_cold); otherwise the utterance's own cold-start register over the voiced
-///    semitones in the speech region, counting the nuclei as its syllables (`ColdStart`, always
-///    flagged `ColdStartRegister`).
+///    [cold](is_cold); otherwise the utterance's own cold-start register over its voiced
+///    semitones (those in the speech region, or the whole track's when there is none), counting
+///    the nuclei as its syllables (`ColdStart`, always flagged `ColdStartRegister`). A given
+///    register that is not usable (a level that is not finite, a ceiling not above the floor, more
+///    than ten million syllables) is replaced by that cold start and flagged `InvalidRegister`
+///    too: a corrupted persisted register must not stop grading.
 ///
 /// # Errors
 ///
 /// - [`AssessError::EmptyAudio`] if `pcm` is empty (checked first);
-/// - [`AssessError::UnsupportedSampleRate`] unless `sample_rate` is 16 000; the caller resamples.
+/// - [`AssessError::UnsupportedSampleRate`] unless `sample_rate` is 16 000; the caller resamples;
+/// - [`AssessError::TooLong`] for more than 30 s of audio (ruling R52), before any work.
 ///
 /// Audio too short or too quiet to hold speech is not an error: it analyses to no speech, and
 /// every syllable of any later `assess` is `NotMeasured`. Non-finite samples read as silence.
@@ -96,6 +117,12 @@ pub fn analyze(
     }
     if sample_rate != SAMPLE_RATE {
         return Err(AssessError::UnsupportedSampleRate { got: sample_rate });
+    }
+    if pcm.len() > (MAX_SECONDS * SAMPLE_RATE) as usize {
+        return Err(AssessError::TooLong {
+            seconds: pcm.len() as f32 / SAMPLE_RATE as f32,
+            max: MAX_SECONDS as f32,
+        });
     }
 
     let mut f0 = match &opts.f0 {
@@ -129,6 +156,13 @@ pub fn analyze(
     };
     let voiced_st = voiced_semitones(&f0, speech.as_ref());
 
+    let register = match register {
+        Some(given) if !usable(given) => {
+            issues.push(MeasureIssue::InvalidRegister);
+            None
+        }
+        other => other,
+    };
     let (register, register_source) = match register {
         Some(given) => {
             if is_cold(given) {

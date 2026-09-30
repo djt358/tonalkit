@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| Pack | `packs/cmn/cmn.toml`, lect `cmn`, **v0.2.0** |
+| Pack | `packs/cmn/cmn.toml`, lect `cmn`, **v0.3.0** |
 | Calibration | `packs/cmn/cmn.calib.json` (seed values) |
 | Provenance | `packs/cmn/PROVENANCE.toml`: zero data sources |
 | Loaded by | `tonekit-pack` (`LanguagePack::from_toml`) |

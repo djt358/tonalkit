@@ -6,8 +6,8 @@ expression: "round3(serde_json::to_value(&r).unwrap())"
   "accent_fit": [],
   "intended": "spell",
   "intended_rank": 1,
-  "margin_llr": 1.97,
-  "overall": 0.766,
+  "margin_llr": 1.977,
+  "overall": 0.768,
   "register_update": {
     "ceil_st": 22.35,
     "floor_st": 10.37,
@@ -21,18 +21,13 @@ expression: "round3(serde_json::to_value(&r).unwrap())"
         "Acoustic"
       ],
       "component": "cmn-standard/citation",
-      "deltas": [
-        {
-          "amount": 0.708,
-          "kind": "WiderRange"
-        }
-      ],
-      "distance": 0.66,
+      "deltas": [],
+      "distance": 0.354,
       "expected": "4",
       "heard": "4",
       "heard_as": null,
       "measured": "Full",
-      "p_correct": 0.766
+      "p_correct": 0.768
     },
     {
       "basis": [

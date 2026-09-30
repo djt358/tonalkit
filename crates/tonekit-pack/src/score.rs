@@ -194,8 +194,9 @@ impl LanguagePack {
     ///   ones under `TooShort` (ruling R26).
     /// - `measured`: `Full` with no issues, else `Partial` carrying them.
     ///
-    /// A shape with non-finite numbers is uninformative: `llr_target` 0, every `loglik` at
-    /// `-1.0e6`, and no `heard`, `distance`, `component` or deltas.
+    /// A shape with non-finite numbers is uninformative and not a measurement: `llr_target` 0,
+    /// every `loglik` at `-1.0e6`, no `heard`, `distance`, `component` or deltas, and `measured`
+    /// is `NotMeasured { InvalidEvidence }`.
     ///
     /// Errors as [`LanguagePack::expect`], plus `Invalid` for a shape whose contour or
     /// `voiced_weights` are not `CONTOUR_POINTS` long.
@@ -238,7 +239,11 @@ impl LanguagePack {
             component: None,
             heard: None,
             deltas: Vec::new(),
-            measured: if issues.is_empty() {
+            measured: if !usable {
+                Measured::NotMeasured {
+                    issue: MeasureIssue::InvalidEvidence,
+                }
+            } else if issues.is_empty() {
                 Measured::Full
             } else {
                 Measured::Partial {
