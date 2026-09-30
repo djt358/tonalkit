@@ -1,6 +1,6 @@
 # Decisions
 
-The choices that shaped tonekit's behaviour, data and build, numbered `R1` to `R54`. Code comments
+The choices that shaped tonekit's behaviour, data and build, numbered `R1` to `R57`. Code comments
 and tests cite them as "ruling R27" or just `R27`; this is where they are written down. Each entry
 says what was decided, why, and what it costs if it turns out wrong. The spec
 ([`docs/superpowers/specs/`](superpowers/specs/2026-09-28-tone-assessment-design.md)) says what
@@ -264,20 +264,21 @@ lists. **Cost if wrong.** None.
 
 ### R50: Syllable tone evidence does not depend on the candidate
 
-**Decision.** Each nucleus's shape is extracted once, on its own time-base-unit span (the nearest
-boundaries around the nucleus, with the voiced part restricted to the nucleus's own voiced run), and
-the closed-set decoder scores a syllable segment containing nucleus *n* with the likelihood ratio of
-that one shape against the candidate's target and context. Boundary pairs keep only the duration
-prior and the filler, insertion and null accounting. The open lattice uses the same per-nucleus
-shapes. This replaces extracting a shape per candidate on the boundary pair the search chose for it
-(amending spec §7.2 and the scoring of R33). **Why.** The spec grades the tone the speaker
+**Decision.** Each nucleus's shape is extracted once, on its own tone-bearing unit (TBU) span (the
+nearest boundaries around the nucleus, with the voiced part restricted to the nucleus's own voiced
+run), and the closed-set decoder scores a syllable segment containing nucleus *n* with the
+likelihood ratio of that one shape against the candidate's target and context. Boundary pairs keep
+only the duration prior and the filler, insertion and null accounting. The open lattice uses the
+same per-nucleus shapes. This replaces extracting a shape per candidate on the boundary pair the
+search chose for it (amending spec §7.2 and the scoring of R33). **Why.** The spec grades the tone the speaker
 produced. When each candidate chose its own span, a wrong target could pick a span reaching into the
 gap (pYIN reports "voiced" frames next to syllable edges, even in digital silence), bend the contour
 and score as high as the correct reading: intended "4 2 3" on a spoken 4-1-3 scored 0.795 on the
 middle syllable against 0.734 for the correct reading. Shared evidence also makes the closed-set
 and lattice results identical. **Cost if wrong.** A mis-segmented boundary can no longer be absorbed
 per candidate, so segmentation errors surface as tone errors, bounded by R33's one-nucleus-per-
-syllable anchoring. A substitution sweep in CI measures it.
+syllable anchoring. A substitution sweep in CI measures it. R55 says which span a syllable then
+reports.
 
 ### R51: R47 and R48 stand after R50
 
@@ -285,6 +286,26 @@ syllable anchoring. A substitution sweep in CI measures it.
 corrected decoder with the shipped pack and the earlier pack, and require the committed tests to
 hold. **Why.** Much of R47's motivation was the span-shopping defect of R50. **Cost if wrong.**
 Non-final tone 3 is slightly lenient to full dips, as before.
+
+### R55: A syllable reports where its tone was measured
+
+**Decision.** After R50, `SyllableFit.span` is the nucleus's TBU span, the stretch the tone evidence
+was measured on, and not the boundary pair the decoder chose. The closed-set spans therefore equal
+the lattice spans. **Why.** The boundary pair is now chosen by the duration prior and the filler
+accounting alone, so it drifts into the gaps between syllables; consumers such as the harness
+perturbations and Bendy's highlighting need to know where the syllable's tone is. **Cost if wrong.**
+A consumer that wants the decoder's segmentation for a duration display loses it; nothing uses it
+yet.
+
+### R56: The CI substitution sweep runs on a warm register
+
+**Decision.** The sweep asserts on a warm register, which is the condition of gate S1 (R46). On a
+cold register a tone 2 target on a spoken tone 1 scores 0.63 to 0.67 (5 of the sweep's 54 cases per
+condition reach 0.5), always below the spoken tone's 0.70 to 0.72; that compression is left to the
+P1 calibration of the temperature and β on the owner's data, not treated as a decoder defect.
+**Why.** The seeds are unfitted, and fitting them on synthetic audio is not allowed (spec §9).
+**Cost if wrong.** Bendy's first-session feedback, given on a cold register, is lenient on tones 1
+and 2 until the register warms at 30 syllables.
 
 ## Packs and calibration
 
@@ -410,13 +431,12 @@ One line each; these rulings shaped the workflow, not the library.
   parallel in their own git worktrees and branches.
 - **R13, R18, R29:** Work that an interrupted session left behind unreviewed was redone from the
   written task description, keeping only what met it, rather than trusted as it stood.
-- **R31:** Work proceeds one task at a time, on its own branch, with a commit after each green
-  group of tests and a progress note, so an interruption costs minutes.
+- **R31, R45, R49:** Work proceeds one task at a time, on its own branch, split into units that
+  commit after each green group of tests with a progress note, so an interruption costs minutes and
+  a unit resumes from its branch.
 - **R40:** Commit trailers keep each author's own model attribution; history is not rewritten.
-- **R45:** A unit of work starts if at least half its estimated effort fits in the current usage
-  window, since an interrupted unit resumes from its branch.
-- **R49:** Once a checkpoint is pushed, units of about 150k tokens or less may start past the
-  estimated window cap; larger units wait.
 - **R54:** The final fix wave was split into two lanes that touch disjoint files and run in
   parallel: decoder and Rust robustness in one, harness, registers, CI and documentation in the
   other, followed by one scoped re-review over both.
+- **R57:** The last review findings were fixed in one batch checked by the full gates and a reading
+  of the diff, not by another review round.

@@ -220,7 +220,15 @@ pub struct ToneShape {
 pub struct Phonation { pub creak_ratio: f32, pub cpp_db: f32 }
 
 // judgement.rs
-pub enum MeasureIssue { Unvoiced, LowSnr, Clipped, TooShort, ColdStartRegister }
+pub enum MeasureIssue {
+    Unvoiced, LowSnr, Clipped, TooShort, ColdStartRegister,
+    /// The given register was not usable (non-finite or implausible levels, a median outside the
+    /// floor-to-ceiling range, an inverted range, or an impossible syllable count), so the
+    /// utterance was graded from a cold start instead.
+    InvalidRegister,
+    /// Evidence that is not a number (a non-finite shape or neural probability) was ignored.
+    InvalidEvidence,
+}
 pub enum Measured { Full, Partial { issues: Vec<MeasureIssue> }, NotMeasured { issue: MeasureIssue } }
 /// Advice direction ("start higher"). `amount` is in Chao units, or ms for Turn*.
 pub enum DeltaKind { StartHigher, StartLower, EndHigher, EndLower, TurnEarlier, TurnLater, WiderRange, NarrowerRange }
@@ -272,6 +280,23 @@ pub enum RegisterSource { Given, ColdStart }
 pub struct Analysis { pub f0: F0Track, pub energy: EnergyTrack, pub nuclei: Vec<Nucleus>,
     pub boundaries: Vec<u32>, pub speech: Option<FrameRange>, pub register: Register,
     pub register_source: RegisterSource, pub voiced_st: Vec<f32>, pub issues: Vec<MeasureIssue> }
+
+// error.rs
+pub enum AssessError {
+    EmptyAudio,
+    UnsupportedSampleRate { got: u32 },
+    UnknownTone { tone: ToneId },
+    DuplicateCandidate { id: CandidateId },
+    EvidenceLengthMismatch { expected: u32, got: u32 },
+    /// A pack that cannot be loaded or used as asked (an unknown accent, bad variant weights, a
+    /// malformed pack or calibration).
+    Pack { message: String },
+    /// A request that cannot be graded whatever the audio: no candidates, a candidate with no
+    /// targets, an intended candidate the decode does not hold.
+    InvalidRequest { message: String },
+    /// Audio longer than `max` seconds (R52: the dense pYIN is unbounded in memory).
+    TooLong { seconds: f32, max: f32 },
+}
 ```
 
 **Bendy adapter mapping (P1, in Bendy):** `SyllableAssessment` → `SyllableScore` (`expected`
@@ -301,7 +326,7 @@ reserved now so the FFI stays stable.
 ```toml
 [pack]
 lect = "cmn"
-version = "0.2.0"
+version = "0.3.0"
 tbu = "syllable"
 capabilities = ["register"]
 base_accent = "cmn-standard"
@@ -732,14 +757,17 @@ learner's own audio, on-device, is inside that boundary.
 | Condition | Detection | Result |
 |---|---|---|
 | Wrong sample rate / empty audio | input check | `AssessError` |
+| Audio longer than 30 s | input check (R52) | `AssessError::TooLong`, before any work |
 | No speech | no speech region | every syllable `NotMeasured(Unvoiced)`; `overall = None`; consumer shows "tone not checked" |
 | Whisper | no nucleus (periodic energy peak) in the speech region | as above |
 | Clipping (>1% samples ≥ 0.99) / low SNR (<10 dB) | analyze | `Partial` issue; σ ×1.5; deltas suppressed under LowSnr |
+| Given register not usable (non-finite or implausible levels, median outside floor–ceiling, inverted range, impossible syllable count) | analyze | cold start from the utterance itself, flagged `InvalidRegister` and `ColdStartRegister`; grading goes on |
 | Extra, missing or hesitation syllables | decode | one nucleus per syllable, so no tone shifts by one or hides on a sliver. Extra/hesitation: a gap edge (`insertion_llr` + filler). Missing: a nucleus-less syllable (relaxed pass), `Partial(Unvoiced)` at `unvoiced_syllable_llr`, counted in `overall` |
 | Octave jump (>9 st from the median of its neighbours in its own voiced run: `hz.is_some()` frames, gaps ≤ 2 frames bridged) | f0 post-process | shifted ±12 st toward median; runs < 5 frames untouched |
 | T3 creak | unvoiced_ok | not penalised |
 | Voiced part < 80 ms | shape | `Partial(TooShort)`; onset/offset terms only |
 | Unknown tone / accent / missing realisation | pack | `PackError`, surfaced at load where possible |
+| Non-finite external evidence (neural `p_correct`, tone shape) | fuse, pack | ignored: a measured syllable gains `InvalidEvidence` (a non-finite shape is `NotMeasured(InvalidEvidence)`) |
 
 ---
 

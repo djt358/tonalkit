@@ -12,8 +12,9 @@ pub enum MeasureIssue {
     Clipped,
     TooShort,
     ColdStartRegister,
-    /// The given register was not usable (non-finite, inverted, or an impossible syllable count),
-    /// so the utterance was graded from a cold start instead.
+    /// The given register was not usable (non-finite or implausible levels, a median outside the
+    /// floor-to-ceiling range, an inverted range, or an impossible syllable count), so the
+    /// utterance was graded from a cold start instead.
     InvalidRegister,
     /// Evidence that is not a number (a non-finite shape or neural probability) was ignored.
     InvalidEvidence,

@@ -20,6 +20,10 @@ const MAX_SECONDS: u32 = 30;
 /// A given register claiming more syllables than this is corrupted: 1 000 syllables a day for 27
 /// years. Believing it would freeze the register, since each merge moves it `u/(n+u)` of the way.
 const MAX_REGISTER_SYLLABLES: u32 = 10_000_000;
+/// The band a believable register level lies in, in semitones re 55 Hz: about 14 Hz to 3.5 kHz,
+/// far outside any voice (and pYIN's 50-600 Hz range) but still a pitch. A level beyond it is a
+/// corrupted one, which would grade every syllable wrongly like a NaN does.
+const REGISTER_ST_BAND: std::ops::RangeInclusive<f32> = -24.0..=72.0;
 
 /// Where the f0 track comes from.
 #[derive(Clone, Debug)]
@@ -69,13 +73,16 @@ fn sanitised(track: &F0Track) -> F0Track {
     }
 }
 
-/// Whether a caller's register can be graded against: every level finite, the ceiling above the
-/// floor, and a believable syllable count. Anything else (a corrupted persisted register, most
-/// likely) would grade every syllable wrongly and be persisted again through `register_update`.
+/// Whether a caller's register can be graded against: every level finite and within
+/// [`REGISTER_ST_BAND`], `floor <= median <= ceil` with the ceiling above the floor, and a
+/// believable syllable count. Anything else (a corrupted persisted register, most likely) would
+/// grade every syllable wrongly and be persisted again through `register_update`.
 fn usable(r: &Register) -> bool {
     [r.floor_st, r.median_st, r.ceil_st]
         .iter()
-        .all(|v| v.is_finite())
+        .all(|v| REGISTER_ST_BAND.contains(v))
+        && r.floor_st <= r.median_st
+        && r.median_st <= r.ceil_st
         && r.ceil_st > r.floor_st
         && r.n_syllables <= MAX_REGISTER_SYLLABLES
 }
@@ -94,9 +101,10 @@ fn usable(r: &Register) -> bool {
 ///    [cold](is_cold); otherwise the utterance's own cold-start register over its voiced
 ///    semitones (those in the speech region, or the whole track's when there is none), counting
 ///    the nuclei as its syllables (`ColdStart`, always flagged `ColdStartRegister`). A given
-///    register that is not usable (a level that is not finite, a ceiling not above the floor, more
-///    than ten million syllables) is replaced by that cold start and flagged `InvalidRegister`
-///    too: a corrupted persisted register must not stop grading.
+///    register that is not usable (a level that is not finite or outside -24 to 72 semitones, a
+///    median outside the floor-to-ceiling range, a ceiling not above the floor, more than ten
+///    million syllables) is replaced by that cold start and flagged `InvalidRegister` too: a
+///    corrupted persisted register must not stop grading.
 ///
 /// # Errors
 ///

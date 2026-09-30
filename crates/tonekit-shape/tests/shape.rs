@@ -843,7 +843,7 @@ fn span(start_frame: u32, end_frame: u32) -> TbuSpan {
 
 #[test]
 fn a_nucleus_shape_ignores_voiced_frames_outside_its_own_run() {
-    // A level syllable at Chao 3 on frames 20..40, and two frames of high "bleed" at 44..46 after a
+    // A level syllable at Chao 3 on frames 20..40, and three frames of high "bleed" at 43..46 after a
     // three-frame hole: the bleed is a run of its own and plays no part.
     let reg = register_for(100.0, 200.0);
     let hz = |i: u32| {

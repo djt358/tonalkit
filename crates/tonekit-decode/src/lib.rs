@@ -39,9 +39,11 @@ const LOG_CLAMP: f64 = 1.0e6;
 /// shape of the nucleus it holds, the same for every candidate) and duration priors, less
 /// `filler_per_frame` for every speech frame and plus `insertion_llr` for every nucleus that no
 /// syllable covers. A syllable's `span` is its nucleus's TBU, as in the lattice: the frames its
-/// judgement was measured on, not the boundary pair its path took. Each syllable holds exactly one nucleus; only if that places
-/// no path does a relaxed pass allow syllables without one, which score `unvoiced_syllable_llr`
-/// and are reported `Partial { [Unvoiced] }` (likely misses, ruling R33). A candidate whose
+/// judgement was measured on, not the boundary pair its path took. Each syllable holds exactly
+/// one nucleus; only if that places no path does a relaxed pass allow syllables without one,
+/// which score `unvoiced_syllable_llr` and are reported `Partial { [Unvoiced] }` (likely misses,
+/// ruling R33) at the span of their path, clipped to the gap between their neighbours' spans
+/// (possibly empty), so the reported spans of a candidate never overlap. A candidate whose
 /// targets cannot all be placed scores `K × unvoiced_syllable_llr` with every syllable at an empty
 /// span where the speech region starts: `NotMeasured { Unvoiced }` when the analysis has no
 /// nucleus (no speech, whisper), `Partial { [Unvoiced] }` otherwise. Posteriors are a softmax over
