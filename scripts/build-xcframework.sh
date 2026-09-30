@@ -156,7 +156,7 @@ mkdir -p "$pkg/Sources/Tonekit/Generated"
 cp "$build"/swift/*.swift "$pkg/Sources/Tonekit/Generated/"
 
 # Test resources: the shared fixture pair and the pack, from their single source of truth.
-resources=$pkg/Tests/TonekitSmokeTests/Resources
+resources=$pkg/Tests/TonekitSmokeTests/Fixtures
 mkdir -p "$resources"
 cp fixtures/spoken-413.wav fixtures/spoken-413.assessment.json "$resources/"
 cp packs/cmn/cmn.toml packs/cmn/cmn.calib.json "$resources/"

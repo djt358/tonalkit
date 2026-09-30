@@ -10,4 +10,4 @@ __pycache__/
 /swift/TonekitSmoke/.swiftpm/
 /swift/TonekitSmoke/Frameworks/
 /swift/TonekitSmoke/Sources/Tonekit/Generated/
-/swift/TonekitSmoke/Tests/TonekitSmokeTests/Resources/
+/swift/TonekitSmoke/Tests/TonekitSmokeTests/Fixtures/

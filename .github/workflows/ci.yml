@@ -108,10 +108,11 @@ jobs:
           grep -Eq '^[[:space:]]+TonekitSmoke$' <<<"$schemes" || scheme=TonekitSmoke-Package
           echo "scheme: $scheme"
           if ! xcodebuild test -scheme "$scheme" -destination "$destination" 2>&1 | tee "$log"; then
-            # The library scheme can be listed yet not testable ("not configured for the test
-            # action"); the package-wide scheme then still runs the tests. Both attempts stay in
-            # the log.
+            # The library scheme can be listed yet not testable ("not currently configured for the
+            # test action"); the package-wide scheme then still runs the tests. Any other failure
+            # is the real one: stop there. Both attempts stay in the log.
             [ "$scheme" = TonekitSmoke ] || exit 1
+            grep -q 'not currently configured for the test action' "$log" || exit 1
             echo "::warning::xcodebuild test -scheme TonekitSmoke failed; retrying with TonekitSmoke-Package"
             echo "=== retry: -scheme TonekitSmoke-Package ===" | tee -a "$log"
             xcodebuild test -scheme TonekitSmoke-Package -destination "$destination" 2>&1 | tee -a "$log"
@@ -121,7 +122,7 @@ jobs:
         run: |
           log=build/xcodebuild-test.log
           [ -f "$log" ] || exit 0
-          { grep -E 'error:|Undefined symbol|Failing tests|failed \(' "$log" | head -n 30; echo '---'; tail -n 15 "$log"
+          { grep -E -B2 'error:|Undefined symbol|Failing tests|failed \(|nonzero exit code|unrecognized|TEST FAILED' "$log" | head -n 40; echo '---'; tail -n 15 "$log"
             echo '--- available iPhone simulators'; xcrun simctl list devices available | grep -E 'iPhone|-- iOS' | head -n 12; } |
             sed -e 's/%/%25/g' | awk '{ printf "%s%%0A", $0 }' >build/swift-tail.txt
           echo "::error title=Swift tests failed::$(cat build/swift-tail.txt)"

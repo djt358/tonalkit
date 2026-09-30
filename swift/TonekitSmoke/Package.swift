@@ -9,8 +9,10 @@
 //   Frameworks/Tonekit.xcframework      the Rust static libraries (device + simulator) with the C
 //                                       headers and module map for the C module `TonekitFFI`
 //   Sources/Tonekit/Generated/*.swift   the generated bindings (one file per UniFFI crate)
-//   Tests/TonekitSmokeTests/Resources/  the fixture pair and the pack, copied from fixtures/ and
-//                                       packs/cmn/
+//   Tests/TonekitSmokeTests/Fixtures/   the fixture pair and the pack, copied from fixtures/ and
+//                                       packs/cmn/. Not named "Resources": a directory with that
+//                                       name at the top of an iOS resource bundle makes codesign
+//                                       reject the bundle ("bundle format unrecognized").
 import PackageDescription
 
 let package = Package(
@@ -42,7 +44,7 @@ let package = Package(
         .testTarget(
             name: "TonekitSmokeTests",
             dependencies: ["Tonekit"],
-            resources: [.copy("Resources")]
+            resources: [.copy("Fixtures")]
         ),
     ]
 )

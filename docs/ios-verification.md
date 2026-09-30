@@ -215,5 +215,5 @@ It links `iconv`, `Security` and `Foundation`. Step 1 prints the list rustc repo
 | `swift/TonekitSmoke/` | the SwiftPM package: binary target on the XCFramework, the generated bindings, the tests |
 | `.github/workflows/ci.yml` | the `ffi` job (Linux) and the `ios` job (macos-14: the same two commands as above) |
 
-Generated files (`build/`, `swift/TonekitSmoke/Frameworks/`, `.../Generated/`, `.../Resources/`)
+Generated files (`build/`, `swift/TonekitSmoke/Frameworks/`, `.../Generated/`, `.../Fixtures/`)
 are git-ignored.

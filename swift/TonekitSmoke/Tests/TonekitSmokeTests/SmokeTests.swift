@@ -6,8 +6,8 @@
 // Comparisons are within 1e-4 (ruling R41): another platform's libm may move the last bits.
 //
 // The fixture pair and the pack are test resources that scripts/build-xcframework.sh copies from
-// fixtures/ and packs/cmn/. The package needs the Resources/ directory to exist in order to
-// compile (`resources: [.copy("Resources")]`), and it is git-ignored, so it is there only after
+// fixtures/ and packs/cmn/. The package needs the Fixtures/ directory to exist in order to
+// compile (`resources: [.copy("Fixtures")]`), and it is git-ignored, so it is there only after
 // that script has run. The `#filePath` fallback below helps only when that directory exists but a
 // single file is missing from the bundle: the tests then read the repository copy next to this
 // source file.
@@ -279,7 +279,7 @@ private struct ExpectedAssessment: Decodable {
 private enum Fixtures {
     /// A test resource: from the bundle, else from the repository copy at `repoPath`.
     static func url(_ name: String, _ ext: String, repoPath: String, file: StaticString = #filePath) throws -> URL {
-        if let bundled = Bundle.module.url(forResource: name, withExtension: ext, subdirectory: "Resources") {
+        if let bundled = Bundle.module.url(forResource: name, withExtension: ext, subdirectory: "Fixtures") {
             return bundled
         }
         // .../swift/TonekitSmoke/Tests/TonekitSmokeTests/SmokeTests.swift -> the repository root.
