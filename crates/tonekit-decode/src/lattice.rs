@@ -14,7 +14,10 @@
 //! ```
 //!
 //! and the context-marginalised likelihood of TBU `i` is
-//! `loglik_i(c) = logsumexp_p(ln γ_{i−1}(p) + e_i(p, c))` (`e_0(c)` at `i = 0`).
+//! `loglik_i(c) = logsumexp_p(ln α̂_{i−1}(p) + e_i(p, c))` (`e_0(c)` at `i = 0`), where
+//! `α̂_{i−1} ∝ exp(α_{i−1})` is the previous tone's posterior given the TBUs up to it only. The full
+//! posterior `γ_{i−1}` would already hold TBU `i`'s own evidence (through `β_{i−1}`) and count it
+//! twice.
 
 use tonekit_core::{
     Analysis, AssessError, GradingTarget, LatticeTbu, MeasureIssue, Measured, ToneId, ToneLattice,
@@ -70,27 +73,19 @@ pub(crate) fn forward_backward(log_prior: &[f64], emissions: &[Emission]) -> Mar
         }
     }
 
-    // ln γ_i(c), normalised per TBU.
+    // ln γ_i(c) and ln α̂_i(c), normalised per TBU.
     let log_gamma: Vec<Vec<f64>> = (0..n)
-        .map(|i| {
-            let joint: Vec<f64> = (0..t).map(|c| alpha[i][c] + beta[i][c]).collect();
-            let z = logsumexp(joint.iter().copied());
-            if z.is_finite() {
-                joint.iter().map(|v| v - z).collect()
-            } else {
-                // Unreachable with finite emissions and a positive prior; stay well-defined.
-                vec![-(t as f64).ln(); t]
-            }
-        })
+        .map(|i| normalised(&(0..t).map(|c| alpha[i][c] + beta[i][c]).collect::<Vec<_>>()))
         .collect();
+    let log_forward: Vec<Vec<f64>> = alpha.iter().map(|row| normalised(row)).collect();
     // An unmeasured TBU's emission is 0 in every context, so its marginal is exactly 0 (the
-    // logsumexp would give ln Σγ, 0 only up to rounding).
+    // logsumexp would give ln Σα̂, 0 only up to rounding).
     let loglik = (0..n)
         .map(|i| match (&emissions[i], i) {
             (None, _) => vec![0.0; t],
             (Some(_), 0) => (0..t).map(|c| e(0, 0, c)).collect(),
             (Some(_), _) => (0..t)
-                .map(|c| logsumexp((0..t).map(|p| log_gamma[i - 1][p] + e(i, p, c))))
+                .map(|c| logsumexp((0..t).map(|p| log_forward[i - 1][p] + e(i, p, c))))
                 .collect(),
         })
         .collect();
@@ -99,6 +94,17 @@ pub(crate) fn forward_backward(log_prior: &[f64], emissions: &[Emission]) -> Mar
         .map(|row| row.iter().map(|v| v.exp()).collect())
         .collect();
     Marginals { posterior, loglik }
+}
+
+/// Log-values shifted to sum to 1 in probability; uniform if they cannot be (unreachable with
+/// finite emissions and a positive prior, but kept well-defined).
+fn normalised(log_values: &[f64]) -> Vec<f64> {
+    let z = logsumexp(log_values.iter().copied());
+    if z.is_finite() {
+        log_values.iter().map(|v| v - z).collect()
+    } else {
+        vec![-(log_values.len() as f64).ln(); log_values.len()]
+    }
 }
 
 /// The calibrated log-likelihood of every (previous, current) tone pair for TBU `i` of `n`.
@@ -196,7 +202,7 @@ pub(crate) fn build(
 mod tests {
     use super::*;
     use crate::evidence::tbus;
-    use crate::test_support::{cmn, hand_with, marked, std_g};
+    use crate::test_support::{cmn, hand, hand_with, marked, std_g};
 
     const EPS: f64 = 1e-9;
 
@@ -284,15 +290,30 @@ mod tests {
         for row in &mut posterior {
             row.iter_mut().for_each(|v| *v /= total);
         }
+        // The previous tone's distribution given the TBUs up to it only: enumerate the prefixes.
+        let forward = |i: usize| -> Vec<f64> {
+            let mut f = vec![0.0; t];
+            for code in 0..t.pow(i as u32 + 1) {
+                let seq: Vec<usize> = (0..=i).map(|j| code / t.pow(j as u32) % t).collect();
+                f[seq[i]] += (0..=i)
+                    .map(|j| prior[seq[j]] * e(j, seq[j.saturating_sub(1)], seq[j]).exp())
+                    .product::<f64>();
+            }
+            let z: f64 = f.iter().sum();
+            f.iter().map(|v| v / z).collect()
+        };
         let loglik = (0..n)
             .map(|i| {
                 (0..t)
                     .map(|c| match i {
                         0 => e(0, 0, c),
-                        _ => (0..t)
-                            .map(|p| posterior[i - 1][p] * e(i, p, c).exp())
-                            .sum::<f64>()
-                            .ln(),
+                        _ => {
+                            let before = forward(i - 1);
+                            (0..t)
+                                .map(|p| before[p] * e(i, p, c).exp())
+                                .sum::<f64>()
+                                .ln()
+                        }
                     })
                     .collect()
             })
@@ -339,19 +360,34 @@ mod tests {
     }
 
     #[test]
-    fn loglik_marginalises_the_previous_tone_with_its_posterior() {
+    fn loglik_marginalises_the_previous_tone_with_its_forward_posterior() {
         let prior = ln(&[0.5, 0.5]);
         let second = vec![-4.0, 0.0, -1.0, -2.0];
         let m = forward_backward(&prior, &[Some(vec![0.0, -1.0]), Some(second.clone())]);
-        let g0 = &m.posterior[0];
+        // TBU 0's tone given TBU 0 alone: prior × e_0, normalised.
+        let z = 0.5 + 0.5 * (-1f64).exp();
+        let f0 = [0.5 / z, 0.5 * (-1f64).exp() / z];
         for c in 0..2 {
-            let want = (g0[0] * second[c].exp() + g0[1] * second[2 + c].exp()).ln();
-            assert!((m.loglik[1][c] - want).abs() < 1e-9);
+            let want = (f0[0] * second[c].exp() + f0[1] * second[2 + c].exp()).ln();
+            assert!((m.loglik[1][c] - want).abs() < 1e-12);
         }
-        // The posterior of TBU 0 already sees TBU 1: B at TBU 0 explains TBU 1 better on the
-        // whole (−1, −2 vs −4, 0 → logsumexp −0.69 vs 0.018), so it moves off e_0 alone.
-        let alone = forward_backward(&prior, &[Some(vec![0.0, -1.0])]);
-        assert!((g0[0] - alone.posterior[0][0]).abs() > 1e-3);
+        // Not its full posterior, which already sees TBU 1: B at TBU 0 explains TBU 1 better on
+        // the whole (−1, −2 vs −4, 0 → logsumexp −0.69 vs 0.018), so γ_0 moves off e_0 alone, and
+        // weighting by it would count TBU 1's evidence twice (final review M7).
+        assert!((m.posterior[0][0] - f0[0]).abs() > 1e-3);
+    }
+
+    #[test]
+    fn a_tbu_s_own_evidence_does_not_pick_its_context() {
+        // A=0, B=1, uniform prior. TBU 0 says nothing; TBU 1's shape fits B only after A. γ_0
+        // leans to A because of TBU 1, but TBU 1's likelihood of B weighs A and B as TBU 0 left
+        // them, even.
+        let prior = ln(&[0.5, 0.5]);
+        let second = vec![-4.0, 0.0, -4.0, -4.0];
+        let m = forward_backward(&prior, &[Some(vec![0.0, 0.0]), Some(second)]);
+        assert!(m.posterior[0][0] > 0.6, "{m:?}");
+        let want_b = (0.5f64 + 0.5 * (-4f64).exp()).ln();
+        assert!((m.loglik[1][1] - want_b).abs() < 1e-12, "{m:?}");
     }
 
     #[test]
@@ -429,10 +465,11 @@ mod tests {
         assert!(l.tbus[1].shape.is_none());
         assert!(l.tbus[1].loglik.iter().all(|&v| v == 0.0));
 
-        // TBU 2: phrase-final, its emission marginalised over TBU 1's posterior.
+        // TBU 2: phrase-final, its emission marginalised over TBU 1's tone as the TBUs up to it
+        // have it: with nothing heard at TBU 1, that is the prior.
         let last = l.tbus[2].shape.as_ref().unwrap();
         for (c, tone) in tones.iter().enumerate() {
-            let want = logsumexp(tones.iter().zip(&l.tbus[1].posterior).map(|(prev, &p)| {
+            let want = logsumexp(tones.iter().zip(pack.prior()).map(|(prev, &p)| {
                 let ctx = context(2, Some(prev), true);
                 f64::from(p).ln() + f64::from(pack.tone_loglik(&g, last, tone, &ctx, &[]).unwrap())
             }));
@@ -446,6 +483,48 @@ mod tests {
         for tbu in &l.tbus {
             assert!((tbu.posterior.iter().sum::<f32>() - 1.0).abs() < 1e-5);
         }
+    }
+
+    #[test]
+    fn a_neutral_tone_weighs_the_previous_tone_by_what_came_before_it() {
+        // A half-third then a neutral tone at Chao 4. The pack expects a different "5" after each
+        // of T1-T4, so TBU 1's likelihood mixes over TBU 0's tone, weighted by TBU 0's forward
+        // posterior (prior × its own likelihood), not by its full posterior, which already leans
+        // on TBU 1 (final review M7).
+        let (pack, g) = (cmn(), std_g());
+        let l = built(&marked(hand(&[&[2.0, 1.0], &[4.0]])), &pack, &g);
+        let tones = pack.inventory();
+        let first: Vec<f64> = pack
+            .prior()
+            .iter()
+            .zip(&l.tbus[0].loglik)
+            .map(|(&p, &ll)| f64::from(p).ln() + f64::from(ll))
+            .collect();
+        let z = logsumexp(first.iter().copied());
+        let shape = l.tbus[1].shape.as_ref().unwrap();
+        let mixed = |log_weight: &dyn Fn(usize) -> f64, c: usize| {
+            logsumexp(tones.iter().enumerate().map(|(p, prev)| {
+                let ctx = TargetContext {
+                    index: 1,
+                    count: 2,
+                    prev: Some(prev.clone()),
+                    phrase_final: true,
+                };
+                let ll = pack.tone_loglik(&g, shape, &tones[c], &ctx, &[]).unwrap();
+                log_weight(p) + f64::from(ll)
+            }))
+        };
+        let forward = |p: usize| first[p] - z;
+        for c in 0..tones.len() {
+            let want = mixed(&forward, c);
+            assert!((f64::from(l.tbus[1].loglik[c]) - want).abs() < 1e-4, "{c}");
+        }
+        let neutral = tones.iter().position(|t| t.0 == "5").unwrap();
+        let full = |p: usize| f64::from(l.tbus[0].posterior[p]).ln();
+        assert!(
+            (mixed(&full, neutral) - mixed(&forward, neutral)).abs() > 1e-3,
+            "the two weightings agree here, so this test shows nothing"
+        );
     }
 
     #[test]

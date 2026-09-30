@@ -6,7 +6,7 @@ expression: "round3(serde_json::to_value(&r).unwrap())"
   "accent_fit": [],
   "intended": "spell",
   "intended_rank": 1,
-  "margin_llr": 1.978,
+  "margin_llr": 1.977,
   "overall": 0.768,
   "register_update": {
     "ceil_st": 22.35,

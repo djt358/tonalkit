@@ -652,3 +652,48 @@ fn whisper_has_no_nuclei_and_is_not_measured() {
     }
     assert_eq!(r.null_llr, 0.0);
 }
+
+// --- Ruling R50: one shape per nucleus, for every candidate ------------------------------------
+
+#[test]
+fn every_candidate_is_judged_on_the_shapes_the_lattice_reports() {
+    // Spoken 4-1-3. Right or wrong, each reading is judged on the shape the lattice reports for
+    // the nucleus under each syllable: no target gets to choose the frames that suit it, so a
+    // wrong tone scores against the syllable as spoken.
+    let pack = cmn();
+    let a = analysis_of(&three(vec![vec![5., 1.], vec![5., 5.], vec![2., 1., 4.]]));
+    let l = lattice(&a, &pack, &std_g()).unwrap();
+    assert_eq!(l.tbus.len(), 3);
+    let cands = [
+        c("413", &["4", "1", "3"]),
+        c("423", &["4", "2", "3"]),
+        c("213", &["2", "1", "3"]),
+        c("414", &["4", "1", "4"]),
+    ];
+    let r = decode(&a, &pack, &std_g(), &cands).unwrap();
+    let llr = |id: &str, k: usize| {
+        let cand = r.candidates.iter().find(|x| x.id.0 == id).unwrap();
+        cand.syllables[k].judgement.llr_target
+    };
+    for cand in &r.candidates {
+        let targets = &cands.iter().find(|x| x.id == cand.id).unwrap().targets;
+        for (k, (fit, tbu)) in cand.syllables.iter().zip(&l.tbus).enumerate() {
+            let ctx = tonekit_pack::TargetContext {
+                index: k as u32,
+                count: 3,
+                prev: k.checked_sub(1).map(|p| targets[p].tone.clone()),
+                phrase_final: k == 2,
+            };
+            let shape = tbu.shape.as_ref().expect("every syllable is voiced");
+            let want = pack.judge(&std_g(), shape, &targets[k], &ctx, &[]).unwrap();
+            assert_eq!(fit.judgement, want, "{} syllable {k}", cand.id.0);
+        }
+    }
+    // The substituted syllables score against the background, below the spoken tones.
+    for (id, k) in [("423", 1), ("213", 0), ("414", 2)] {
+        assert!(
+            llr(id, k) < 0.0 && llr(id, k) < llr("413", k),
+            "{id}: {r:#?}"
+        );
+    }
+}
