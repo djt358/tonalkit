@@ -15,18 +15,17 @@ class StrictModel(BaseModel):
 def format_validation_error(
     e: ValidationError, data: object = None, names: Mapping[str, str] | None = None
 ) -> str:
-    """One line per problem. A field error reads `<path>: <message>`; a check on a whole list item
-    (whose message names the item itself) is just the message. With the raw `data` and `names`
-    (list field -> the key that names its items, e.g. {"card": "id"}), `card.3.set` reads
-    `card 'g01-e'.set`."""
+    """One line per problem. A field error reads `<path>: <message>`; a rule written as a model
+    validator (a `ValueError`, whose message names what it is about) is just the message. With the
+    raw `data` and `names` (list field -> the key that names its items, e.g. {"card": "id"}),
+    `card.3.set` reads `card 'g01-e'.set`."""
     lines = []
     for err in e.errors():
-        loc = err["loc"]
         msg = err["msg"].removeprefix("Value error, ")
-        if not loc or isinstance(loc[-1], int):
+        if err["type"] == "value_error":
             lines.append(msg)
         else:
-            lines.append(f"{_path(loc, data, names or {})}: {msg}")
+            lines.append(f"{_path(err['loc'], data, names or {})}: {msg}")
     return "\n".join(lines)
 
 
