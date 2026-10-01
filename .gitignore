@@ -11,3 +11,11 @@ __pycache__/
 /swift/TonekitSmoke/Frameworks/
 /swift/TonekitSmoke/Sources/Tonekit/Generated/
 /swift/TonekitSmoke/Tests/TonekitSmokeTests/Fixtures/
+# Recordings never enter the repository (the repo is public). Volunteer and DJ audio lives under
+# $TONEKIT_DATA (docs/s05/contracts.md); the only tracked audio is fixtures/spoken-413.wav.
+/harness/corpus/*
+!/harness/corpus/PROTOCOL.md
+/corpus/
+*.m4a
+*.caf
+*.aac
