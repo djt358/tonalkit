@@ -3,13 +3,15 @@
 //!
 //! Each nucleus's shape is extracted once, on its tone-bearing unit (TBU): the span between the
 //! nearest boundary candidates on either side of it, with the voiced part restricted to the
-//! nucleus's own voiced run ([`tonekit_shape::extract_nucleus`]). Every candidate that puts a
+//! nucleus's own voiced run ([`tonekit_shape::extract_nucleus`]), less the frames beside an edge
+//! where it runs straight into a neighbouring syllable (ruling R61). Every candidate that puts a
 //! syllable on a nucleus is scored on that one shape, so no reading can choose the frames that
 //! suit it best, and the closed-set decode and the lattice see the same evidence.
 
 use tonekit_core::{Analysis, MeasureIssue, TbuSpan};
-use tonekit_shape::{extract_nucleus, Extracted};
+use tonekit_shape::{extract_nucleus, Extracted, Joins, JOIN_TRIM_FRAMES};
 
+use crate::closed::speech_mask;
 use crate::count_u32;
 
 /// A TBU's shape, or why there is none.
@@ -24,8 +26,11 @@ pub(crate) struct Tbu {
 
 /// The evidence of every distinct nucleus of `a`, in frame order: its TBU ([`tbu_spans`], falling
 /// back to the speech region's edges, or the track's without one) and the shape of its own voiced
-/// run there, normalised by the analysis's register.
+/// run there, normalised by the analysis's register, with the frames beside a coarticulated edge
+/// left out ([`joins`], ruling R61).
 pub(crate) fn tbus(a: &Analysis) -> Vec<Tbu> {
+    let speech = speech_mask(&a.energy);
+    let pitched: Vec<bool> = a.f0.frames.iter().map(|f| f.hz.is_some()).collect();
     let mut nuclei: Vec<u32> = a.nuclei.iter().map(|n| n.frame).collect();
     nuclei.sort_unstable();
     nuclei.dedup();
@@ -37,10 +42,37 @@ pub(crate) fn tbus(a: &Analysis) -> Vec<Tbu> {
         .into_iter()
         .zip(nuclei)
         .map(|(span, nucleus)| Tbu {
-            segment: extract_nucleus(&a.f0, &span, nucleus, &a.register),
+            segment: extract_nucleus(
+                &a.f0,
+                &span,
+                nucleus,
+                &a.register,
+                joins(&speech, &pitched, &span),
+            ),
             span,
         })
         .collect()
+}
+
+/// Which edges of `span` are coarticulated joins (ruling R61): every frame within
+/// [`JOIN_TRIM_FRAMES`] on either side of the edge is speech (`speech[i]`), so the voice runs
+/// from one syllable straight into the next. A pause or a consonant's silence anywhere near the
+/// edge, the speech region's own edges and the ends of the track are not joins.
+fn joins(speech: &[bool], pitched: &[bool], span: &TbuSpan) -> Joins {
+    let reach = JOIN_TRIM_FRAMES as usize;
+    let join = |edge: u32| {
+        let edge = edge as usize;
+        edge >= reach
+            && edge + reach <= speech.len()
+            && speech[edge - reach..edge + reach].iter().all(|&s| s)
+            && pitched
+                .get(edge - 1..=edge)
+                .is_some_and(|p| p.iter().all(|&v| v))
+    };
+    Joins {
+        start: join(span.start_frame),
+        end: join(span.end_frame),
+    }
 }
 
 /// The TBU of each nucleus: from the nearest boundary strictly before the nucleus frame to the
@@ -97,6 +129,47 @@ mod tests {
             start_frame,
             end_frame,
         }
+    }
+
+    #[test]
+    fn an_edge_is_a_join_only_with_speech_all_around_it() {
+        // Speech on 10..40 and 42..70 (a two-frame pause at 40..42): 30 is inside the first stretch,
+        // 40 and 44 are within three frames of the pause, and 10 and 70 are the ends of the speech.
+        let speech: Vec<bool> = (0..80)
+            .map(|i| (10..40).contains(&i) || (42..70).contains(&i))
+            .collect();
+        let pitched = vec![true; 80];
+        let edges = |start, end| joins(&speech, &pitched, &span(start, end));
+        let both = Joins {
+            start: true,
+            end: true,
+        };
+        assert_eq!(edges(20, 30), both);
+        assert_eq!(
+            edges(30, 40),
+            Joins {
+                start: true,
+                end: false
+            }
+        );
+        assert_eq!(
+            edges(10, 30),
+            Joins {
+                start: false,
+                end: true
+            }
+        );
+        assert_eq!(edges(44, 70), Joins::NONE);
+        assert_eq!(edges(13, 37), both);
+        assert_eq!(
+            edges(12, 38),
+            Joins {
+                start: false,
+                end: false
+            }
+        );
+        // The ends of the track are never joins.
+        assert_eq!(joins(&[true; 5], &[true; 5], &span(1, 4)), Joins::NONE);
     }
 
     #[test]

@@ -6,6 +6,7 @@ use tonekit_core::{
 
 use crate::chao::{st_to_chao_f64, voiced_st};
 use crate::fit::{line_slope, quadratic_coefficient, turning_point};
+use crate::joins::{measured_span, Joins};
 
 /// Milliseconds per frame (`HOP` samples at 16 kHz).
 const FRAME_MS: f32 = 10.0;
@@ -86,6 +87,10 @@ pub fn extract(f0: &F0Track, span: &TbuSpan, r: &Register) -> Result<Extracted, 
 /// nucleus's own voiced run counts as the voiced part, so voiced frames elsewhere in `span` (pitch
 /// bleeding from a neighbouring syllable, a stray periodic noise) cannot bend its contour.
 ///
+/// At an edge that `joins` marks as a coarticulated join (ruling R61), the voiced frames within
+/// [`JOIN_TRIM_FRAMES`](crate::JOIN_TRIM_FRAMES) of it (at most a quarter of the span) are left
+/// out: they carry the pitch's transition from or to the neighbouring tone.
+///
 /// A voiced run is a maximal stretch of the span's voiced frames with no gap between consecutive
 /// ones longer than [`MAX_BRIDGED_GAP_FRAMES`](tonekit_core::MAX_BRIDGED_GAP_FRAMES)
 /// ([`voiced_runs`], ruling R32). The nucleus's run is the one holding its frame, or, when the
@@ -97,8 +102,9 @@ pub fn extract_nucleus(
     span: &TbuSpan,
     nucleus: u32,
     r: &Register,
+    joins: Joins,
 ) -> Result<Extracted, MeasureIssue> {
-    let voiced = voiced_frames(f0, span);
+    let voiced = voiced_frames(f0, &measured_span(span, joins));
     shape_of(span, own_run(&voiced, nucleus as usize), r)
 }
 

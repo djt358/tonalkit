@@ -852,7 +852,7 @@ fn a_nucleus_shape_ignores_voiced_frames_outside_its_own_run() {
     };
     let with_bleed = track_where(|i| (20..40).contains(&i) || (43..46).contains(&i), hz);
     let alone = track_where(|i| (20..40).contains(&i), hz);
-    let got = extract_nucleus(&with_bleed, &span(15, 50), 30, &reg).unwrap();
+    let got = extract_nucleus(&with_bleed, &span(15, 50), 30, &reg, Joins::NONE).unwrap();
     let want = extract(&alone, &span(15, 50), &reg).unwrap();
     assert_eq!(got, want);
     // Whereas the whole span's first..last voiced frame bends up into the bleed.
@@ -872,13 +872,13 @@ fn a_run_bridges_holes_of_up_to_two_frames() {
     // Frames 20..30 and 32..40 (a two-frame hole): one run, so a nucleus in either half sees both.
     let two = track_where(|i| (20..30).contains(&i) || (32..40).contains(&i), hz);
     for nucleus in [22, 30, 36] {
-        let e = extract_nucleus(&two, &span(10, 50), nucleus, &reg).unwrap();
+        let e = extract_nucleus(&two, &span(10, 50), nucleus, &reg, Joins::NONE).unwrap();
         assert_eq!(e, extract(&two, &span(10, 50), &reg).unwrap(), "{nucleus}");
     }
     // A three-frame hole (20..30, 33..40) ends the run: each half is its own.
     let three = track_where(|i| (20..30).contains(&i) || (33..40).contains(&i), hz);
-    let left = extract_nucleus(&three, &span(10, 50), 25, &reg).unwrap();
-    let right = extract_nucleus(&three, &span(10, 50), 35, &reg).unwrap();
+    let left = extract_nucleus(&three, &span(10, 50), 25, &reg, Joins::NONE).unwrap();
+    let right = extract_nucleus(&three, &span(10, 50), 35, &reg, Joins::NONE).unwrap();
     assert_abs_diff_eq!(left.shape.voiced_fraction, 10.0 / 40.0, epsilon = 1e-6);
     assert_abs_diff_eq!(right.shape.voiced_fraction, 7.0 / 40.0, epsilon = 1e-6);
 }
@@ -891,12 +891,12 @@ fn a_nucleus_between_runs_takes_the_nearest() {
         |i| (10..20).contains(&i) || (30..45).contains(&i),
         |_| 150.0,
     );
-    let e = extract_nucleus(&t, &span(5, 50), 23, &reg).unwrap();
+    let e = extract_nucleus(&t, &span(5, 50), 23, &reg, Joins::NONE).unwrap();
     assert_abs_diff_eq!(e.shape.voiced_fraction, 10.0 / 45.0, epsilon = 1e-6);
-    let e = extract_nucleus(&t, &span(5, 50), 27, &reg).unwrap();
+    let e = extract_nucleus(&t, &span(5, 50), 27, &reg, Joins::NONE).unwrap();
     assert_abs_diff_eq!(e.shape.voiced_fraction, 15.0 / 45.0, epsilon = 1e-6);
     // Only voiced frames inside the span count: a run cut by the span edge is what is left of it.
-    let e = extract_nucleus(&t, &span(15, 50), 12, &reg).unwrap();
+    let e = extract_nucleus(&t, &span(15, 50), 12, &reg, Joins::NONE).unwrap();
     assert_abs_diff_eq!(e.shape.voiced_fraction, 5.0 / 35.0, epsilon = 1e-6);
 }
 
@@ -909,17 +909,51 @@ fn a_nucleus_run_too_short_for_a_shape_is_unvoiced() {
         |_| 150.0,
     );
     assert_eq!(
-        extract_nucleus(&t, &span(5, 50), 11, &reg),
+        extract_nucleus(&t, &span(5, 50), 11, &reg, Joins::NONE),
         Err(MeasureIssue::Unvoiced)
     );
     assert!(extract(&t, &span(5, 50), &reg).is_ok());
     let silent = track_where(|_| false, |_| 150.0);
     assert_eq!(
-        extract_nucleus(&silent, &span(5, 50), 20, &reg),
+        extract_nucleus(&silent, &span(5, 50), 20, &reg, Joins::NONE),
         Err(MeasureIssue::Unvoiced)
     );
     assert_eq!(
-        extract_nucleus(&t, &span(40, 40), 40, &reg),
+        extract_nucleus(&t, &span(40, 40), 40, &reg, Joins::NONE),
         Err(MeasureIssue::Unvoiced)
+    );
+}
+
+#[test]
+fn a_join_edge_leaves_out_the_transition_frames_beside_it() {
+    // Ruling R61. One run from 10 to 50: a glide down from Chao 5 on 10..13, Chao 3 on 13..47,
+    // a glide up on 47..50. Marked as joins, the glides are left out of the voiced part; the span
+    // and the fractions over it are still the whole span's.
+    let reg = register_for(100.0, 200.0);
+    let chao = |i: u32| match i {
+        10..=12 => 5.0 - (i - 10 + 1) as f32 * 0.5,
+        47..=49 => 3.0 + (i - 46) as f32 * 0.5,
+        _ => 3.0,
+    };
+    let t = track_where(
+        |i| (10..50).contains(&i),
+        |i| tonekit_testkit::chao_to_hz(chao(i), 100.0, 200.0),
+    );
+    let both = Joins {
+        start: true,
+        end: true,
+    };
+    let joined = extract_nucleus(&t, &span(10, 50), 30, &reg, both).unwrap();
+    assert!(
+        joined.shape.contour.iter().all(|c| (c - 3.0).abs() < 0.01),
+        "{joined:?}"
+    );
+    assert_eq!(joined.shape.span, span(10, 50));
+    assert_abs_diff_eq!(joined.shape.voiced_fraction, 34.0 / 40.0, epsilon = 1e-6);
+    // Unmarked, the glides bend both ends.
+    let plain = extract_nucleus(&t, &span(10, 50), 30, &reg, Joins::NONE).unwrap();
+    assert!(
+        plain.shape.onset > 4.0 && plain.shape.offset > 4.0,
+        "{plain:?}"
     );
 }
