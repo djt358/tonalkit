@@ -41,13 +41,18 @@ def stale_path(root: Path, corpus_id: str) -> Path:
 
 def mark_stale(root: Path, corpus_id: str, reason: str, *, now: datetime | None = None) -> StaleMarker:
     """Record that `corpus_id`'s outputs are stale, and why. The corpus must exist under `root`.
-    Returns the marker as written."""
+    A marker that is already there keeps its reasons (a damaged one is replaced, and the new
+    marker says so). Returns the marker as written."""
     if not reason.strip():
         raise ValueError("a stale marker needs a reason")
     existing_corpus_dir(root, corpus_id)  # a mistyped id must not silently mark nothing
-    earlier = read_marker(root, corpus_id)
-    new = StaleReason(reason=reason.strip(), marked_at=now or datetime.now(UTC))
-    marker = StaleMarker(corpus=corpus_id, reasons=[*(earlier.reasons if earlier else []), new])
+    at = now or datetime.now(UTC)
+    try:
+        earlier = read_marker(root, corpus_id)
+        before = earlier.reasons if earlier else []
+    except RegistryError:  # marking must work even when the last marker is damaged: say so, replace it
+        before = [StaleReason(reason="an earlier stale marker could not be read and was replaced", marked_at=at)]
+    marker = StaleMarker(corpus=corpus_id, reasons=[*before, StaleReason(reason=reason.strip(), marked_at=at)])
     write_text_atomic(stale_path(root, corpus_id), marker.model_dump_json(indent=2) + "\n")
     return marker
 

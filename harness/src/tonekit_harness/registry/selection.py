@@ -16,8 +16,9 @@ from .refusals import check_fitting, check_gate
 
 @dataclass(frozen=True)
 class Selection:
-    """The result of `DataRoot.select`: `items` in corpus-id order, then manifest order.
-    `audio_root` is the directory the grading clips' paths are relative to."""
+    """The result of `DataRoot.select`: `items` in corpus-id order, then manifest order (a union
+    keeps its first operand's items first). `audio_root` is the directory the grading clips' paths
+    are relative to."""
 
     audio_root: Path
     items: tuple[CorpusClip, ...] = ()
