@@ -51,8 +51,10 @@ def mark_stale(root: Path, corpus_id: str, reason: str, *, now: datetime | None 
         earlier = read_marker(root, corpus_id)
         before = earlier.reasons if earlier else []
     except RegistryError:  # marking must work even when the last marker is damaged: say so, replace it
-        before = [StaleReason(reason="an earlier stale marker could not be read and was replaced", marked_at=at)]
-    marker = StaleMarker(corpus=corpus_id, reasons=[*before, StaleReason(reason=reason.strip(), marked_at=at)])
+        lost = "an earlier stale marker could not be read and was replaced"
+        before = [StaleReason(reason=lost, marked_at=at)]
+    now_stale = StaleReason(reason=reason.strip(), marked_at=at)
+    marker = StaleMarker(corpus=corpus_id, reasons=[*before, now_stale])
     write_text_atomic(stale_path(root, corpus_id), marker.model_dump_json(indent=2) + "\n")
     return marker
 

@@ -34,6 +34,7 @@ def summarise(root: DataRoot, corpus_id: str) -> CorpusSummary:
     speakers = {split: by_split[split] for split in get_args(Split) if by_split[split]}
     try:
         by_set = Counter(i.clip.set for i in corpus.clips)
-        return CorpusSummary(corpus_id, meta.kind, meta.source, speakers, dict(by_set), root.stale_marker(corpus_id))
+        stale = root.stale_marker(corpus_id)
+        return CorpusSummary(corpus_id, meta.kind, meta.source, speakers, dict(by_set), stale)
     except RegistryError as e:
         return CorpusSummary(corpus_id, meta.kind, meta.source, speakers, error=str(e))

@@ -58,7 +58,10 @@ class Selection:
 
     def accents(self, override: str | None = None) -> dict[str, str]:
         """Each speaker's accent by qualified id; `override` (evaluate's `--accent`) wins."""
-        return {i.qualified_speaker: accent_for(i.speaker, i.corpus.lect, override=override) for i in self.items}
+        return {
+            i.qualified_speaker: accent_for(i.speaker, i.corpus.lect, override=override)
+            for i in self.items
+        }
 
     def __or__(self, other: Selection) -> Selection:
         """The union: this selection's clips, then the other's that are not already here (the same

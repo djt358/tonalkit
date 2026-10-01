@@ -58,9 +58,8 @@ def row_problems(clips: list[Clip], meta: CorpusMeta, speakers: Mapping[str, Spe
     first_row: dict[str, int] = {}
     for row, clip in enumerate(clips):
         if clip.speaker not in speakers:
-            problems.append(
-                RowProblem(row, f"clip {clip.id!r}: speaker {clip.speaker!r} is not a [[speaker]] of the corpus")
-            )
+            who = f"clip {clip.id!r}: speaker {clip.speaker!r}"
+            problems.append(RowProblem(row, f"{who} is not a [[speaker]] of the corpus"))
         if clip.source != meta.source:
             problems.append(
                 RowProblem(

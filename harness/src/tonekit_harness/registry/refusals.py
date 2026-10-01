@@ -19,6 +19,7 @@ from .items import CorpusClip
 
 NEVER_FITTED = frozenset({"gate", "heldout"})
 MAX_PROBLEMS_SHOWN = 10
+GATE_NEEDS_REAL = "a gate is measured on real recordings"
 
 
 class RefusalError(ValueError):
@@ -64,18 +65,23 @@ def _synthetic_problems(items: list[CorpusClip]) -> list[str]:
     for corpus_id in dict.fromkeys(i.corpus.id for i in items):
         mine = [i for i in items if i.corpus.id == corpus_id]
         if mine[0].corpus.kind == "synthetic":
-            problems.append(f"{corpus_id}: synthetic corpus ({_clips(len(mine))}); a gate is measured on real recordings")
+            problems.append(f"{corpus_id}: synthetic corpus ({_clips(len(mine))}); {GATE_NEEDS_REAL}")
             continue
-        n = sum(clearance.is_synthetic(i.clip) for i in mine)
-        if n:
-            who = ", ".join(sorted({i.qualified_speaker for i in mine if clearance.is_synthetic(i.clip)}))
-            problems.append(f"{corpus_id}: synthetic clips ({_clips(n)}, speakers {who}); a gate is measured on real recordings")
+        fake = [i for i in mine if clearance.is_synthetic(i.clip)]
+        if fake:
+            who = ", ".join(sorted({i.qualified_speaker for i in fake}))
+            problems.append(f"{corpus_id}: synthetic clips ({_clips(len(fake))}, speakers {who}); {GATE_NEEDS_REAL}")
     return problems
 
 
 def _source_problems(items: list[CorpusClip], register: Mapping[str, str]) -> list[str]:
-    uncleared = Counter((i.corpus.id, i.clip.source) for i in items if not clearance.is_allowed(i.clip, register))
-    return [f"{corpus_id}: source {source!r} {_status(source, register)} ({_clips(n)})" for (corpus_id, source), n in uncleared.items()]
+    uncleared = Counter(
+        (i.corpus.id, i.clip.source) for i in items if not clearance.is_allowed(i.clip, register)
+    )
+    return [
+        f"{corpus_id}: source {source!r} {_status(source, register)} ({_clips(n)})"
+        for (corpus_id, source), n in uncleared.items()
+    ]
 
 
 def _status(source: str, register: Mapping[str, str]) -> str:
