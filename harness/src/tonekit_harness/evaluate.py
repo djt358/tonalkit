@@ -14,7 +14,6 @@ import argparse
 import hashlib
 import io
 import json
-import os
 import struct
 import sys
 import tomllib
@@ -29,6 +28,7 @@ import tonekit_py
 from scipy.io import wavfile
 
 from . import calibration, clearance, manifest, metrics, pitch_tracks, provenance, report
+from .atomic import write_text_atomic
 from .ingest import TARGET_SR, to_float32
 from .manifest import Clip, ManifestError, to_candidate_json
 
@@ -156,10 +156,7 @@ def _read_cached(path: Path) -> str | None:
 
 
 def _write_cached(path: Path, text: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
-    tmp.write_text(text, encoding="utf-8")
-    os.replace(tmp, path)  # atomic: a reader never sees a half-written entry
+    write_text_atomic(path, text)  # a reader never sees a half-written entry
 
 
 # ---- grading ----------------------------------------------------------------------------------

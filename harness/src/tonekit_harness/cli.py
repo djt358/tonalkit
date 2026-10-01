@@ -18,8 +18,9 @@ import sys
 from collections.abc import Callable
 
 from . import bakeoff, evaluate, ingest, provenance, schema
+from .registry import add_data_option, corpora_cmd
 
-MODULES = [ingest, provenance, evaluate, bakeoff, schema]
+MODULES = [ingest, provenance, evaluate, bakeoff, schema, corpora_cmd]
 OPTIONAL_MODULES = ["synth", "adversary"]  # tonekit_harness.<name>; both need pyworld
 
 
@@ -46,6 +47,7 @@ def _register_optional(subparsers, name: str) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="tkh", description="tonekit evaluation harness")
+    add_data_option(parser)
     subparsers = parser.add_subparsers(dest="command", required=True, metavar="COMMAND")
     for module in MODULES:
         module.register(subparsers)
