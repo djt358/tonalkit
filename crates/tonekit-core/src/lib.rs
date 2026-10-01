@@ -1,4 +1,5 @@
-//! Plain-data types shared by every tonekit crate (spec §5). No logic lives here.
+//! Plain-data types shared by every tonekit crate (spec §5). The only logic here is a definition
+//! every crate must agree on: what a voiced run is ([`voiced_runs`]).
 
 #![forbid(unsafe_code)]
 

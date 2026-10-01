@@ -1,13 +1,14 @@
 use tonekit_core::{EnergyTrack, F0Track, FrameRange, Nucleus};
 
 use crate::region::floor_db;
-use crate::smooth::{frame, local_extrema, smoothed_db, Extremum};
+use crate::runs::{in_separate_runs, long_runs, Run};
+use crate::smooth::{argmax_middle, frame, local_extrema, shallow_valley, smoothed_db, Extremum};
 use crate::SegmentParams;
 
 /// A peak is voiced if pYIN reports a pitch on any frame within this many frames of it.
-const VOICING_RADIUS: usize = 2;
+pub(crate) const VOICING_RADIUS: usize = 2;
 
-/// Syllable nuclei inside `region`: energy peaks that are voiced.
+/// Syllable nuclei inside `region`: energy peaks that are voiced, at least one per long voiced run.
 ///
 /// A candidate is a local maximum of the 5-frame moving average of the frame dB, at or above the
 /// speech threshold (p10 dB plus `p.speech_margin_db`), with periodicity at the peak: some frame
@@ -16,10 +17,18 @@ const VOICING_RADIUS: usize = 2;
 /// (`hz`) stays right, and the flat energy inside a syllable makes the exact peak frame arbitrary.
 /// Voicing elsewhere in the syllable is not required.
 ///
-/// Candidates are then merged left to right. A candidate joins the nucleus before it when the
-/// smoothed minimum between them is above `min(peak_a, peak_b) - p.dip_db`, or when they are
-/// closer than `p.min_nucleus_gap` frames; the higher peak survives (the earlier one on a tie),
-/// and a surviving new peak is compared with the nucleus before that in turn. `strength_db` is the
+/// A long voiced run (ruling R58: at least 5 voiced frames, gaps of up to 2 bridged) inside the
+/// region that holds no such peak adds one candidate of its own, the frame of its highest smoothed
+/// dB (the middle of a flat top), if that is at or above the speech threshold and no frame within
+/// 2 of it is more than `p.dip_db` louder (a run on the flank of a louder unvoiced peak is not a
+/// syllable of its own). Fluent speech can run two syllables together with no dip in level at all,
+/// and the voice's pitch break between them is then the only sign of the join.
+///
+/// Candidates are then merged left to right. A candidate joins the nucleus before it when they are
+/// closer than `p.min_nucleus_gap` frames, or when the smoothed minimum between them is above
+/// `min(peak_a, peak_b) - p.dip_db` and they do not lie in two different long voiced runs (each
+/// within 2 frames of its run); the higher peak survives (the earlier one on a tie), and a
+/// surviving new peak is compared with the nucleus before that in turn. `strength_db` is the
 /// smoothed peak minus the p10 dB.
 ///
 /// The result is sorted by frame; a region that is empty or lies past the track gives no nuclei.
@@ -34,19 +43,39 @@ pub fn nuclei(
     };
     let threshold = floor + p.speech_margin_db;
     let s = smoothed_db(&e.db);
+    let (start, end) = (region.start as usize, (region.end as usize).min(s.len()));
+
+    let mut candidates: Vec<usize> = local_extrema(&s, start, end, Extremum::Max)
+        .into_iter()
+        .filter(|&peak| {
+            let voiced = (peak.saturating_sub(VOICING_RADIUS)..=peak + VOICING_RADIUS)
+                .any(|i| f0.frames.get(i).is_some_and(|f| f.hz.is_some()));
+            s[peak] >= threshold && voiced
+        })
+        .collect();
+    let runs = long_runs(f0);
+    for run in &runs {
+        let (lo, hi) = (run.first.max(start), (run.last + 1).min(end));
+        if lo < hi
+            && !candidates
+                .iter()
+                .any(|&c| (run.first..=run.last).contains(&c))
+        {
+            let top = argmax_middle(&s, lo, hi - 1);
+            let around =
+                &s[top.saturating_sub(VOICING_RADIUS)..(top + VOICING_RADIUS + 1).min(s.len())];
+            let flank = around.iter().any(|&d| d > s[top] + p.dip_db);
+            if s[top] >= threshold && !flank {
+                candidates.push(top);
+            }
+        }
+    }
+    candidates.sort_unstable();
+    candidates.dedup();
 
     let mut kept: Vec<usize> = Vec::new();
-    for peak in local_extrema(
-        &s,
-        region.start as usize,
-        region.end as usize,
-        Extremum::Max,
-    ) {
-        let voiced = (peak.saturating_sub(VOICING_RADIUS)..=peak + VOICING_RADIUS)
-            .any(|i| f0.frames.get(i).is_some_and(|f| f.hz.is_some()));
-        if s[peak] >= threshold && voiced {
-            push_merging(&mut kept, peak, &s, p);
-        }
+    for peak in candidates {
+        push_merging(&mut kept, peak, &s, &runs, p);
     }
     kept.into_iter()
         .map(|i| Nucleus {
@@ -58,12 +87,18 @@ pub fn nuclei(
 
 /// Adds `peak` (later than everything in `kept`) to `kept`, merging it into its predecessors
 /// where the merge rules say so.
-fn push_merging(kept: &mut Vec<usize>, mut peak: usize, s: &[f32], p: &SegmentParams) {
+fn push_merging(
+    kept: &mut Vec<usize>,
+    mut peak: usize,
+    s: &[f32],
+    runs: &[Run],
+    p: &SegmentParams,
+) {
     while let Some(&prev) = kept.last() {
-        let valley = s[prev..=peak].iter().copied().fold(f32::INFINITY, f32::min);
-        let shallow = valley > s[prev].min(s[peak]) - p.dip_db;
         let close = peak - prev < p.min_nucleus_gap as usize;
-        if !(shallow || close) {
+        let same_syllable = shallow_valley(s, prev, peak, p.dip_db)
+            && !in_separate_runs(runs, prev, peak, VOICING_RADIUS);
+        if !(close || same_syllable) {
             break;
         }
         kept.pop();

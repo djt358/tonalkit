@@ -17,6 +17,7 @@
 mod boundaries;
 mod nuclei;
 mod region;
+mod runs;
 mod smooth;
 
 pub use boundaries::{boundaries, boundaries_with};

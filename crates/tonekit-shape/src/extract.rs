@@ -1,7 +1,7 @@
 //! ToneShape extraction from an f0 track and a syllable span (spec §5, §7).
 
 use tonekit_core::{
-    F0Track, MeasureIssue, Register, TbuSpan, ToneShape, CONTOUR_POINTS, MAX_BRIDGED_GAP_FRAMES,
+    voiced_runs, F0Track, MeasureIssue, Register, TbuSpan, ToneShape, CONTOUR_POINTS,
 };
 
 use crate::chao::{st_to_chao_f64, voiced_st};
@@ -87,9 +87,9 @@ pub fn extract(f0: &F0Track, span: &TbuSpan, r: &Register) -> Result<Extracted, 
 /// bleeding from a neighbouring syllable, a stray periodic noise) cannot bend its contour.
 ///
 /// A voiced run is a maximal stretch of the span's voiced frames with no gap between consecutive
-/// ones longer than [`MAX_BRIDGED_GAP_FRAMES`], the definition octave repair uses (ruling R32).
-/// The nucleus's run is the one holding its frame, or, when the frame sits outside every run, the
-/// nearest one (the earlier on a tie). Everything else is as in [`extract`], with the run's
+/// ones longer than [`MAX_BRIDGED_GAP_FRAMES`](tonekit_core::MAX_BRIDGED_GAP_FRAMES)
+/// ([`voiced_runs`], ruling R32). The nucleus's run is the one holding its frame, or, when the
+/// frame sits outside every run, the nearest one (the earlier on a tie). Everything else is as in [`extract`], with the run's
 /// frames as the span's voiced frames: `span`, `duration_ms` and the denominator of
 /// `voiced_fraction` stay the whole span's, and a run under three frames is `Err(Unvoiced)`.
 pub fn extract_nucleus(
@@ -120,21 +120,15 @@ fn voiced_frames(f0: &F0Track, span: &TbuSpan) -> Vec<Voiced> {
 /// The voiced run of `voiced` (in frame order) holding frame `at`, or the nearest to it; empty
 /// if there are no voiced frames.
 fn own_run(voiced: &[Voiced], at: usize) -> &[Voiced] {
+    let frames: Vec<usize> = voiced.iter().map(|&(i, _, _)| i).collect();
     let mut best: Option<(usize, &[Voiced])> = None;
-    let mut start = 0;
-    for end in 1..=voiced.len() {
-        let run_ends =
-            end == voiced.len() || voiced[end].0 - voiced[end - 1].0 > MAX_BRIDGED_GAP_FRAMES + 1;
-        if !run_ends {
-            continue;
-        }
-        let run = &voiced[start..end];
+    for range in voiced_runs(&frames) {
+        let run = &voiced[range];
         let (first, last) = (run[0].0, run[run.len() - 1].0);
         let distance = first.saturating_sub(at).max(at.saturating_sub(last));
         if best.is_none_or(|(d, _)| distance < d) {
             best = Some((distance, run));
         }
-        start = end;
     }
     best.map_or(&[], |(_, run)| run)
 }
