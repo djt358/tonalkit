@@ -51,6 +51,10 @@ html {
 }
 
 body {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  min-height: 100dvh;
   margin: 0;
   background: var(--paper);
   color: var(--ink);
@@ -59,6 +63,10 @@ body {
 }
 
 main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
   max-width: 34rem;
   margin: 0 auto;
   padding: max(var(--gutter), env(safe-area-inset-top)) max(var(--gutter), env(safe-area-inset-right))
@@ -66,10 +74,10 @@ main {
 }
 
 .screen {
+  flex: 1;
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
-  min-height: calc(100dvh - 2 * var(--gutter));
 }
 
 .screen[hidden],
@@ -81,7 +89,7 @@ h1 {
   font-size: 1.75rem;
   line-height: 1.2;
   letter-spacing: -0.01em;
-  margin: 1.5rem 0 0.25rem;
+  margin: 1rem 0 0.25rem;
 }
 
 .lead {
@@ -258,8 +266,8 @@ button:focus-visible,
   align-items: center;
   justify-content: center;
   gap: 0.75rem;
-  min-height: 14rem;
-  padding: 1.5rem 0.5rem;
+  min-height: 9rem;
+  padding: 1rem 0.5rem;
   text-align: center;
 }
 
@@ -307,12 +315,17 @@ button:focus-visible,
   gap: 0.75rem;
 }
 
-.card-actions .row:not(:has(button:not([hidden]))) {
-  display: none;
+.card-actions .row > button {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.card-actions .row > .next {
+  flex-grow: 1.4;
 }
 
 .record {
-  min-height: 5rem;
+  min-height: 4.5rem;
   font-size: 1.3rem;
   background: var(--seal);
   border-color: var(--seal);
@@ -392,9 +405,6 @@ button:focus-visible,
 /* Banners and loading ------------------------------------------------------------------------- */
 
 .banner {
-  position: sticky;
-  top: 0;
-  z-index: 1;
   padding: 0.5rem var(--gutter);
   padding-top: max(0.5rem, env(safe-area-inset-top));
   font-size: 0.9rem;

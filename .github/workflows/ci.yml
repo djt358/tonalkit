@@ -25,6 +25,23 @@ jobs:
       - uses: actions/checkout@v4
       - run: scripts/check-no-audio.sh
 
+  # The volunteer recording kit (kit/): node unit tests (resampler, trim, WAV, zip, order, ...),
+  # then the whole flow in headless Chromium with the fixture as the microphone (kit/tests/e2e.py).
+  kit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r kit/tests/requirements.txt
+      # The Python Playwright package's own install, so the browser build matches the package.
+      - run: python -m playwright install --with-deps chromium
+      - run: kit/tests/run.sh
+
   fmt:
     runs-on: ubuntu-latest
     steps:

@@ -57,6 +57,7 @@ export function cardScreen(app) {
     const card = byId.get(id);
     stopPlayback();
     setClip(id, null);
+    window.scrollTo(0, 0);
     $("card-progress").textContent = app.t("card.progress", { n: app.session.index + 1, total: app.session.order.length });
     const text = $("card-text");
     text.textContent = card.text;

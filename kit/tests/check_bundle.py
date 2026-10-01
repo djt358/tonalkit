@@ -27,11 +27,27 @@ SHA256 = re.compile(r"^[0-9a-f]{64}$")
 TIMESTAMP = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
 ENUMS = {
     "background": {"native", "heritage", "learner", "prefer_not"},
-    "grew_up_hearing": {"mainland", "taiwan", "singapore_malaysia", "hong_kong_macau", "other", "prefer_not"},
+    "grew_up_hearing": {
+        "mainland",
+        "taiwan",
+        "singapore_malaysia",
+        "hong_kong_macau",
+        "other",
+        "prefer_not",
+    },
     "reading": {"hanzi", "hanzi+pinyin"},
 }
 TOP_KEYS = {
-    "schema", "deck", "session", "started_at", "finished_at", "consent", "speaker", "device", "clips", "skipped",
+    "schema",
+    "deck",
+    "session",
+    "started_at",
+    "finished_at",
+    "consent",
+    "speaker",
+    "device",
+    "clips",
+    "skipped",
 }
 CLIP_KEYS = {"card", "file", "takes", "duration_s", "peak"}
 SCHEMA_DIR = Path(__file__).resolve().parents[1] / "schema"
@@ -44,7 +60,10 @@ def wav_info(data: bytes) -> tuple[int, int, int, int, int, float]:
     fmt = None
     pos = 12
     while pos + 8 <= len(data):
-        chunk, size = data[pos : pos + 4], struct.unpack("<I", data[pos + 4 : pos + 8])[0]
+        chunk, size = (
+            data[pos : pos + 4],
+            struct.unpack("<I", data[pos + 4 : pos + 8])[0],
+        )
         body = data[pos + 8 : pos + 8 + size]
         if chunk == b"fmt ":
             fmt = struct.unpack("<HHIIHH", body[:16])
@@ -53,7 +72,11 @@ def wav_info(data: bytes) -> tuple[int, int, int, int, int, float]:
                 raise ValueError("data before fmt")
             fmt_tag, channels, rate, _, align, bits = fmt
             frames = len(body) // align
-            samples = struct.unpack(f"<{len(body) // 2}h", body[: len(body) // 2 * 2]) if bits == 16 else ()
+            samples = (
+                struct.unpack(f"<{len(body) // 2}h", body[: len(body) // 2 * 2])
+                if bits == 16
+                else ()
+            )
             peak = max((abs(s) for s in samples), default=0) / 32768
             return fmt_tag, channels, rate, bits, frames, peak
         pos += 8 + size + (size & 1)
@@ -61,16 +84,25 @@ def wav_info(data: bytes) -> tuple[int, int, int, int, int, float]:
 
 
 def check_schema(session: dict, problems: list[str]) -> None:
-    candidates = sorted(SCHEMA_DIR.glob("*session*.json")) + sorted(SCHEMA_DIR.glob("*bundle*.json"))
+    candidates = sorted(SCHEMA_DIR.glob("*session*.json")) + sorted(
+        SCHEMA_DIR.glob("*bundle*.json")
+    )
     if not candidates:
         return
     try:
         import jsonschema
     except ImportError:
-        print(f"note: {candidates[0].name} present but jsonschema isn't installed; skipped", file=sys.stderr)
+        print(
+            f"note: {candidates[0].name} present but jsonschema isn't installed; skipped",
+            file=sys.stderr,
+        )
         return
-    for error in jsonschema.Draft202012Validator(json.loads(candidates[0].read_text())).iter_errors(session):
-        problems.append(f"schema {candidates[0].name}: {error.json_path}: {error.message}")
+    for error in jsonschema.Draft202012Validator(
+        json.loads(candidates[0].read_text())
+    ).iter_errors(session):
+        problems.append(
+            f"schema {candidates[0].name}: {error.json_path}: {error.message}"
+        )
 
 
 def check(path: Path, deck_path: Path | None, min_duration: float) -> list[str]:
@@ -109,7 +141,12 @@ def check(path: Path, deck_path: Path | None, min_duration: float) -> list[str]:
             bad(f"{key} {value!r} is not YYYY-MM-DDTHH:MM:SSZ")
         else:
             times[key] = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    if len(times) == 3 and not times["started_at"] <= times["consent.agreed_at"] <= times["finished_at"]:
+    if (
+        len(times) == 3
+        and not times["started_at"]
+        <= times["consent.agreed_at"]
+        <= times["finished_at"]
+    ):
         bad(f"timestamps out of order: {times}")
     consent = session.get("consent", {})
     if set(consent) != {"version", "agreed_at"} or not consent.get("version"):
@@ -131,13 +168,19 @@ def check(path: Path, deck_path: Path | None, min_duration: float) -> list[str]:
     if not isinstance(device.get("user_agent"), str):
         bad("device.user_agent is not a string")
     constraints = device.get("constraints")
-    if not isinstance(constraints, dict) or not all(isinstance(v, bool) for v in constraints.values()):
+    if not isinstance(constraints, dict) or not all(
+        isinstance(v, bool) for v in constraints.values()
+    ):
         bad(f"device.constraints {constraints!r}")
 
     clips = session.get("clips", [])
     skipped = session.get("skipped", [])
     cards = [c.get("card") for c in clips]
-    if len(set(cards)) != len(cards) or len(set(skipped)) != len(skipped) or set(cards) & set(skipped):
+    if (
+        len(set(cards)) != len(cards)
+        or len(set(skipped)) != len(skipped)
+        or set(cards) & set(skipped)
+    ):
         bad("a card appears twice across clips/skipped")
     for card_id in [*cards, *skipped]:
         if not isinstance(card_id, str) or not CARD_ID.match(card_id):
@@ -165,9 +208,13 @@ def check(path: Path, deck_path: Path | None, min_duration: float) -> list[str]:
             bad(f"{where}: {e}")
             continue
         if (fmt_tag, channels, wav_rate, bits) != (1, 1, 16000, 16):
-            bad(f"{where}: WAV is format {fmt_tag}, {channels} ch, {wav_rate} Hz, {bits} bit")
+            bad(
+                f"{where}: WAV is format {fmt_tag}, {channels} ch, {wav_rate} Hz, {bits} bit"
+            )
         if abs(frames / 16000 - clip["duration_s"]) > 0.002:
-            bad(f"{where}: WAV holds {frames / 16000:.3f} s, session.json says {clip['duration_s']}")
+            bad(
+                f"{where}: WAV holds {frames / 16000:.3f} s, session.json says {clip['duration_s']}"
+            )
         if abs(peak - clip["peak"]) > 0.002:
             bad(f"{where}: WAV peak {peak:.4f}, session.json says {clip['peak']}")
     extra = set(files) - {c.get("file") for c in clips}
@@ -189,7 +236,11 @@ def check(path: Path, deck_path: Path | None, min_duration: float) -> list[str]:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("bundle", type=Path)
-    parser.add_argument("--deck", type=Path, help="the deck JSON the kit loaded (checks sha256 and card ids)")
+    parser.add_argument(
+        "--deck",
+        type=Path,
+        help="the deck JSON the kit loaded (checks sha256 and card ids)",
+    )
     parser.add_argument("--min-duration", type=float, default=0.3)
     args = parser.parse_args()
     problems = check(args.bundle, args.deck, args.min_duration)

@@ -190,7 +190,7 @@ function wire() {
     try {
       await openMic();
     } catch (e) {
-      console.error(e);
+      console.warn(e); // handled: the message tells the volunteer what to do
       setText($("mic-error"), micErrorText(e));
       allow.disabled = false;
       return;
@@ -217,7 +217,7 @@ function wire() {
     try {
       await openMic();
     } catch (e) {
-      console.error(e);
+      console.warn(e); // handled: the message tells the volunteer what to do
       setText($("pause-error"), micErrorText(e));
       return;
     } finally {
