@@ -43,7 +43,7 @@ def _build(args: argparse.Namespace) -> int:
         return 1
     paths = write_deck(built.data, args.out or _deck_dir())
     if args.audit:
-        Path(args.audit).write_text(audit_markdown(built.data, built.flags), encoding="utf-8")
+        Path(args.audit).write_text(audit_markdown(built.data, built.flags, built.gate.source), encoding="utf-8")
     for path in paths:
         print(f"wrote {path}")
     if args.audit:
@@ -60,6 +60,9 @@ def _check(args: argparse.Namespace) -> int:
         deck = load_any(path, args.pack)
     except DeckError as e:
         print(f"FAIL {problem_report(e)}", file=sys.stderr)
+        return 1
+    except OSError as e:
+        print(f"error: cannot read {path}: {e.strerror or e}", file=sys.stderr)
         return 1
     print(summary(deck, path))
     return 0

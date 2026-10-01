@@ -86,6 +86,7 @@ def test_pairs_are_chosen_from_the_table_and_every_row_left_out_says_why(tmp_pat
     built = build_gate(rows, lexicon, 3, earlier_unusable=no_phrase)
     assert [u.reading.text for u in built.selected] == ["一杯水", "一本书", "一辆车"]  # yì before 1 and 3, yí before 4
     assert trial.problems(built.cards) == []
+    assert not any(f.startswith("stand-in") for f in built.flags.values())
     reasons = {x.text: x.reason for x in built.unusable + built.passed_over}
     assert reasons["一张纸"].startswith("its own pinyin does not hold") and "1-1-3" in reasons["一张纸"]
     assert "啡 has no tone variant" in reasons["一杯咖啡"]

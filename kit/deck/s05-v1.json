@@ -1,0 +1,2434 @@
+{
+  "deck": {
+    "id": "s05-v1",
+    "lect": "cmn",
+    "version": 1,
+    "title": "Mandarin tones: phrases and words"
+  },
+  "card": [
+    {
+      "id": "r01",
+      "set": "register",
+      "label": "correct",
+      "text": "妈麻马骂",
+      "text_traditional": "媽麻馬罵",
+      "pinyin": "mā má mǎ mà",
+      "citation_pinyin": "mā má mǎ mà",
+      "context": "isolated",
+      "intended": {
+        "id": "r01",
+        "tones": [
+          "1",
+          "2",
+          "3",
+          "4"
+        ],
+        "labels": [
+          "ma",
+          "ma",
+          "ma",
+          "ma"
+        ]
+      },
+      "produced_tones": [
+        "1",
+        "2",
+        "3",
+        "4"
+      ],
+      "distractors": [],
+      "prompt_note": "Four separate sounds with a short pause between each.",
+      "status": "unverified"
+    },
+    {
+      "id": "r02",
+      "set": "register",
+      "label": "correct",
+      "text": "妈麻马骂",
+      "text_traditional": "媽麻馬罵",
+      "pinyin": "mā má mǎ mà",
+      "citation_pinyin": "mā má mǎ mà",
+      "context": "isolated",
+      "intended": {
+        "id": "r02",
+        "tones": [
+          "1",
+          "2",
+          "3",
+          "4"
+        ],
+        "labels": [
+          "ma",
+          "ma",
+          "ma",
+          "ma"
+        ]
+      },
+      "produced_tones": [
+        "1",
+        "2",
+        "3",
+        "4"
+      ],
+      "distractors": [],
+      "prompt_note": "Four separate sounds with a short pause between each.",
+      "status": "unverified"
+    },
+    {
+      "id": "r03",
+      "set": "register",
+      "label": "correct",
+      "text": "妈麻马骂",
+      "text_traditional": "媽麻馬罵",
+      "pinyin": "mā má mǎ mà",
+      "citation_pinyin": "mā má mǎ mà",
+      "context": "isolated",
+      "intended": {
+        "id": "r03",
+        "tones": [
+          "1",
+          "2",
+          "3",
+          "4"
+        ],
+        "labels": [
+          "ma",
+          "ma",
+          "ma",
+          "ma"
+        ]
+      },
+      "produced_tones": [
+        "1",
+        "2",
+        "3",
+        "4"
+      ],
+      "distractors": [],
+      "prompt_note": "Four separate sounds with a short pause between each.",
+      "status": "unverified"
+    },
+    {
+      "id": "r04",
+      "set": "register",
+      "label": "correct",
+      "text": "妈麻马骂",
+      "text_traditional": "媽麻馬罵",
+      "pinyin": "mā má mǎ mà",
+      "citation_pinyin": "mā má mǎ mà",
+      "context": "isolated",
+      "intended": {
+        "id": "r04",
+        "tones": [
+          "1",
+          "2",
+          "3",
+          "4"
+        ],
+        "labels": [
+          "ma",
+          "ma",
+          "ma",
+          "ma"
+        ]
+      },
+      "produced_tones": [
+        "1",
+        "2",
+        "3",
+        "4"
+      ],
+      "distractors": [],
+      "prompt_note": "Four separate sounds with a short pause between each.",
+      "status": "unverified"
+    },
+    {
+      "id": "r05",
+      "set": "register",
+      "label": "correct",
+      "text": "妈麻马骂",
+      "text_traditional": "媽麻馬罵",
+      "pinyin": "mā má mǎ mà",
+      "citation_pinyin": "mā má mǎ mà",
+      "context": "isolated",
+      "intended": {
+        "id": "r05",
+        "tones": [
+          "1",
+          "2",
+          "3",
+          "4"
+        ],
+        "labels": [
+          "ma",
+          "ma",
+          "ma",
+          "ma"
+        ]
+      },
+      "produced_tones": [
+        "1",
+        "2",
+        "3",
+        "4"
+      ],
+      "distractors": [],
+      "prompt_note": "Four separate sounds with a short pause between each.",
+      "status": "unverified"
+    },
+    {
+      "id": "r06",
+      "set": "register",
+      "label": "correct",
+      "text": "妈麻马骂",
+      "text_traditional": "媽麻馬罵",
+      "pinyin": "mā má mǎ mà",
+      "citation_pinyin": "mā má mǎ mà",
+      "context": "isolated",
+      "intended": {
+        "id": "r06",
+        "tones": [
+          "1",
+          "2",
+          "3",
+          "4"
+        ],
+        "labels": [
+          "ma",
+          "ma",
+          "ma",
+          "ma"
+        ]
+      },
+      "produced_tones": [
+        "1",
+        "2",
+        "3",
+        "4"
+      ],
+      "distractors": [],
+      "prompt_note": "Four separate sounds with a short pause between each.",
+      "status": "unverified"
+    },
+    {
+      "id": "r07",
+      "set": "register",
+      "label": "correct",
+      "text": "妈麻马骂",
+      "text_traditional": "媽麻馬罵",
+      "pinyin": "mā má mǎ mà",
+      "citation_pinyin": "mā má mǎ mà",
+      "context": "isolated",
+      "intended": {
+        "id": "r07",
+        "tones": [
+          "1",
+          "2",
+          "3",
+          "4"
+        ],
+        "labels": [
+          "ma",
+          "ma",
+          "ma",
+          "ma"
+        ]
+      },
+      "produced_tones": [
+        "1",
+        "2",
+        "3",
+        "4"
+      ],
+      "distractors": [],
+      "prompt_note": "Four separate sounds with a short pause between each.",
+      "status": "unverified"
+    },
+    {
+      "id": "r08",
+      "set": "register",
+      "label": "correct",
+      "text": "妈麻马骂",
+      "text_traditional": "媽麻馬罵",
+      "pinyin": "mā má mǎ mà",
+      "citation_pinyin": "mā má mǎ mà",
+      "context": "isolated",
+      "intended": {
+        "id": "r08",
+        "tones": [
+          "1",
+          "2",
+          "3",
+          "4"
+        ],
+        "labels": [
+          "ma",
+          "ma",
+          "ma",
+          "ma"
+        ]
+      },
+      "produced_tones": [
+        "1",
+        "2",
+        "3",
+        "4"
+      ],
+      "distractors": [],
+      "prompt_note": "Four separate sounds with a short pause between each.",
+      "status": "unverified"
+    },
+    {
+      "id": "g01-c",
+      "set": "gate",
+      "pair": "g01",
+      "label": "correct",
+      "text": "一杯水",
+      "text_traditional": "一杯水",
+      "pinyin": "yì bēi shuǐ",
+      "citation_pinyin": "yī bēi shuǐ",
+      "context": "phrase",
+      "intended": {
+        "id": "g01",
+        "tones": [
+          "4",
+          "1",
+          "3"
+        ],
+        "labels": [
+          "yi",
+          "bei",
+          "shui"
+        ]
+      },
+      "produced_tones": [
+        "4",
+        "1",
+        "3"
+      ],
+      "distractors": [],
+      "prompt_note": "",
+      "status": "unverified"
+    },
+    {
+      "id": "g01-e",
+      "set": "gate",
+      "pair": "g01",
+      "label": "tone_error",
+      "text": "一杯睡",
+      "text_traditional": "一杯睡",
+      "pinyin": "yì bēi shuì",
+      "citation_pinyin": "yī bēi shuì",
+      "context": "phrase",
+      "intended": {
+        "id": "g01",
+        "tones": [
+          "4",
+          "1",
+          "3"
+        ],
+        "labels": [
+          "yi",
+          "bei",
+          "shui"
+        ]
+      },
+      "produced_tones": [
+        "4",
+        "1",
+        "4"
+      ],
+      "distractors": [],
+      "prompt_note": "Read it as written: 睡 as in 睡觉 (to sleep).",
+      "status": "unverified"
+    },
+    {
+      "id": "g02-c",
+      "set": "gate",
+      "pair": "g02",
+      "label": "correct",
+      "text": "一本书",
+      "text_traditional": "一本書",
+      "pinyin": "yì běn shū",
+      "citation_pinyin": "yī běn shū",
+      "context": "phrase",
+      "intended": {
+        "id": "g02",
+        "tones": [
+          "4",
+          "3",
+          "1"
+        ],
+        "labels": [
+          "yi",
+          "ben",
+          "shu"
+        ]
+      },
+      "produced_tones": [
+        "4",
+        "3",
+        "1"
+      ],
+      "distractors": [],
+      "prompt_note": "",
+      "status": "unverified"
+    },
+    {
+      "id": "g02-e",
+      "set": "gate",
+      "pair": "g02",
+      "label": "tone_error",
+      "text": "一本树",
+      "text_traditional": "一本樹",
+      "pinyin": "yì běn shù",
+      "citation_pinyin": "yī běn shù",
+      "context": "phrase",
+      "intended": {
+        "id": "g02",
+        "tones": [
+          "4",
+          "3",
+          "1"
+        ],
+        "labels": [
+          "yi",
+          "ben",
+          "shu"
+        ]
+      },
+      "produced_tones": [
+        "4",
+        "3",
+        "4"
+      ],
+      "distractors": [],
+      "prompt_note": "Read it as written: 树 as in 大树 (tree).",
+      "status": "unverified"
+    },
+    {
+      "id": "g03-c",
+      "set": "gate",
+      "pair": "g03",
+      "label": "correct",
+      "text": "一张纸",
+      "text_traditional": "一張紙",
+      "pinyin": "yì zhāng zhǐ",
+      "citation_pinyin": "yī zhāng zhǐ",
+      "context": "phrase",
+      "intended": {
+        "id": "g03",
+        "tones": [
+          "4",
+          "1",
+          "3"
+        ],
+        "labels": [
+          "yi",
+          "zhang",
+          "zhi"
+        ]
+      },
+      "produced_tones": [
+        "4",
+        "1",
+        "3"
+      ],
+      "distractors": [],
+      "prompt_note": "",
+      "status": "unverified"
+    },
+    {
+      "id": "g03-e",
+      "set": "gate",
+      "pair": "g03",
+      "label": "tone_error",
+      "text": "一张直",
+      "text_traditional": "一張直",
+      "pinyin": "yì zhāng zhí",
+      "citation_pinyin": "yī zhāng zhí",
+      "context": "phrase",
+      "intended": {
+        "id": "g03",
+        "tones": [
+          "4",
+          "1",
+          "3"
+        ],
+        "labels": [
+          "yi",
+          "zhang",
+          "zhi"
+        ]
+      },
+      "produced_tones": [
+        "4",
+        "1",
+        "2"
+      ],
+      "distractors": [],
+      "prompt_note": "Read it as written: 直 as in 直接 (directly).",
+      "status": "unverified"
+    },
+    {
+      "id": "g04-c",
+      "set": "gate",
+      "pair": "g04",
+      "label": "correct",
+      "text": "一碗饭",
+      "text_traditional": "一碗飯",
+      "pinyin": "yì wǎn fàn",
+      "citation_pinyin": "yī wǎn fàn",
+      "context": "phrase",
+      "intended": {
+        "id": "g04",
+        "tones": [
+          "4",
+          "3",
+          "4"
+        ],
+        "labels": [
+          "yi",
+          "wan",
+          "fan"
+        ]
+      },
+      "produced_tones": [
+        "4",
+        "3",
+        "4"
+      ],
+      "distractors": [],
+      "prompt_note": "",
+      "status": "unverified"
+    },
+    {
+      "id": "g04-e",
+      "set": "gate",
+      "pair": "g04",
+      "label": "tone_error",
+      "text": "一碗烦",
+      "text_traditional": "一碗煩",
+      "pinyin": "yì wǎn fán",
+      "citation_pinyin": "yī wǎn fán",
+      "context": "phrase",
+      "intended": {
+        "id": "g04",
+        "tones": [
+          "4",
+          "3",
+          "4"
+        ],
+        "labels": [
+          "yi",
+          "wan",
+          "fan"
+        ]
+      },
+      "produced_tones": [
+        "4",
+        "3",
+        "2"
+      ],
+      "distractors": [],
+      "prompt_note": "Read it as written: 烦 as in 麻烦 (troublesome).",
+      "status": "unverified"
+    },
+    {
+      "id": "g05-c",
+      "set": "gate",
+      "pair": "g05",
+      "label": "correct",
+      "text": "一条鱼",
+      "text_traditional": "一條魚",
+      "pinyin": "yì tiáo yú",
+      "citation_pinyin": "yī tiáo yú",
+      "context": "phrase",
+      "intended": {
+        "id": "g05",
+        "tones": [
+          "4",
+          "2",
+          "2"
+        ],
+        "labels": [
+          "yi",
+          "tiao",
+          "yu"
+        ]
+      },
+      "produced_tones": [
+        "4",
+        "2",
+        "2"
+      ],
+      "distractors": [],
+      "prompt_note": "",
+      "status": "unverified"
+    },
+    {
+      "id": "g05-e",
+      "set": "gate",
+      "pair": "g05",
+      "label": "tone_error",
+      "text": "一条雨",
+      "text_traditional": "一條雨",
+      "pinyin": "yì tiáo yǔ",
+      "citation_pinyin": "yī tiáo yǔ",
+      "context": "phrase",
+      "intended": {
+        "id": "g05",
+        "tones": [
+          "4",
+          "2",
+          "2"
+        ],
+        "labels": [
+          "yi",
+          "tiao",
+          "yu"
+        ]
+      },
+      "produced_tones": [
+        "4",
+        "2",
+        "3"
+      ],
+      "distractors": [],
+      "prompt_note": "Read it as written: 雨 as in 下雨 (rain).",
+      "status": "unverified"
+    },
+    {
+      "id": "g06-c",
+      "set": "gate",
+      "pair": "g06",
+      "label": "correct",
+      "text": "一只猫",
+      "text_traditional": "一隻貓",
+      "pinyin": "yì zhī māo",
+      "citation_pinyin": "yī zhī māo",
+      "context": "phrase",
+      "intended": {
+        "id": "g06",
+        "tones": [
+          "4",
+          "1",
+          "1"
+        ],
+        "labels": [
+          "yi",
+          "zhi",
+          "mao"
+        ]
+      },
+      "produced_tones": [
+        "4",
+        "1",
+        "1"
+      ],
+      "distractors": [],
+      "prompt_note": "",
+      "status": "unverified"
+    },
+    {
+      "id": "g06-e",
+      "set": "gate",
+      "pair": "g06",
+      "label": "tone_error",
+      "text": "一只毛",
+      "text_traditional": "一隻毛",
+      "pinyin": "yì zhī máo",
+      "citation_pinyin": "yī zhī máo",
+      "context": "phrase",
+      "intended": {
+        "id": "g06",
+        "tones": [
+          "4",
+          "1",
+          "1"
+        ],
+        "labels": [
+          "yi",
+          "zhi",
+          "mao"
+        ]
+      },
+      "produced_tones": [
+        "4",
+        "1",
+        "2"
+      ],
+      "distractors": [],
+      "prompt_note": "Read it as written: 毛 as in 毛衣 (sweater).",
+      "status": "unverified"
+    },
+    {
+      "id": "g07-c",
+      "set": "gate",
+      "pair": "g07",
+      "label": "correct",
+      "text": "一瓶酒",
+      "text_traditional": "一瓶酒",
+      "pinyin": "yì píng jiǔ",
+      "citation_pinyin": "yī píng jiǔ",
+      "context": "phrase",
+      "intended": {
+        "id": "g07",
+        "tones": [
+          "4",
+          "2",
+          "3"
+        ],
+        "labels": [
+          "yi",
+          "ping",
+          "jiu"
+        ]
+      },
+      "produced_tones": [
+        "4",
+        "2",
+        "3"
+      ],
+      "distractors": [],
+      "prompt_note": "",
+      "status": "unverified"
+    },
+    {
+      "id": "g07-e",
+      "set": "gate",
+      "pair": "g07",
+      "label": "tone_error",
+      "text": "一瓶就",
+      "text_traditional": "一瓶就",
+      "pinyin": "yì píng jiù",
+      "citation_pinyin": "yī píng jiù",
+      "context": "phrase",
+      "intended": {
+        "id": "g07",
+        "tones": [
+          "4",
+          "2",
+          "3"
+        ],
+        "labels": [
+          "yi",
+          "ping",
+          "jiu"
+        ]
+      },
+      "produced_tones": [
+        "4",
+        "2",
+        "4"
+      ],
+      "distractors": [],
+      "prompt_note": "Read it as written: 就 as in 就是 (exactly).",
+      "status": "unverified"
+    },
+    {
+      "id": "g08-c",
+      "set": "gate",
+      "pair": "g08",
+      "label": "correct",
+      "text": "一块饼",
+      "text_traditional": "一塊餅",
+      "pinyin": "yí kuài bǐng",
+      "citation_pinyin": "yī kuài bǐng",
+      "context": "phrase",
+      "intended": {
+        "id": "g08",
+        "tones": [
+          "2",
+          "4",
+          "3"
+        ],
+        "labels": [
+          "yi",
+          "kuai",
+          "bing"
+        ]
+      },
+      "produced_tones": [
+        "2",
+        "4",
+        "3"
+      ],
+      "distractors": [],
+      "prompt_note": "",
+      "status": "unverified"
+    },
+    {
+      "id": "g08-e",
+      "set": "gate",
+      "pair": "g08",
+      "label": "tone_error",
+      "text": "一块病",
+      "text_traditional": "一塊病",
+      "pinyin": "yí kuài bìng",
+      "citation_pinyin": "yī kuài bìng",
+      "context": "phrase",
+      "intended": {
+        "id": "g08",
+        "tones": [
+          "2",
+          "4",
+          "3"
+        ],
+        "labels": [
+          "yi",
+          "kuai",
+          "bing"
+        ]
+      },
+      "produced_tones": [
+        "2",
+        "4",
+        "4"
+      ],
+      "distractors": [],
+      "prompt_note": "Read it as written: 病 as in 生病 (to fall ill).",
+      "status": "unverified"
+    },
+    {
+      "id": "g09-c",
+      "set": "gate",
+      "pair": "g09",
+      "label": "correct",
+      "text": "一辆车",
+      "text_traditional": "一輛車",
+      "pinyin": "yí liàng chē",
+      "citation_pinyin": "yī liàng chē",
+      "context": "phrase",
+      "intended": {
+        "id": "g09",
+        "tones": [
+          "2",
+          "4",
+          "1"
+        ],
+        "labels": [
+          "yi",
+          "liang",
+          "che"
+        ]
+      },
+      "produced_tones": [
+        "2",
+        "4",
+        "1"
+      ],
+      "distractors": [],
+      "prompt_note": "",
+      "status": "unverified"
+    },
+    {
+      "id": "g09-e",
+      "set": "gate",
+      "pair": "g09",
+      "label": "tone_error",
+      "text": "一辆彻",
+      "text_traditional": "一輛徹",
+      "pinyin": "yí liàng chè",
+      "citation_pinyin": "yī liàng chè",
+      "context": "phrase",
+      "intended": {
+        "id": "g09",
+        "tones": [
+          "2",
+          "4",
+          "1"
+        ],
+        "labels": [
+          "yi",
+          "liang",
+          "che"
+        ]
+      },
+      "produced_tones": [
+        "2",
+        "4",
+        "4"
+      ],
+      "distractors": [],
+      "prompt_note": "Read it as written: 彻 as in 彻底 (thoroughly).",
+      "status": "unverified"
+    },
+    {
+      "id": "g10-c",
+      "set": "gate",
+      "pair": "g10",
+      "label": "correct",
+      "text": "一双鞋",
+      "text_traditional": "一雙鞋",
+      "pinyin": "yì shuāng xié",
+      "citation_pinyin": "yī shuāng xié",
+      "context": "phrase",
+      "intended": {
+        "id": "g10",
+        "tones": [
+          "4",
+          "1",
+          "2"
+        ],
+        "labels": [
+          "yi",
+          "shuang",
+          "xie"
+        ]
+      },
+      "produced_tones": [
+        "4",
+        "1",
+        "2"
+      ],
+      "distractors": [],
+      "prompt_note": "",
+      "status": "unverified"
+    },
+    {
+      "id": "g10-e",
+      "set": "gate",
+      "pair": "g10",
+      "label": "tone_error",
+      "text": "一双写",
+      "text_traditional": "一雙寫",
+      "pinyin": "yì shuāng xiě",
+      "citation_pinyin": "yī shuāng xiě",
+      "context": "phrase",
+      "intended": {
+        "id": "g10",
+        "tones": [
+          "4",
+          "1",
+          "2"
+        ],
+        "labels": [
+          "yi",
+          "shuang",
+          "xie"
+        ]
+      },
+      "produced_tones": [
+        "4",
+        "1",
+        "3"
+      ],
+      "distractors": [],
+      "prompt_note": "Read it as written: 写 as in 写字 (to write).",
+      "status": "unverified"
+    },
+    {
+      "id": "g11-c",
+      "set": "gate",
+      "pair": "g11",
+      "label": "correct",
+      "text": "一盘菜",
+      "text_traditional": "一盤菜",
+      "pinyin": "yì pán cài",
+      "citation_pinyin": "yī pán cài",
+      "context": "phrase",
+      "intended": {
+        "id": "g11",
+        "tones": [
+          "4",
+          "2",
+          "4"
+        ],
+        "labels": [
+          "yi",
+          "pan",
+          "cai"
+        ]
+      },
+      "produced_tones": [
+        "4",
+        "2",
+        "4"
+      ],
+      "distractors": [],
+      "prompt_note": "",
+      "status": "unverified"
+    },
+    {
+      "id": "g11-e",
+      "set": "gate",
+      "pair": "g11",
+      "label": "tone_error",
+      "text": "一盘才",
+      "text_traditional": "一盤才",
+      "pinyin": "yì pán cái",
+      "citation_pinyin": "yī pán cái",
+      "context": "phrase",
+      "intended": {
+        "id": "g11",
+        "tones": [
+          "4",
+          "2",
+          "4"
+        ],
+        "labels": [
+          "yi",
+          "pan",
+          "cai"
+        ]
+      },
+      "produced_tones": [
+        "4",
+        "2",
+        "2"
+      ],
+      "distractors": [],
+      "prompt_note": "Read it as written: 才 as in 刚才 (just now).",
+      "status": "unverified"
+    },
+    {
+      "id": "g12-c",
+      "set": "gate",
+      "pair": "g12",
+      "label": "correct",
+      "text": "一把刀",
+      "text_traditional": "一把刀",
+      "pinyin": "yì bǎ dāo",
+      "citation_pinyin": "yī bǎ dāo",
+      "context": "phrase",
+      "intended": {
+        "id": "g12",
+        "tones": [
+          "4",
+          "3",
+          "1"
+        ],
+        "labels": [
+          "yi",
+          "ba",
+          "dao"
+        ]
+      },
+      "produced_tones": [
+        "4",
+        "3",
+        "1"
+      ],
+      "distractors": [],
+      "prompt_note": "",
+      "status": "unverified"
+    },
+    {
+      "id": "g12-e",
+      "set": "gate",
+      "pair": "g12",
+      "label": "tone_error",
+      "text": "一把到",
+      "text_traditional": "一把到",
+      "pinyin": "yì bǎ dào",
+      "citation_pinyin": "yī bǎ dào",
+      "context": "phrase",
+      "intended": {
+        "id": "g12",
+        "tones": [
+          "4",
+          "3",
+          "1"
+        ],
+        "labels": [
+          "yi",
+          "ba",
+          "dao"
+        ]
+      },
+      "produced_tones": [
+        "4",
+        "3",
+        "4"
+      ],
+      "distractors": [],
+      "prompt_note": "Read it as written: 到 as in 到家 (to arrive home).",
+      "status": "unverified"
+    },
+    {
+      "id": "g13-c",
+      "set": "gate",
+      "pair": "g13",
+      "label": "correct",
+      "text": "一碗水",
+      "text_traditional": "一碗水",
+      "pinyin": "yì wán shuǐ",
+      "citation_pinyin": "yī wǎn shuǐ",
+      "context": "phrase",
+      "intended": {
+        "id": "g13",
+        "tones": [
+          "4",
+          "2",
+          "3"
+        ],
+        "labels": [
+          "yi",
+          "wan",
+          "shui"
+        ]
+      },
+      "produced_tones": [
+        "4",
+        "2",
+        "3"
+      ],
+      "distractors": [],
+      "prompt_note": "",
+      "status": "unverified"
+    },
+    {
+      "id": "g13-e",
+      "set": "gate",
+      "pair": "g13",
+      "label": "tone_error",
+      "text": "一湾水",
+      "text_traditional": "一灣水",
+      "pinyin": "yì wān shuǐ",
+      "citation_pinyin": "yī wān shuǐ",
+      "context": "phrase",
+      "intended": {
+        "id": "g13",
+        "tones": [
+          "4",
+          "2",
+          "3"
+        ],
+        "labels": [
+          "yi",
+          "wan",
+          "shui"
+        ]
+      },
+      "produced_tones": [
+        "4",
+        "1",
+        "3"
+      ],
+      "distractors": [],
+      "prompt_note": "Read it as written: 湾 as in 海湾 (bay).",
+      "status": "unverified"
+    },
+    {
+      "id": "g14-c",
+      "set": "gate",
+      "pair": "g14",
+      "label": "correct",
+      "text": "一把伞",
+      "text_traditional": "一把傘",
+      "pinyin": "yì bá sǎn",
+      "citation_pinyin": "yī bǎ sǎn",
+      "context": "phrase",
+      "intended": {
+        "id": "g14",
+        "tones": [
+          "4",
+          "2",
+          "3"
+        ],
+        "labels": [
+          "yi",
+          "ba",
+          "san"
+        ]
+      },
+      "produced_tones": [
+        "4",
+        "2",
+        "3"
+      ],
+      "distractors": [],
+      "prompt_note": "",
+      "status": "unverified"
+    },
+    {
+      "id": "g14-e",
+      "set": "gate",
+      "pair": "g14",
+      "label": "tone_error",
+      "text": "一巴伞",
+      "text_traditional": "一巴傘",
+      "pinyin": "yì bā sǎn",
+      "citation_pinyin": "yī bā sǎn",
+      "context": "phrase",
+      "intended": {
+        "id": "g14",
+        "tones": [
+          "4",
+          "2",
+          "3"
+        ],
+        "labels": [
+          "yi",
+          "ba",
+          "san"
+        ]
+      },
+      "produced_tones": [
+        "4",
+        "1",
+        "3"
+      ],
+      "distractors": [],
+      "prompt_note": "Read it as written: 巴 as in 巴士 (bus).",
+      "status": "unverified"
+    },
+    {
+      "id": "g15-c",
+      "set": "gate",
+      "pair": "g15",
+      "label": "correct",
+      "text": "一包糖",
+      "text_traditional": "一包糖",
+      "pinyin": "yì bāo táng",
+      "citation_pinyin": "yī bāo táng",
+      "context": "phrase",
+      "intended": {
+        "id": "g15",
+        "tones": [
+          "4",
+          "1",
+          "2"
+        ],
+        "labels": [
+          "yi",
+          "bao",
+          "tang"
+        ]
+      },
+      "produced_tones": [
+        "4",
+        "1",
+        "2"
+      ],
+      "distractors": [],
+      "prompt_note": "",
+      "status": "unverified"
+    },
+    {
+      "id": "g15-e",
+      "set": "gate",
+      "pair": "g15",
+      "label": "tone_error",
+      "text": "一包躺",
+      "text_traditional": "一包躺",
+      "pinyin": "yì bāo tǎng",
+      "citation_pinyin": "yī bāo tǎng",
+      "context": "phrase",
+      "intended": {
+        "id": "g15",
+        "tones": [
+          "4",
+          "1",
+          "2"
+        ],
+        "labels": [
+          "yi",
+          "bao",
+          "tang"
+        ]
+      },
+      "produced_tones": [
+        "4",
+        "1",
+        "3"
+      ],
+      "distractors": [],
+      "prompt_note": "Read it as written: 躺 as in 躺下 (to lie down).",
+      "status": "unverified"
+    },
+    {
+      "id": "g16-c",
+      "set": "gate",
+      "pair": "g16",
+      "label": "correct",
+      "text": "一片云",
+      "text_traditional": "一片雲",
+      "pinyin": "yí piàn yún",
+      "citation_pinyin": "yī piàn yún",
+      "context": "phrase",
+      "intended": {
+        "id": "g16",
+        "tones": [
+          "2",
+          "4",
+          "2"
+        ],
+        "labels": [
+          "yi",
+          "pian",
+          "yun"
+        ]
+      },
+      "produced_tones": [
+        "2",
+        "4",
+        "2"
+      ],
+      "distractors": [],
+      "prompt_note": "",
+      "status": "unverified"
+    },
+    {
+      "id": "g16-e",
+      "set": "gate",
+      "pair": "g16",
+      "label": "tone_error",
+      "text": "一片运",
+      "text_traditional": "一片運",
+      "pinyin": "yí piàn yùn",
+      "citation_pinyin": "yī piàn yùn",
+      "context": "phrase",
+      "intended": {
+        "id": "g16",
+        "tones": [
+          "2",
+          "4",
+          "2"
+        ],
+        "labels": [
+          "yi",
+          "pian",
+          "yun"
+        ]
+      },
+      "produced_tones": [
+        "2",
+        "4",
+        "4"
+      ],
+      "distractors": [],
+      "prompt_note": "Read it as written: 运 as in 运动 (exercise).",
+      "status": "unverified"
+    },
+    {
+      "id": "g17-c",
+      "set": "gate",
+      "pair": "g17",
+      "label": "correct",
+      "text": "一头牛",
+      "text_traditional": "一頭牛",
+      "pinyin": "yì tóu niú",
+      "citation_pinyin": "yī tóu niú",
+      "context": "phrase",
+      "intended": {
+        "id": "g17",
+        "tones": [
+          "4",
+          "2",
+          "2"
+        ],
+        "labels": [
+          "yi",
+          "tou",
+          "niu"
+        ]
+      },
+      "produced_tones": [
+        "4",
+        "2",
+        "2"
+      ],
+      "distractors": [],
+      "prompt_note": "",
+      "status": "unverified"
+    },
+    {
+      "id": "g17-e",
+      "set": "gate",
+      "pair": "g17",
+      "label": "tone_error",
+      "text": "一头扭",
+      "text_traditional": "一頭扭",
+      "pinyin": "yì tóu niǔ",
+      "citation_pinyin": "yī tóu niǔ",
+      "context": "phrase",
+      "intended": {
+        "id": "g17",
+        "tones": [
+          "4",
+          "2",
+          "2"
+        ],
+        "labels": [
+          "yi",
+          "tou",
+          "niu"
+        ]
+      },
+      "produced_tones": [
+        "4",
+        "2",
+        "3"
+      ],
+      "distractors": [],
+      "prompt_note": "Read it as written: 扭 as in 扭伤 (to sprain).",
+      "status": "unverified"
+    },
+    {
+      "id": "g18-c",
+      "set": "gate",
+      "pair": "g18",
+      "label": "correct",
+      "text": "一袋米",
+      "text_traditional": "一袋米",
+      "pinyin": "yí dài mǐ",
+      "citation_pinyin": "yī dài mǐ",
+      "context": "phrase",
+      "intended": {
+        "id": "g18",
+        "tones": [
+          "2",
+          "4",
+          "3"
+        ],
+        "labels": [
+          "yi",
+          "dai",
+          "mi"
+        ]
+      },
+      "produced_tones": [
+        "2",
+        "4",
+        "3"
+      ],
+      "distractors": [],
+      "prompt_note": "",
+      "status": "unverified"
+    },
+    {
+      "id": "g18-e",
+      "set": "gate",
+      "pair": "g18",
+      "label": "tone_error",
+      "text": "一袋密",
+      "text_traditional": "一袋密",
+      "pinyin": "yí dài mì",
+      "citation_pinyin": "yī dài mì",
+      "context": "phrase",
+      "intended": {
+        "id": "g18",
+        "tones": [
+          "2",
+          "4",
+          "3"
+        ],
+        "labels": [
+          "yi",
+          "dai",
+          "mi"
+        ]
+      },
+      "produced_tones": [
+        "2",
+        "4",
+        "4"
+      ],
+      "distractors": [],
+      "prompt_note": "Read it as written: 密 as in 秘密 (secret).",
+      "status": "unverified"
+    },
+    {
+      "id": "g19-c",
+      "set": "gate",
+      "pair": "g19",
+      "label": "correct",
+      "text": "一束花",
+      "text_traditional": "一束花",
+      "pinyin": "yí shù huā",
+      "citation_pinyin": "yī shù huā",
+      "context": "phrase",
+      "intended": {
+        "id": "g19",
+        "tones": [
+          "2",
+          "4",
+          "1"
+        ],
+        "labels": [
+          "yi",
+          "shu",
+          "hua"
+        ]
+      },
+      "produced_tones": [
+        "2",
+        "4",
+        "1"
+      ],
+      "distractors": [],
+      "prompt_note": "",
+      "status": "unverified"
+    },
+    {
+      "id": "g19-e",
+      "set": "gate",
+      "pair": "g19",
+      "label": "tone_error",
+      "text": "一束画",
+      "text_traditional": "一束畫",
+      "pinyin": "yí shù huà",
+      "citation_pinyin": "yī shù huà",
+      "context": "phrase",
+      "intended": {
+        "id": "g19",
+        "tones": [
+          "2",
+          "4",
+          "1"
+        ],
+        "labels": [
+          "yi",
+          "shu",
+          "hua"
+        ]
+      },
+      "produced_tones": [
+        "2",
+        "4",
+        "4"
+      ],
+      "distractors": [],
+      "prompt_note": "Read it as written: 画 as in 画画 (to draw).",
+      "status": "unverified"
+    },
+    {
+      "id": "g20-c",
+      "set": "gate",
+      "pair": "g20",
+      "label": "correct",
+      "text": "一座桥",
+      "text_traditional": "一座橋",
+      "pinyin": "yí zuò qiáo",
+      "citation_pinyin": "yī zuò qiáo",
+      "context": "phrase",
+      "intended": {
+        "id": "g20",
+        "tones": [
+          "2",
+          "4",
+          "2"
+        ],
+        "labels": [
+          "yi",
+          "zuo",
+          "qiao"
+        ]
+      },
+      "produced_tones": [
+        "2",
+        "4",
+        "2"
+      ],
+      "distractors": [],
+      "prompt_note": "",
+      "status": "unverified"
+    },
+    {
+      "id": "g20-e",
+      "set": "gate",
+      "pair": "g20",
+      "label": "tone_error",
+      "text": "一座巧",
+      "text_traditional": "一座巧",
+      "pinyin": "yí zuò qiǎo",
+      "citation_pinyin": "yī zuò qiǎo",
+      "context": "phrase",
+      "intended": {
+        "id": "g20",
+        "tones": [
+          "2",
+          "4",
+          "2"
+        ],
+        "labels": [
+          "yi",
+          "zuo",
+          "qiao"
+        ]
+      },
+      "produced_tones": [
+        "2",
+        "4",
+        "3"
+      ],
+      "distractors": [],
+      "prompt_note": "Read it as written: 巧 as in 巧克力 (chocolate).",
+      "status": "unverified"
+    },
+    {
+      "id": "x01",
+      "set": "diag_context",
+      "label": "correct",
+      "text": "一",
+      "text_traditional": "一",
+      "pinyin": "yī",
+      "citation_pinyin": "yī",
+      "context": "isolated",
+      "intended": {
+        "id": "x01",
+        "tones": [
+          "1"
+        ],
+        "labels": [
+          "yi"
+        ]
+      },
+      "produced_tones": [
+        "1"
+      ],
+      "distractors": [],
+      "prompt_note": "The number one, said on its own, as when counting.",
+      "status": "unverified"
+    },
+    {
+      "id": "x02",
+      "set": "diag_context",
+      "label": "correct",
+      "text": "一杯",
+      "text_traditional": "一杯",
+      "pinyin": "yì bēi",
+      "citation_pinyin": "yī bēi",
+      "context": "phrase",
+      "intended": {
+        "id": "x02",
+        "tones": [
+          "4",
+          "1"
+        ],
+        "labels": [
+          "yi",
+          "bei"
+        ]
+      },
+      "produced_tones": [
+        "4",
+        "1"
+      ],
+      "distractors": [],
+      "prompt_note": "",
+      "status": "unverified"
+    },
+    {
+      "id": "x03",
+      "set": "diag_context",
+      "label": "correct",
+      "text": "一块",
+      "text_traditional": "一塊",
+      "pinyin": "yí kuài",
+      "citation_pinyin": "yī kuài",
+      "context": "phrase",
+      "intended": {
+        "id": "x03",
+        "tones": [
+          "2",
+          "4"
+        ],
+        "labels": [
+          "yi",
+          "kuai"
+        ]
+      },
+      "produced_tones": [
+        "2",
+        "4"
+      ],
+      "distractors": [],
+      "prompt_note": "",
+      "status": "unverified"
+    },
+    {
+      "id": "x04",
+      "set": "diag_context",
+      "label": "correct",
+      "text": "不",
+      "text_traditional": "不",
+      "pinyin": "bù",
+      "citation_pinyin": "bù",
+      "context": "isolated",
+      "intended": {
+        "id": "x04",
+        "tones": [
+          "4"
+        ],
+        "labels": [
+          "bu"
+        ]
+      },
+      "produced_tones": [
+        "4"
+      ],
+      "distractors": [],
+      "prompt_note": "The word that means not. Say it on its own.",
+      "status": "unverified"
+    },
+    {
+      "id": "x05",
+      "set": "diag_context",
+      "label": "correct",
+      "text": "不对",
+      "text_traditional": "不對",
+      "pinyin": "bú duì",
+      "citation_pinyin": "bù duì",
+      "context": "phrase",
+      "intended": {
+        "id": "x05",
+        "tones": [
+          "2",
+          "4"
+        ],
+        "labels": [
+          "bu",
+          "dui"
+        ]
+      },
+      "produced_tones": [
+        "2",
+        "4"
+      ],
+      "distractors": [],
+      "prompt_note": "",
+      "status": "unverified"
+    },
+    {
+      "id": "x06",
+      "set": "diag_context",
+      "label": "correct",
+      "text": "水",
+      "text_traditional": "水",
+      "pinyin": "shuǐ",
+      "citation_pinyin": "shuǐ",
+      "context": "isolated",
+      "intended": {
+        "id": "x06",
+        "tones": [
+          "3"
+        ],
+        "labels": [
+          "shui"
+        ]
+      },
+      "produced_tones": [
+        "3"
+      ],
+      "distractors": [],
+      "prompt_note": "",
+      "status": "unverified"
+    },
+    {
+      "id": "x07",
+      "set": "diag_context",
+      "label": "correct",
+      "text": "水果",
+      "text_traditional": "水果",
+      "pinyin": "shuí guǒ",
+      "citation_pinyin": "shuǐ guǒ",
+      "context": "phrase",
+      "intended": {
+        "id": "x07",
+        "tones": [
+          "2",
+          "3"
+        ],
+        "labels": [
+          "shui",
+          "guo"
+        ]
+      },
+      "produced_tones": [
+        "2",
+        "3"
+      ],
+      "distractors": [],
+      "prompt_note": "",
+      "status": "unverified"
+    },
+    {
+      "id": "t01-c",
+      "set": "diag_t23",
+      "pair": "t01",
+      "label": "correct",
+      "text": "大雨",
+      "text_traditional": "大雨",
+      "pinyin": "dà yǔ",
+      "citation_pinyin": "dà yǔ",
+      "context": "phrase",
+      "intended": {
+        "id": "t01",
+        "tones": [
+          "4",
+          "3"
+        ],
+        "labels": [
+          "da",
+          "yu"
+        ]
+      },
+      "produced_tones": [
+        "4",
+        "3"
+      ],
+      "distractors": [],
+      "prompt_note": "",
+      "status": "unverified"
+    },
+    {
+      "id": "t01-e",
+      "set": "diag_t23",
+      "pair": "t01",
+      "label": "tone_error",
+      "text": "大鱼",
+      "text_traditional": "大魚",
+      "pinyin": "dà yú",
+      "citation_pinyin": "dà yú",
+      "context": "phrase",
+      "intended": {
+        "id": "t01",
+        "tones": [
+          "4",
+          "3"
+        ],
+        "labels": [
+          "da",
+          "yu"
+        ]
+      },
+      "produced_tones": [
+        "4",
+        "2"
+      ],
+      "distractors": [],
+      "prompt_note": "Read it as written: 鱼 as in 金鱼 (goldfish).",
+      "status": "unverified"
+    },
+    {
+      "id": "t02-c",
+      "set": "diag_t23",
+      "pair": "t02",
+      "label": "correct",
+      "text": "花钱",
+      "text_traditional": "花錢",
+      "pinyin": "huā qián",
+      "citation_pinyin": "huā qián",
+      "context": "phrase",
+      "intended": {
+        "id": "t02",
+        "tones": [
+          "1",
+          "2"
+        ],
+        "labels": [
+          "hua",
+          "qian"
+        ]
+      },
+      "produced_tones": [
+        "1",
+        "2"
+      ],
+      "distractors": [],
+      "prompt_note": "",
+      "status": "unverified"
+    },
+    {
+      "id": "t02-e",
+      "set": "diag_t23",
+      "pair": "t02",
+      "label": "tone_error",
+      "text": "花浅",
+      "text_traditional": "花淺",
+      "pinyin": "huā qiǎn",
+      "citation_pinyin": "huā qiǎn",
+      "context": "phrase",
+      "intended": {
+        "id": "t02",
+        "tones": [
+          "1",
+          "2"
+        ],
+        "labels": [
+          "hua",
+          "qian"
+        ]
+      },
+      "produced_tones": [
+        "1",
+        "3"
+      ],
+      "distractors": [],
+      "prompt_note": "Read it as written: 浅 as in 浅色 (light-coloured).",
+      "status": "unverified"
+    },
+    {
+      "id": "t03-c",
+      "set": "diag_t23",
+      "pair": "t03",
+      "label": "correct",
+      "text": "起床",
+      "text_traditional": "起床",
+      "pinyin": "qǐ chuáng",
+      "citation_pinyin": "qǐ chuáng",
+      "context": "phrase",
+      "intended": {
+        "id": "t03",
+        "tones": [
+          "3",
+          "2"
+        ],
+        "labels": [
+          "qi",
+          "chuang"
+        ]
+      },
+      "produced_tones": [
+        "3",
+        "2"
+      ],
+      "distractors": [],
+      "prompt_note": "",
+      "status": "unverified"
+    },
+    {
+      "id": "t03-e",
+      "set": "diag_t23",
+      "pair": "t03",
+      "label": "tone_error",
+      "text": "骑床",
+      "text_traditional": "騎床",
+      "pinyin": "qí chuáng",
+      "citation_pinyin": "qí chuáng",
+      "context": "phrase",
+      "intended": {
+        "id": "t03",
+        "tones": [
+          "3",
+          "2"
+        ],
+        "labels": [
+          "qi",
+          "chuang"
+        ]
+      },
+      "produced_tones": [
+        "2",
+        "2"
+      ],
+      "distractors": [],
+      "prompt_note": "Read it as written: 骑 as in 骑车 (to ride a bike).",
+      "status": "unverified"
+    },
+    {
+      "id": "t04-c",
+      "set": "diag_t23",
+      "pair": "t04",
+      "label": "correct",
+      "text": "回家",
+      "text_traditional": "回家",
+      "pinyin": "huí jiā",
+      "citation_pinyin": "huí jiā",
+      "context": "phrase",
+      "intended": {
+        "id": "t04",
+        "tones": [
+          "2",
+          "1"
+        ],
+        "labels": [
+          "hui",
+          "jia"
+        ]
+      },
+      "produced_tones": [
+        "2",
+        "1"
+      ],
+      "distractors": [],
+      "prompt_note": "",
+      "status": "unverified"
+    },
+    {
+      "id": "t04-e",
+      "set": "diag_t23",
+      "pair": "t04",
+      "label": "tone_error",
+      "text": "悔家",
+      "text_traditional": "悔家",
+      "pinyin": "huǐ jiā",
+      "citation_pinyin": "huǐ jiā",
+      "context": "phrase",
+      "intended": {
+        "id": "t04",
+        "tones": [
+          "2",
+          "1"
+        ],
+        "labels": [
+          "hui",
+          "jia"
+        ]
+      },
+      "produced_tones": [
+        "3",
+        "1"
+      ],
+      "distractors": [],
+      "prompt_note": "Read it as written: 悔 as in 后悔 (to regret).",
+      "status": "unverified"
+    },
+    {
+      "id": "m01-a",
+      "set": "diag_minimal",
+      "pair": "m01",
+      "label": "correct",
+      "text": "买",
+      "text_traditional": "買",
+      "pinyin": "mǎi",
+      "citation_pinyin": "mǎi",
+      "context": "isolated",
+      "intended": {
+        "id": "mai3",
+        "tones": [
+          "3"
+        ],
+        "labels": [
+          "mai"
+        ]
+      },
+      "produced_tones": [
+        "3"
+      ],
+      "distractors": [
+        {
+          "id": "mai4",
+          "tones": [
+            "4"
+          ],
+          "labels": [
+            "mai"
+          ]
+        }
+      ],
+      "prompt_note": "",
+      "status": "unverified"
+    },
+    {
+      "id": "m01-b",
+      "set": "diag_minimal",
+      "pair": "m01",
+      "label": "correct",
+      "text": "卖",
+      "text_traditional": "賣",
+      "pinyin": "mài",
+      "citation_pinyin": "mài",
+      "context": "isolated",
+      "intended": {
+        "id": "mai4",
+        "tones": [
+          "4"
+        ],
+        "labels": [
+          "mai"
+        ]
+      },
+      "produced_tones": [
+        "4"
+      ],
+      "distractors": [
+        {
+          "id": "mai3",
+          "tones": [
+            "3"
+          ],
+          "labels": [
+            "mai"
+          ]
+        }
+      ],
+      "prompt_note": "",
+      "status": "unverified"
+    },
+    {
+      "id": "m02-a",
+      "set": "diag_minimal",
+      "pair": "m02",
+      "label": "correct",
+      "text": "水",
+      "text_traditional": "水",
+      "pinyin": "shuǐ",
+      "citation_pinyin": "shuǐ",
+      "context": "isolated",
+      "intended": {
+        "id": "shui3",
+        "tones": [
+          "3"
+        ],
+        "labels": [
+          "shui"
+        ]
+      },
+      "produced_tones": [
+        "3"
+      ],
+      "distractors": [
+        {
+          "id": "shui4",
+          "tones": [
+            "4"
+          ],
+          "labels": [
+            "shui"
+          ]
+        }
+      ],
+      "prompt_note": "",
+      "status": "unverified"
+    },
+    {
+      "id": "m02-b",
+      "set": "diag_minimal",
+      "pair": "m02",
+      "label": "correct",
+      "text": "睡",
+      "text_traditional": "睡",
+      "pinyin": "shuì",
+      "citation_pinyin": "shuì",
+      "context": "isolated",
+      "intended": {
+        "id": "shui4",
+        "tones": [
+          "4"
+        ],
+        "labels": [
+          "shui"
+        ]
+      },
+      "produced_tones": [
+        "4"
+      ],
+      "distractors": [
+        {
+          "id": "shui3",
+          "tones": [
+            "3"
+          ],
+          "labels": [
+            "shui"
+          ]
+        }
+      ],
+      "prompt_note": "",
+      "status": "unverified"
+    },
+    {
+      "id": "m03-a",
+      "set": "diag_minimal",
+      "pair": "m03",
+      "label": "correct",
+      "text": "汤",
+      "text_traditional": "湯",
+      "pinyin": "tāng",
+      "citation_pinyin": "tāng",
+      "context": "isolated",
+      "intended": {
+        "id": "tang1",
+        "tones": [
+          "1"
+        ],
+        "labels": [
+          "tang"
+        ]
+      },
+      "produced_tones": [
+        "1"
+      ],
+      "distractors": [
+        {
+          "id": "tang2",
+          "tones": [
+            "2"
+          ],
+          "labels": [
+            "tang"
+          ]
+        }
+      ],
+      "prompt_note": "",
+      "status": "unverified"
+    },
+    {
+      "id": "m03-b",
+      "set": "diag_minimal",
+      "pair": "m03",
+      "label": "correct",
+      "text": "糖",
+      "text_traditional": "糖",
+      "pinyin": "táng",
+      "citation_pinyin": "táng",
+      "context": "isolated",
+      "intended": {
+        "id": "tang2",
+        "tones": [
+          "2"
+        ],
+        "labels": [
+          "tang"
+        ]
+      },
+      "produced_tones": [
+        "2"
+      ],
+      "distractors": [
+        {
+          "id": "tang1",
+          "tones": [
+            "1"
+          ],
+          "labels": [
+            "tang"
+          ]
+        }
+      ],
+      "prompt_note": "",
+      "status": "unverified"
+    },
+    {
+      "id": "m04-a",
+      "set": "diag_minimal",
+      "pair": "m04",
+      "label": "correct",
+      "text": "猫",
+      "text_traditional": "貓",
+      "pinyin": "māo",
+      "citation_pinyin": "māo",
+      "context": "isolated",
+      "intended": {
+        "id": "mao1",
+        "tones": [
+          "1"
+        ],
+        "labels": [
+          "mao"
+        ]
+      },
+      "produced_tones": [
+        "1"
+      ],
+      "distractors": [
+        {
+          "id": "mao4",
+          "tones": [
+            "4"
+          ],
+          "labels": [
+            "mao"
+          ]
+        }
+      ],
+      "prompt_note": "",
+      "status": "unverified"
+    },
+    {
+      "id": "m04-b",
+      "set": "diag_minimal",
+      "pair": "m04",
+      "label": "correct",
+      "text": "帽",
+      "text_traditional": "帽",
+      "pinyin": "mào",
+      "citation_pinyin": "mào",
+      "context": "isolated",
+      "intended": {
+        "id": "mao4",
+        "tones": [
+          "4"
+        ],
+        "labels": [
+          "mao"
+        ]
+      },
+      "produced_tones": [
+        "4"
+      ],
+      "distractors": [
+        {
+          "id": "mao1",
+          "tones": [
+            "1"
+          ],
+          "labels": [
+            "mao"
+          ]
+        }
+      ],
+      "prompt_note": "",
+      "status": "unverified"
+    },
+    {
+      "id": "m05-a",
+      "set": "diag_minimal",
+      "pair": "m05",
+      "label": "correct",
+      "text": "鱼",
+      "text_traditional": "魚",
+      "pinyin": "yú",
+      "citation_pinyin": "yú",
+      "context": "isolated",
+      "intended": {
+        "id": "yu2",
+        "tones": [
+          "2"
+        ],
+        "labels": [
+          "yu"
+        ]
+      },
+      "produced_tones": [
+        "2"
+      ],
+      "distractors": [
+        {
+          "id": "yu3",
+          "tones": [
+            "3"
+          ],
+          "labels": [
+            "yu"
+          ]
+        }
+      ],
+      "prompt_note": "",
+      "status": "unverified"
+    },
+    {
+      "id": "m05-b",
+      "set": "diag_minimal",
+      "pair": "m05",
+      "label": "correct",
+      "text": "雨",
+      "text_traditional": "雨",
+      "pinyin": "yǔ",
+      "citation_pinyin": "yǔ",
+      "context": "isolated",
+      "intended": {
+        "id": "yu3",
+        "tones": [
+          "3"
+        ],
+        "labels": [
+          "yu"
+        ]
+      },
+      "produced_tones": [
+        "3"
+      ],
+      "distractors": [
+        {
+          "id": "yu2",
+          "tones": [
+            "2"
+          ],
+          "labels": [
+            "yu"
+          ]
+        }
+      ],
+      "prompt_note": "",
+      "status": "unverified"
+    },
+    {
+      "id": "n01",
+      "set": "diag_count",
+      "label": "correct",
+      "text": "嗯…一杯水",
+      "text_traditional": "嗯…一杯水",
+      "pinyin": "yì bēi shuǐ",
+      "citation_pinyin": "yī bēi shuǐ",
+      "context": "phrase",
+      "intended": {
+        "id": "n01",
+        "tones": [
+          "4",
+          "1",
+          "3"
+        ],
+        "labels": [
+          "yi",
+          "bei",
+          "shui"
+        ]
+      },
+      "produced_tones": [
+        "4",
+        "1",
+        "3"
+      ],
+      "distractors": [],
+      "prompt_note": "Say um, pause as if you are thinking, then say 一杯水.",
+      "status": "unverified"
+    },
+    {
+      "id": "n02",
+      "set": "diag_count",
+      "label": "correct",
+      "text": "一本…一本书",
+      "text_traditional": "一本…一本書",
+      "pinyin": "yì běn shū",
+      "citation_pinyin": "yī běn shū",
+      "context": "phrase",
+      "intended": {
+        "id": "n02",
+        "tones": [
+          "4",
+          "3",
+          "1"
+        ],
+        "labels": [
+          "yi",
+          "ben",
+          "shu"
+        ]
+      },
+      "produced_tones": [
+        "4",
+        "3",
+        "1"
+      ],
+      "distractors": [],
+      "prompt_note": "Start the phrase, stop after 一本 as if you lost your place, then say the whole phrase: 一本书.",
+      "status": "unverified"
+    },
+    {
+      "id": "n03",
+      "set": "diag_count",
+      "label": "correct",
+      "text": "就是…一碗饭",
+      "text_traditional": "就是…一碗飯",
+      "pinyin": "yì wǎn fàn",
+      "citation_pinyin": "yī wǎn fàn",
+      "context": "phrase",
+      "intended": {
+        "id": "n03",
+        "tones": [
+          "4",
+          "3",
+          "4"
+        ],
+        "labels": [
+          "yi",
+          "wan",
+          "fan"
+        ]
+      },
+      "produced_tones": [
+        "4",
+        "3",
+        "4"
+      ],
+      "distractors": [],
+      "prompt_note": "Say 就是, like the English I mean, pause as if you are searching for the words, then say 一碗饭.",
+      "status": "unverified"
+    }
+  ]
+}

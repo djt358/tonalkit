@@ -29,6 +29,14 @@ def test_the_standin_makes_twenty_pairs_the_contract_accepts(standin, lexicon):
     assert built.unusable == [] and built.passed_over == []
 
 
+def test_every_standin_phrase_is_flagged_as_one_for_djs_audit(standin, lexicon):
+    built = build_gate(standin, lexicon, 20, source="the stand-in")
+    correct = [c["id"] for c in built.cards if c["label"] == "correct"]
+    assert all(built.flags[i].startswith("stand-in phrase") for i in correct)
+    assert "chosen from the stand-in" in built.report_lines()[0]
+    assert "two third tones in a row" in built.flags["g13-c"]
+
+
 def test_the_pairs_cover_every_tone_after_yi_and_third_tone_runs(standin, lexicon):
     built = build_gate(standin, lexicon, 20)
     assert Counter(u.after_yi for u in built.selected) == {"1": 5, "2": 4, "3": 5, "4": 6}

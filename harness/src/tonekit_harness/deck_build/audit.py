@@ -22,10 +22,12 @@ def _cell(text: str) -> str:
     return text.replace("|", "\\|")
 
 
-def audit_markdown(data: dict, flags: dict[str, str]) -> str:
-    """A markdown table of every card of the deck (a dict of `{"deck", "card"}`)."""
+def audit_markdown(data: dict, flags: dict[str, str], gate_source: str = "") -> str:
+    """A markdown table of every card of the deck (a dict of `{"deck", "card"}`), under a line
+    saying where the gate phrases came from."""
     head = "| id | set | text | traditional | pinyin | context | label | intended | produced | flags and note |"
-    lines = [head, "|" + "---|" * 10]
+    lines = [f"Gate phrases: {gate_source}.", ""] if gate_source else []
+    lines += [head, "|" + "---|" * 10]
     for card in data["card"]:
         extras = [flags[card["id"]]] if card["id"] in flags else []
         if card["prompt_note"]:

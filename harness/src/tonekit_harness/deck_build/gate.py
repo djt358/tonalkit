@@ -33,6 +33,7 @@ class GateRow:
 
 @dataclass
 class GateBuild:
+    source: str = ""  # where the phrases came from, for the reports
     cards: list[dict] = field(default_factory=list)
     flags: dict[str, str] = field(default_factory=dict)  # card id -> what DJ should look at
     selected: list[Usable] = field(default_factory=list)
@@ -41,7 +42,7 @@ class GateBuild:
 
     def report_lines(self) -> list[str]:
         n = len(self.selected)
-        lines = [f"gate: {n} pair{'' if n == 1 else 's'} chosen"]
+        lines = [f"gate: {n} pair{'' if n == 1 else 's'} chosen from {self.source or 'the rows given'}"]
         lines += [f"  can't use {x.where} {x.text}: {x.reason}" for x in self.unusable]
         lines += [f"  left out  {x.where} {x.text}: {x.reason}" for x in self.passed_over]
         return lines
@@ -56,7 +57,8 @@ def _standin_row(row: Row) -> GateRow:
         row.need("text"), row.need("citation_pinyin"), row.need("spoken_pinyin"),
         "phrase", row.get("text_traditional") or None,
     )  # fmt: skip
-    return GateRow(row.where, reading, row.get("flag"), row.get("status", "unverified"))
+    flag = "stand-in phrase" + (f"; {row.get('flag')}" if row.get("flag") else "")
+    return GateRow(row.where, reading, flag, row.get("status", "unverified"))
 
 
 def _shape_problem(r: Reading) -> str | None:
@@ -99,11 +101,11 @@ def usable_or_left(row: GateRow, lexicon: Lexicon) -> Usable | Left:
 
 
 def build_gate(
-    rows: list[GateRow], lexicon: Lexicon, pairs: int, *, earlier_unusable: list[Left] | None = None
+    rows: list[GateRow], lexicon: Lexicon, pairs: int, *, earlier_unusable: list[Left] | None = None, source: str = ""
 ) -> GateBuild:
     """The gate cards (`g01-c`, `g01-e`, ...) for `pairs` pairs chosen from `rows`. Raises
     `BuildError`, with the full report, if fewer than `pairs` rows can make a pair."""
-    out = GateBuild(unusable=list(earlier_unusable or []))
+    out = GateBuild(source=source, unusable=list(earlier_unusable or []))
     usable: list[Usable] = []
     seen: set[str] = set()
     for row in rows:

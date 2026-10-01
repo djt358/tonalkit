@@ -66,3 +66,21 @@ needs_c0_fix = pytest.mark.skipif(
 
 def gate_row(text: str, citation: str, spoken: str, trad: str | None = None, where: str = "t.csv:2") -> GateRow:
     return GateRow(where, Reading(text, citation, spoken, "phrase", trad))
+
+
+def small_deck_data(pairs: int = 2) -> dict:
+    """A deck of the first gate pairs of the stand-in and one register card: everything the model
+    holds today, so it passes `load_deck` before and after C0's fix."""
+    from tonekit_harness.deck_build.cards import candidate, make_card
+    from tonekit_harness.deck_build.gate import build_gate, standin_rows
+    from tonekit_harness.deck_build.lexicon import load_lexicon
+    from tonekit_harness.deck_build.reading import Reading
+
+    rows = standin_rows(SOURCES / "gate_standin.csv")[:pairs]
+    gate = build_gate(rows, load_lexicon(SOURCES / "tone_variants.csv"), pairs)
+    register = make_card(
+        id="r01", set="register", label="correct", reading=Reading("妈麻马骂", "mā má mǎ mà", "mā má mǎ mà", "isolated", "媽麻馬罵"),
+        intended=candidate("r01", "mā má mǎ mà"), note="Pause.",
+    )  # fmt: skip
+    meta = {"id": "t-v1", "lect": "cmn", "version": 1, "title": "Test deck"}
+    return {"deck": meta, "card": [register, *gate.cards]}

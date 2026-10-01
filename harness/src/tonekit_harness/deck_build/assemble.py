@@ -14,7 +14,6 @@ from ..contracts.deck import Deck, parse_deck
 from .contract_view import contract_card, dropped_fields
 from .errors import BuildError
 from .gate import GateBuild, build_gate, standin_rows
-from .gate_select import Left
 from .gmeasure import read_gmeasure
 from .lexicon import load_lexicon
 from .minimal_set import minimal_cards
@@ -56,10 +55,9 @@ def _meta(sources: Path) -> dict:
 def _gate(sources: Path, gmeasure: Path | None, gmeasure_map: Mapping[str, str] | None, pairs: int) -> GateBuild:
     lexicon = load_lexicon(sources / LEXICON)
     if gmeasure is None:
-        return build_gate(standin_rows(sources / STANDIN), lexicon, pairs)
+        return build_gate(standin_rows(sources / STANDIN), lexicon, pairs, source=f"the stand-in {STANDIN}")
     rows, no_phrase = read_gmeasure(gmeasure, gmeasure_map)
-    earlier: list[Left] = list(no_phrase)
-    return build_gate(rows, lexicon, pairs, earlier_unusable=earlier)
+    return build_gate(rows, lexicon, pairs, earlier_unusable=list(no_phrase), source=f"DJ's table {gmeasure.name}")
 
 
 def build_deck(
