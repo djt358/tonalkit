@@ -372,7 +372,10 @@ substitution-sweep readings, except six named gaps. At 0 dB, 1-2-3, 4-1-2 and 2-
 and 4-1-3 (the 110-260 Hz speaker) are reported, not asserted. At 6/s, that speaker's 2-3-4 and
 3-4-1 must segment and rank the spoken tone first, but a wrong tone may reach 0.5. A gap that starts
 passing is reported. A report-only matrix covers 4 to 6 syllables/s, 0 to 12 dB, 30 or 60 ms glides,
-a fricative onset and 20 dB SNR. **Why.** With no level dip and the pitch tracked straight through
+a fricative onset and 20 dB SNR: with any dip it missegments 6 of 1,296 clips (all at 6 syllables/s
+with a fricative onset, for the 110-260 Hz speaker) and grades 43 of 11,664 substitutions too well,
+18 of them in those 6 clips; in every other clip the spoken tone still grades highest. With no dip
+it missegments 243 of 432 clips. **Why.** With no level dip and the pitch tracked straight through
 (a 2-Chao glide from tone 1 to tone 2, or tones 2 and 4 meeting at the ceiling), no energy or
 periodicity cue separates the syllables. Finding them needs a pitch-landmark cue, which the design
 (R27, R32, R33, R50) does not have and which is a design decision, not a fix. The 6/s gaps are a

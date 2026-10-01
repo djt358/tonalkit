@@ -9,9 +9,8 @@
 //! suit it best, and the closed-set decode and the lattice see the same evidence.
 
 use tonekit_core::{Analysis, EnergyTrack, MeasureIssue, TbuSpan};
-use tonekit_shape::{extract_nucleus, Extracted, Joins, JOIN_TRIM_FRAMES};
-
 use tonekit_segment::{speech_frames, SegmentParams};
+use tonekit_shape::{extract_nucleus, Extracted, Joins, JOIN_TRIM_FRAMES};
 
 use crate::count_u32;
 
@@ -148,9 +147,9 @@ mod tests {
     }
 
     #[test]
-    fn an_edge_is_a_join_only_with_speech_all_around_it() {
-        // Speech on 10..40 and 42..70 (a two-frame pause at 40..42): 30 is inside the first stretch,
-        // 40 and 44 are within three frames of the pause, and 10 and 70 are the ends of the speech.
+    fn an_edge_is_a_join_only_with_voice_all_around_it_and_pitch_on_both_sides() {
+        // Voice on 10..40 and 42..70 (a two-frame pause at 40..42): 30 is inside the first stretch,
+        // 40 and 44 are within three frames of the pause, and 10 and 70 are the ends of the voice.
         let speech: Vec<bool> = (0..80)
             .map(|i| (10..40).contains(&i) || (42..70).contains(&i))
             .collect();
@@ -184,6 +183,14 @@ mod tests {
                 end: false
             }
         );
+        // A pitch break at the edge (frame 29 or 30 unvoiced) is not a join either.
+        let mut broken = vec![true; 80];
+        broken[30] = false;
+        assert!(!joins(&speech, &broken, &span(20, 30)).end);
+        assert!(joins(&speech, &broken, &span(20, 32)).end);
+        broken[30] = true;
+        broken[29] = false;
+        assert!(!joins(&speech, &broken, &span(30, 40)).start);
         // The ends of the track are never joins.
         assert_eq!(joins(&[true; 5], &[true; 5], &span(1, 4)), Joins::NONE);
     }
