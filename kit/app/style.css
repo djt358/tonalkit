@@ -1,0 +1,433 @@
+/* Mobile-first (iPhone Safari): one column, big tap targets, the card's Chinese text large. */
+
+:root {
+  --paper: #faf8f3;
+  --ink: #1c1917;
+  --muted: #6f6a62;
+  --line: #e6e0d4;
+  --raised: #ffffff;
+  --seal: #b42318;
+  --seal-ink: #ffffff;
+  --primary: #1c1917;
+  --primary-ink: #faf8f3;
+  --ok: #2f6f3e;
+  --warn: #8a5a00;
+  --dev: #fde68a;
+  --dev-ink: #3f2d00;
+  --error-bg: #fde8e6;
+  --error-ink: #8c1d13;
+  --radius: 14px;
+  --gutter: 1.25rem;
+  --sans: -apple-system, BlinkMacSystemFont, "Helvetica Neue", "Segoe UI", Roboto, sans-serif;
+  --cjk: "PingFang SC", "PingFang TC", "Hiragino Sans GB", "Noto Sans CJK SC", "Noto Sans SC",
+    "Microsoft YaHei", sans-serif;
+  color-scheme: light dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper: #151311;
+    --ink: #f3efe7;
+    --muted: #a39d93;
+    --line: #2e2a25;
+    --raised: #1f1c19;
+    --seal: #e5483a;
+    --primary: #f3efe7;
+    --primary-ink: #151311;
+    --ok: #7fc28f;
+    --warn: #e6b450;
+    --error-bg: #3a1714;
+    --error-ink: #ffb4a9;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font: 1.0625rem/1.5 var(--sans);
+  -webkit-tap-highlight-color: transparent;
+}
+
+main {
+  max-width: 34rem;
+  margin: 0 auto;
+  padding: max(var(--gutter), env(safe-area-inset-top)) max(var(--gutter), env(safe-area-inset-right))
+    max(var(--gutter), env(safe-area-inset-bottom)) max(var(--gutter), env(safe-area-inset-left));
+}
+
+.screen {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  min-height: calc(100dvh - 2 * var(--gutter));
+}
+
+.screen[hidden],
+[hidden] {
+  display: none !important;
+}
+
+h1 {
+  font-size: 1.75rem;
+  line-height: 1.2;
+  letter-spacing: -0.01em;
+  margin: 1.5rem 0 0.25rem;
+}
+
+.lead {
+  font-size: 1.125rem;
+  color: var(--ink);
+  margin: 0;
+}
+
+.prose {
+  overflow-wrap: anywhere;
+}
+
+.prose h2 {
+  font-size: 1.2rem;
+  margin: 1.25rem 0 0.25rem;
+}
+
+.prose h3,
+.prose h4,
+.prose h5,
+.prose h6 {
+  font-size: 1.05rem;
+  margin: 1rem 0 0.25rem;
+}
+
+.prose p,
+.prose ul {
+  margin: 0.4rem 0;
+}
+
+.prose ul {
+  padding-left: 1.25rem;
+}
+
+/* Buttons ------------------------------------------------------------------------------------ */
+
+button,
+.button {
+  appearance: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 3.5rem;
+  padding: 0.75rem 1.25rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--raised);
+  color: var(--ink);
+  font: 600 1.125rem/1.2 var(--sans);
+  text-align: center;
+  text-decoration: none;
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+button:focus-visible,
+.button:focus-visible {
+  outline: 3px solid var(--seal);
+  outline-offset: 2px;
+}
+
+.primary {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: var(--primary-ink);
+}
+
+.quiet {
+  background: transparent;
+  border-color: transparent;
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-top: auto;
+  padding-top: 1.5rem;
+}
+
+/* Background questions ------------------------------------------------------------------------ */
+
+.choices {
+  border: 0;
+  margin: 1rem 0 0;
+  padding: 0;
+}
+
+.choices legend {
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+  padding: 0;
+}
+
+.choices [role="radiogroup"] {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.5rem;
+}
+
+.choice {
+  min-height: 3.25rem;
+  font-weight: 500;
+  font-size: 1rem;
+}
+
+.choice[aria-checked="true"] {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: var(--primary-ink);
+}
+
+/* Level meter and status ---------------------------------------------------------------------- */
+
+.meter {
+  height: 8px;
+  border-radius: 4px;
+  background: var(--line);
+  overflow: hidden;
+}
+
+.meter-fill {
+  height: 100%;
+  background: var(--ok);
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform 60ms linear;
+}
+
+.status {
+  min-height: 1.5em;
+  margin: 0;
+  color: var(--muted);
+  text-align: center;
+}
+
+.error-text {
+  margin: 0;
+  padding: 0.75rem 1rem;
+  border-radius: var(--radius);
+  background: var(--error-bg);
+  color: var(--error-ink);
+}
+
+.detail {
+  color: var(--muted);
+  font-size: 0.875rem;
+  overflow-wrap: anywhere;
+}
+
+/* Cards --------------------------------------------------------------------------------------- */
+
+.progress {
+  margin: 0.5rem 0 0;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.card {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  min-height: 14rem;
+  padding: 1.5rem 0.5rem;
+  text-align: center;
+}
+
+.card-text {
+  margin: 0;
+  font: 500 clamp(3rem, 17vw, 5.5rem) / 1.2 var(--cjk);
+  letter-spacing: 0.04em;
+  overflow-wrap: anywhere;
+}
+
+.card-text.long {
+  font-size: clamp(1.9rem, 9vw, 3rem);
+  line-height: 1.35;
+}
+
+.card-pinyin {
+  margin: 0;
+  font-size: 1.5rem;
+  color: var(--muted);
+}
+
+.card-hint {
+  margin: 0;
+  color: var(--muted);
+}
+
+.card-note {
+  margin: 0.5rem 0 0;
+  padding: 0.6rem 0.9rem;
+  border-radius: var(--radius);
+  background: var(--raised);
+  border: 1px solid var(--line);
+  font-family: var(--cjk), var(--sans);
+}
+
+.card-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding-top: 0.5rem;
+}
+
+.card-actions .row {
+  display: flex;
+  gap: 0.75rem;
+}
+
+.card-actions .row:not(:has(button:not([hidden]))) {
+  display: none;
+}
+
+.record {
+  min-height: 5rem;
+  font-size: 1.3rem;
+  background: var(--seal);
+  border-color: var(--seal);
+  color: var(--seal-ink);
+  gap: 0.6rem;
+}
+
+.record::before {
+  content: "";
+  width: 0.9rem;
+  height: 0.9rem;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.record.recording::before {
+  border-radius: 3px;
+}
+
+.record.recording {
+  animation: pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--seal) 45%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 0 10px color-mix(in srgb, var(--seal) 0%, transparent);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .record.recording {
+    animation: none;
+  }
+  .meter-fill {
+    transition: none;
+  }
+}
+
+#card-skip[aria-pressed="true"] {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: var(--primary-ink);
+}
+
+/* Done ---------------------------------------------------------------------------------------- */
+
+.code-box {
+  margin: 1rem 0;
+  padding: 1.25rem;
+  border-radius: var(--radius);
+  background: var(--raised);
+  border: 1px solid var(--line);
+  text-align: center;
+}
+
+.code-label {
+  margin: 0;
+  color: var(--muted);
+}
+
+.code {
+  margin: 0.25rem 0;
+  font: 700 2.5rem/1.2 ui-monospace, "SF Mono", Menlo, monospace;
+  letter-spacing: 0.18em;
+  user-select: all;
+  -webkit-user-select: all;
+}
+
+.code-note {
+  margin: 0;
+}
+
+/* Banners and loading ------------------------------------------------------------------------- */
+
+.banner {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 0.5rem var(--gutter);
+  padding-top: max(0.5rem, env(safe-area-inset-top));
+  font-size: 0.9rem;
+  text-align: center;
+}
+
+.banner.dev {
+  background: var(--dev);
+  color: var(--dev-ink);
+  font-weight: 600;
+}
+
+.banner.error {
+  background: var(--error-bg);
+  color: var(--error-ink);
+}
+
+#screen-loading {
+  align-items: center;
+  justify-content: center;
+}
+
+.spinner {
+  width: 2rem;
+  height: 2rem;
+  border: 3px solid var(--line);
+  border-top-color: var(--ink);
+  border-radius: 50%;
+  animation: spin 0.9s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
