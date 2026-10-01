@@ -1,0 +1,70 @@
+{
+  "welcome.title": "Thanks for helping out",
+  "welcome.body": "You'll read about 70 short cards aloud, about 20 minutes in all. Find a quiet spot, ideally on your own, and speak the way you normally would. A few cards look a little off on purpose, so read every card exactly as written, even if it looks wrong. You're not being tested. The app is. You can pause and pick it up later.",
+  "welcome.start": "Get started",
+
+  "consent.title": "Before you start",
+  "consent.agree": "I agree",
+  "consent.decline": "No thanks",
+
+  "background.title": "A little about you",
+  "background.intro": "Three quick questions, so DJ can see how the results differ across kinds of speakers. You can pick Prefer not to say on the first two.",
+  "background.next": "Next",
+
+  "background.background.label": "How would you describe yourself as a Mandarin speaker?",
+  "background.background.native": "Native speaker: Mandarin was my first language",
+  "background.background.heritage": "Heritage speaker: I grew up with Mandarin at home, but it's not my strongest language",
+  "background.background.learner": "Learner: I picked it up later",
+  "background.background.prefer_not": "Prefer not to say",
+
+  "background.grew_up_hearing.label": "Which Mandarin did you mostly hear growing up?",
+  "background.grew_up_hearing.mainland": "Mainland China",
+  "background.grew_up_hearing.taiwan": "Taiwan",
+  "background.grew_up_hearing.singapore_malaysia": "Singapore or Malaysia",
+  "background.grew_up_hearing.hong_kong_macau": "Hong Kong or Macau",
+  "background.grew_up_hearing.other": "Somewhere else",
+  "background.grew_up_hearing.prefer_not": "Prefer not to say",
+
+  "background.reading.label": "How would you like to see the cards?",
+  "background.reading.hanzi": "Characters only",
+  "background.reading.hanzi_pinyin": "Characters with pinyin",
+
+  "mic.title": "Check your microphone",
+  "mic.body": "Your phone will ask to use the microphone. Tap Allow. Your recordings stay on your phone until you choose to share them.",
+  "mic.allow": "Allow microphone",
+  "mic.checking": "Say a few words in your normal voice. We're checking the sound level.",
+  "mic.level_ok": "That sounds good.",
+  "mic.level_low": "A bit quiet. Hold the phone closer, or speak up a little.",
+  "mic.noisy": "A little noisy. That's fine, or move somewhere quieter if it's easy.",
+  "mic.continue": "Continue",
+
+  "card.progress": "{n} of {total}",
+  "card.record": "Record",
+  "card.stop": "Stop",
+  "card.play": "Play back",
+  "card.redo": "Record again",
+  "card.skip": "Skip",
+  "card.next": "Next",
+  "card.note": "{note}",
+  "card.isolated_hint": "Say it by itself, like you're telling someone how it's pronounced.",
+  "card.phrase_hint": "Say it naturally, like part of a conversation.",
+  "card.saved": "Saved on your phone",
+
+  "pause.title": "Taking a break?",
+  "pause.body": "Your recordings so far are saved on this phone. Open the same link in Safari later and you'll pick up where you left off.",
+  "pause.resume": "Continue where I left off",
+
+  "done.title": "All done. Thank you!",
+  "done.body": "That's every card. Tap Share to send your recordings to DJ. Once DJ has them, you can delete your copy.",
+  "done.code_label": "Your code",
+  "done.code_note": "Keep this code if you ever want your recordings deleted: just send it to DJ. It's also in the name of the file you share.",
+
+  "share.button": "Share with DJ",
+  "share.fallback": "Save to Files, then send it to DJ",
+  "share.done": "Thank you. You're all done.",
+
+  "error.mic_blocked": "The microphone is blocked. Tap aA in the address bar, then Website Settings, then Microphone, and choose Allow. You can also go to Settings > Safari > Microphone. Then reload this page.",
+  "error.unsupported": "This page needs Safari on an iPhone. Please open the link in Safari.",
+  "error.storage": "This page can't save your recordings on your phone. That can happen in a Private tab or when storage is full. Try a normal Safari tab, then reload.",
+  "error.generic": "Something went wrong. Reload the page; your recordings so far should still be there. If it keeps happening, tell DJ."
+}

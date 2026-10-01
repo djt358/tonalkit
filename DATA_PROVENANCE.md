@@ -96,6 +96,24 @@ on every push and pull request.
 To clear a `verify` source properly, confirm its terms and update its row in the register. A
 `[[signoff]]` records a person's decision to use it while the terms are still unconfirmed.
 
+## Volunteer recordings
+
+Recordings from the S0.5 volunteer kit are the `volunteer-corpus` row in the register. They are
+made on the volunteers' own phones, with the consent text in [`kit/CONSENT.md`](kit/CONSENT.md)
+(version `v1`; every session records the version its speaker agreed to).
+
+- **What each promise rests on.** [`kit/PROMISES.md`](kit/PROMISES.md) maps every promise in the
+  consent and the guide to the mechanism that keeps it and the test that would fail if it broke.
+- **Where the data lives.** Under `$TONEKIT_DATA`, never in the repository: audio is blocked from
+  git (`scripts/check-no-audio.sh`), and speakers are known only by pseudonymous session codes and
+  enum-only background answers.
+- **What it may be used for.** The row's `shipped_weights_training` is `verify`: S1 gate and
+  evaluation only. Moving volunteer speakers into calibration waits for DJ to confirm the consent
+  wording, and a `PROVENANCE.toml` listing `volunteer-corpus` as a source then needs a
+  `[[signoff]]` like any other `verify` source.
+- **Deletion.** A volunteer's session code is the only key. `tkh purge --session CODE` removes
+  that session and logs it (`docs/s05/contracts.md` §6).
+
 ## Synthetic audio never fits shipped calibration
 
 Synthetic and TTS audio (`synthetic-world`, `apple-system-tts`) are for tests and diagnostics. They
