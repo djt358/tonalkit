@@ -371,6 +371,7 @@ def check_fidelity(bundle: Path, shown: list[str]) -> list[str]:
     with zipfile.ZipFile(bundle) as z:
         session = json.loads(z.read("session.json"))
         clips = {c["card"]: z.read(c["file"]) for c in session["clips"]}
+    print(f"  device: {json.dumps(session['device'])}")
     expect_speaker = {
         "background": "heritage",
         "grew_up_hearing": "taiwan",

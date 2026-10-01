@@ -26,7 +26,9 @@ const app = {
   cards: null,
   paused: false,
   bundle: null,
+  clips: new Map(), // kept takes of this page's lifetime: export still works if storage fails
   save,
+  readClip,
   finish,
   pause,
 };
@@ -41,13 +43,19 @@ function banner(text) {
   setText($("error-banner"), text);
 }
 
+/** Saves the session (and a kept take with it); a storage failure keeps going in memory. */
 async function save(clip = null) {
+  if (clip) app.clips.set(clip.id, clip.wav);
   try {
     await app.store.save(app.session, clip);
   } catch (e) {
     console.error(e);
     banner(app.t("error.storage"));
   }
+}
+
+async function readClip(id) {
+  return app.clips.get(id) ?? (await app.store.getClip(id));
 }
 
 function micErrorText(e) {
@@ -109,7 +117,7 @@ async function showDone() {
   app.capture.close(); // the recording indicator goes off: nothing more is recorded
   try {
     app.bundle = await buildBundle(app.session, async (id) => {
-      const wav = await app.store.getClip(id);
+      const wav = await readClip(id);
       if (!wav) throw new Error(`clip ${id} missing from storage`);
       return wav;
     });
@@ -171,6 +179,7 @@ function wire() {
     showBackground();
   });
 
+  // Declining ends the session politely: nothing was recorded, nothing is kept.
   onTap("consent-decline", async () => {
     await app.store.clear();
     app.session = null;
@@ -241,12 +250,11 @@ function wire() {
   });
 
   app.capture.onLevel((db) => setMeter(db));
-  app.capture.onInterrupt = () => {
-    if (["mic", "cards"].includes(currentScreen())) pause();
-  };
-  document.addEventListener("visibilitychange", () => {
-    if (document.hidden && ["mic", "cards"].includes(currentScreen())) pause();
-  });
+  // Leaving the page (screen lock, another app, a call) while the microphone is open pauses
+  // the kit; the take in progress, if any, is dropped.
+  const micOpen = () => app.capture.ctx && ["mic", "cards"].includes(currentScreen());
+  app.capture.onInterrupt = () => micOpen() && pause();
+  document.addEventListener("visibilitychange", () => document.hidden && micOpen() && pause());
   window.addEventListener("pagehide", () => app.cards?.abort());
 }
 

@@ -7,7 +7,7 @@ const MAX_TAKE_S = 30; // a forgotten Stop ends the take here (it is kept, not t
 const LONG_TEXT = 6; // characters; longer cards get a smaller font
 
 /**
- * @param {object} app the shared app context: {t, session, deck, store, capture, save, finish, pause}
+ * @param {object} app the shared app context: {t, session, deck, capture, save, readClip, finish, pause}
  */
 export function cardScreen(app) {
   const byId = new Map(app.deck.cards.map((c) => [c.id, c]));
@@ -68,7 +68,7 @@ export function cardScreen(app) {
     setText($("card-note"), card.prompt_note ? app.t("card.note", { note: card.prompt_note }) : "");
     update();
     if (app.session.cards[id]?.kept) {
-      const wav = await app.store.getClip(id);
+      const wav = await app.readClip(id);
       if (currentId() === id && !clip.url) setClip(id, wav);
       update();
     }
