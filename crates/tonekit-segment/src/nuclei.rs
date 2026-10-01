@@ -1,7 +1,7 @@
 use tonekit_core::{EnergyTrack, F0Track, FrameRange, Nucleus};
 
 use crate::region::floor_db;
-use crate::runs::{in_separate_runs, long_runs, Run};
+use crate::runs::{in_separate_runs, long_runs, run_of, Run};
 use crate::smooth::{argmax_middle, frame, local_extrema, shallow_valley, smoothed_db, Extremum};
 use crate::SegmentParams;
 
@@ -24,12 +24,17 @@ pub(crate) const VOICING_RADIUS: usize = 2;
 /// syllable of its own). Fluent speech can run two syllables together with no dip in level at all,
 /// and the voice's pitch break between them is then the only sign of the join.
 ///
+/// A candidate within 2 frames outside a long voiced run is moved onto the run's nearest voiced
+/// frame (ruling R58) if that frame is in the region and at or above the speech threshold, so a
+/// nucleus lies inside the voiced part its tone is measured on even when pause or pitch-break
+/// edges fall between that part and the energy peak.
+///
 /// Candidates are then merged left to right. A candidate joins the nucleus before it when they are
 /// closer than `p.min_nucleus_gap` frames, or when the smoothed minimum between them is above
 /// `min(peak_a, peak_b) - p.dip_db` and they do not lie in two different long voiced runs (each
 /// within 2 frames of its run); the higher peak survives (the earlier one on a tie), and a
 /// surviving new peak is compared with the nucleus before that in turn. `strength_db` is the
-/// smoothed peak minus the p10 dB.
+/// smoothed level at the nucleus minus the p10 dB.
 ///
 /// The result is sorted by frame; a region that is empty or lies past the track gives no nuclei.
 pub fn nuclei(
@@ -70,6 +75,17 @@ pub fn nuclei(
             }
         }
     }
+    let mut candidates: Vec<usize> = candidates
+        .into_iter()
+        .map(|c| {
+            let on = onto_run(&runs, c);
+            if (start..end).contains(&on) && s[on] >= threshold {
+                on
+            } else {
+                c
+            }
+        })
+        .collect();
     candidates.sort_unstable();
     candidates.dedup();
 
@@ -83,6 +99,14 @@ pub fn nuclei(
             strength_db: s[i] - floor,
         })
         .collect()
+}
+
+/// `at` moved onto the nearest frame of its long run when it lies just outside one; otherwise `at`.
+fn onto_run(runs: &[Run], at: usize) -> usize {
+    match run_of(runs, at, VOICING_RADIUS) {
+        Some(k) => at.clamp(runs[k].first, runs[k].last),
+        None => at,
+    }
 }
 
 /// Adds `peak` (later than everything in `kept`) to `kept`, merging it into its predecessors

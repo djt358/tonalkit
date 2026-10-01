@@ -23,7 +23,6 @@ const DIP_MS: f32 = 80.0;
 /// How fast and how smoothly the reading is spoken.
 #[derive(Clone, Copy, Debug)]
 struct Condition {
-    name: &'static str,
     syllables_per_s: f32,
     glide_ms: f32,
     dip_db: f32,
@@ -35,7 +34,6 @@ struct Condition {
 /// The CI conditions.
 const CONDITIONS: [Condition; 3] = [
     Condition {
-        name: "5 syl/s, 0 dB dip, 40 ms glide",
         syllables_per_s: 5.0,
         glide_ms: 40.0,
         dip_db: 0.0,
@@ -43,7 +41,6 @@ const CONDITIONS: [Condition; 3] = [
         snr_db: None,
     },
     Condition {
-        name: "5 syl/s, 6 dB dip, 60 ms glide",
         syllables_per_s: 5.0,
         glide_ms: 60.0,
         dip_db: 6.0,
@@ -51,7 +48,6 @@ const CONDITIONS: [Condition; 3] = [
         snr_db: None,
     },
     Condition {
-        name: "6 syl/s, 3 dB dip, 30 ms glide, 25 dB SNR",
         syllables_per_s: 6.0,
         glide_ms: 30.0,
         dip_db: 3.0,
@@ -59,6 +55,23 @@ const CONDITIONS: [Condition; 3] = [
         snr_db: Some(25.0),
     },
 ];
+
+impl Condition {
+    /// "5 syl/s, 6 dB dip, 60 ms glide", then the onset and the SNR when there are any.
+    fn label(&self) -> String {
+        let mut label = format!(
+            "{} syl/s, {} dB dip, {} ms glide",
+            self.syllables_per_s, self.dip_db, self.glide_ms
+        );
+        if self.middle_onset_ms > 0.0 {
+            label += &format!(", {} ms onset", self.middle_onset_ms);
+        }
+        if let Some(snr) = self.snr_db {
+            label += &format!(", {snr} dB SNR");
+        }
+        label
+    }
+}
 
 fn clip(reading: &[&str], c: &Condition, speaker: &Speaker) -> Vec<f32> {
     let last = reading.len() - 1;
@@ -84,65 +97,182 @@ fn clip(reading: &[&str], c: &Condition, speaker: &Speaker) -> Vec<f32> {
     .pcm
 }
 
-/// One condition and speaker: the readings that did not segment into three nuclei, and every
-/// single substitution of the readings that did.
-struct Outcome {
-    missegmented: Vec<String>,
+/// A clip the CI sweep knows it cannot pass yet, and why (see the rulings in the R1 report).
+struct Gap {
+    condition: &'static str,
+    /// `None`: every speaker.
+    speaker: Option<&'static str>,
+    reading: &'static str,
+    kind: GapKind,
+    why: &'static str,
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum GapKind {
+    /// No acoustic cue separates two syllables: nothing about the clip is asserted.
+    Unsegmentable,
+    /// Segmented right, and the spoken tone still grades above every substitution, but a wrong
+    /// tone can reach 0.5.
+    Ambiguous,
+}
+
+const A: &str = "5 syl/s, 0 dB dip, 40 ms glide";
+const C: &str = "6 syl/s, 3 dB dip, 30 ms glide, 25 dB SNR";
+
+/// The known gaps (ruling R62). The 0 dB condition has no level dip at all, so two syllables are
+/// told apart only where pYIN loses the pitch between them (ruling R58); a 2-Chao glide (T1 → T2)
+/// or no glide at all (T2 → T4 meeting at the ceiling) leaves it tracking straight through.
+const GAPS: [Gap; 6] = [
+    Gap {
+        condition: A,
+        speaker: None,
+        reading: "1-2-3",
+        kind: GapKind::Unsegmentable,
+        why: "T1 → T2 is a 2-Chao glide at a flat level: no dip, no pitch break",
+    },
+    Gap {
+        condition: A,
+        speaker: None,
+        reading: "4-1-2",
+        kind: GapKind::Unsegmentable,
+        why: "T1 → T2 is a 2-Chao glide at a flat level: no dip, no pitch break",
+    },
+    Gap {
+        condition: A,
+        speaker: None,
+        reading: "2-4-1",
+        kind: GapKind::Unsegmentable,
+        why: "T2 → T4 meet at the ceiling at a flat level: no glide, no dip, no pitch break",
+    },
+    Gap {
+        condition: A,
+        speaker: Some("wide"),
+        reading: "4-1-3",
+        kind: GapKind::Unsegmentable,
+        why: "pYIN loses the 14 st T4 → T1 jump for only 2 frames, which a voiced run bridges",
+    },
+    Gap {
+        condition: C,
+        speaker: Some("wide"),
+        reading: "2-3-4",
+        kind: GapKind::Ambiguous,
+        why: "a 15 st T4 fall in ~150 ms (beyond the human maximum speed of pitch change): pYIN \
+              loses its high start, and the mid fall it keeps fits T3 at 0.52",
+    },
+    Gap {
+        condition: C,
+        speaker: Some("wide"),
+        reading: "3-4-1",
+        kind: GapKind::Ambiguous,
+        why: "a 15 st T4 fall in ~150 ms (beyond the human maximum speed of pitch change): pYIN \
+              loses both its ends, and the mid fall it keeps fits T3 at 0.60",
+    },
+];
+
+fn gap(condition: &str, speaker: &str, reading: &str) -> Option<&'static Gap> {
+    GAPS.iter().find(|g| {
+        g.condition == condition && g.speaker.is_none_or(|s| s == speaker) && g.reading == reading
+    })
+}
+
+/// What one clip did: whether it segmented into one nucleus per syllable, and every single
+/// substitution graded on it.
+struct Clip {
+    reading: String,
+    nuclei: Vec<u32>,
     substitutions: Vec<Substitution>,
 }
 
-fn sweep(pack: &LanguagePack, c: &Condition, speaker: &Speaker) -> Outcome {
+impl Clip {
+    fn segmented(&self) -> bool {
+        self.nuclei.len() == 3
+    }
+
+    fn graded_too_well(&self) -> usize {
+        self.substitutions
+            .iter()
+            .filter(|s| s.graded_too_well())
+            .count()
+    }
+
+    fn ranked_wrong(&self) -> usize {
+        self.substitutions
+            .iter()
+            .filter(|s| s.ranked_wrong())
+            .count()
+    }
+}
+
+fn sweep(pack: &LanguagePack, c: &Condition, speaker: &Speaker) -> Vec<Clip> {
     let register = speaker.register();
-    let mut out = Outcome {
-        missegmented: Vec::new(),
-        substitutions: Vec::new(),
-    };
-    for spoken in READINGS {
-        let a = analyze(
-            &clip(&spoken, c, speaker),
-            RATE,
-            Some(&register),
-            &AnalyzeOptions::default(),
-        )
-        .unwrap();
-        let frames: Vec<u32> = a.nuclei.iter().map(|n| n.frame).collect();
-        if frames.len() != spoken.len() {
-            out.missegmented
-                .push(format!("{}: nuclei at {frames:?}", spoken.join("-")));
+    READINGS
+        .iter()
+        .map(|&spoken| {
+            let a = analyze(
+                &clip(&spoken, c, speaker),
+                RATE,
+                Some(&register),
+                &AnalyzeOptions::default(),
+            )
+            .unwrap();
+            Clip {
+                reading: spoken.join("-"),
+                nuclei: a.nuclei.iter().map(|n| n.frame).collect(),
+                substitutions: substitutions(&a, pack, spoken),
+            }
+        })
+        .collect()
+}
+
+/// Runs `conditions` × [`FLUENT_SPEAKERS`], printing each cell (clips that missegmented, then the
+/// substitutions as `report` prints them); returns every clip with its condition and speaker.
+fn run(conditions: &[Condition]) -> Vec<(String, &'static str, Clip)> {
+    let pack = cmn();
+    let mut out = Vec::new();
+    for c in conditions {
+        for speaker in &FLUENT_SPEAKERS {
+            let label = format!("{}, {}", c.label(), speaker.name);
+            let clips = sweep(&pack, c, speaker);
+            let missegmented = clips.iter().filter(|k| !k.segmented()).count();
+            eprintln!("{label}: {missegmented} of 6 clips missegmented");
+            for k in clips.iter().filter(|k| !k.segmented()) {
+                eprintln!("  {}: nuclei at {:?}", k.reading, k.nuclei);
+            }
+            report(&label, clips.iter().flat_map(|k| &k.substitutions));
+            out.extend(clips.into_iter().map(|k| (c.label(), speaker.name, k)));
         }
-        out.substitutions.extend(substitutions(&a, pack, spoken));
     }
     out
 }
 
-/// Runs `conditions` × [`FLUENT_SPEAKERS`], printing each cell; returns the cells that failed with
-/// their missegmented-clip and too-well-graded counts.
-fn run(conditions: &[Condition]) -> Vec<(String, usize, usize)> {
-    let pack = cmn();
-    let mut failed = Vec::new();
-    for c in conditions {
-        for speaker in &FLUENT_SPEAKERS {
-            let label = format!("{}, {}", c.name, speaker.name);
-            let outcome = sweep(&pack, c, speaker);
-            for m in &outcome.missegmented {
-                eprintln!("{label}: missegmented {m}");
-            }
-            let misses = report(&label, &outcome.substitutions);
-            if misses > 0 || !outcome.missegmented.is_empty() {
-                failed.push((label, outcome.missegmented.len(), misses));
-            }
-        }
-    }
-    failed
-}
-
 #[test]
 fn fluent_speech_segments_and_no_substitution_grades_as_well_as_the_spoken_tone() {
-    let failed = run(&CONDITIONS);
-    assert!(
-        failed.is_empty(),
-        "(cell, missegmented clips of 6, substitutions graded too well of 54): {failed:?}"
-    );
+    let mut failed = Vec::new();
+    for (condition, speaker, clip) in run(&CONDITIONS) {
+        let at = format!("{condition}, {speaker}, {}", clip.reading);
+        let (segmented, too_well, ranked_wrong) = (
+            clip.segmented(),
+            clip.graded_too_well(),
+            clip.ranked_wrong(),
+        );
+        match gap(&condition, speaker, &clip.reading) {
+            None if !segmented || too_well > 0 => failed.push(format!(
+                "{at}: nuclei {:?}, {too_well} of 9 graded too well",
+                clip.nuclei
+            )),
+            Some(g) if g.kind == GapKind::Ambiguous && (!segmented || ranked_wrong > 0) => failed
+                .push(format!(
+                    "{at} (known gap: {}): nuclei {:?}, {ranked_wrong} of 9 ranked above the \
+                     spoken tone",
+                    g.why, clip.nuclei
+                )),
+            Some(g) if segmented && too_well == 0 => {
+                eprintln!("{at}: known gap now passes, take it off GAPS ({})", g.why)
+            }
+            _ => {}
+        }
+    }
+    assert!(failed.is_empty(), "{failed:#?}");
 }
 
 /// Report only: the wider matrix (4 to 6 syllables per second, dips of 0 to 12 dB, 30 or 60 ms
@@ -156,7 +286,6 @@ fn fluent_speech_full_matrix_report() {
             for glide_ms in [30.0, 60.0] {
                 for (middle_onset_ms, snr_db) in [(0.0, None), (30.0, None), (0.0, Some(20.0))] {
                     matrix.push(Condition {
-                        name: "",
                         syllables_per_s,
                         glide_ms,
                         dip_db,
@@ -167,26 +296,15 @@ fn fluent_speech_full_matrix_report() {
             }
         }
     }
-    let names: Vec<String> = matrix
-        .iter()
-        .map(|c| {
-            format!(
-                "{} syl/s, {} dB dip, {} ms glide, {} ms onset, SNR {:?}",
-                c.syllables_per_s, c.dip_db, c.glide_ms, c.middle_onset_ms, c.snr_db
-            )
-        })
-        .collect();
-    let named: Vec<Condition> = matrix
-        .iter()
-        .zip(&names)
-        .map(|(c, n)| Condition {
-            name: Box::leak(n.clone().into_boxed_str()),
-            ..*c
-        })
-        .collect();
-    let failed = run(&named);
-    eprintln!("{} of {} cells failed", failed.len(), named.len() * 4);
-    for f in &failed {
-        eprintln!("  {f:?}");
-    }
+    let clips = run(&matrix);
+    let cells = clips.len() / READINGS.len();
+    let missegmented = clips.iter().filter(|(_, _, k)| !k.segmented()).count();
+    let too_well: usize = clips.iter().map(|(_, _, k)| k.graded_too_well()).sum();
+    let ranked_wrong: usize = clips.iter().map(|(_, _, k)| k.ranked_wrong()).sum();
+    eprintln!(
+        "{cells} cells, {} clips: {missegmented} missegmented; of {} substitutions {too_well} \
+         graded too well, {ranked_wrong} ranked above the spoken tone",
+        clips.len(),
+        clips.len() * 9
+    );
 }

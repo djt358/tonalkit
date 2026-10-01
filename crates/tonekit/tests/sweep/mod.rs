@@ -84,7 +84,12 @@ pub struct Substitution {
 impl Substitution {
     /// The wrong tone reached 0.5 or the spoken tone's own grade.
     pub fn graded_too_well(&self) -> bool {
-        self.p_wrong >= 0.5 || self.p_wrong >= self.p_correct
+        self.p_wrong >= 0.5 || self.ranked_wrong()
+    }
+
+    /// The wrong tone reached the spoken tone's own grade.
+    pub fn ranked_wrong(&self) -> bool {
+        self.p_wrong >= self.p_correct
     }
 
     pub fn describe(&self) -> String {
@@ -117,8 +122,13 @@ pub fn substitutions(a: &Analysis, pack: &LanguagePack, spoken: [&str; 3]) -> Ve
 
 /// Prints how many of `subs` graded too well, which, and the best-graded wrong tone; returns the
 /// count.
-pub fn report(label: &str, subs: &[Substitution]) -> usize {
-    let misses: Vec<&Substitution> = subs.iter().filter(|s| s.graded_too_well()).collect();
+pub fn report<'a>(label: &str, subs: impl IntoIterator<Item = &'a Substitution>) -> usize {
+    let subs: Vec<&Substitution> = subs.into_iter().collect();
+    let misses: Vec<&Substitution> = subs
+        .iter()
+        .copied()
+        .filter(|s| s.graded_too_well())
+        .collect();
     eprintln!(
         "{label}: {} of {} substitutions graded too well",
         misses.len(),
