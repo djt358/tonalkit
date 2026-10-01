@@ -350,13 +350,15 @@ edge (R50) it cut a syllable's own voiced run short. **Cost if wrong.** None see
 
 ### R61: A coarticulated join is transition, not tone
 
-**Decision.** At a TBU edge where the speech runs on (every frame within 3 on either side is a
-speech frame) and the pitch runs on (the frames either side of the edge are both voiced), the 3
-frames (30 ms) beside the edge, at most a quarter of the TBU, are left out of the nucleus's voiced
-part. The reported span (R55) is unchanged. **Why.** In fluent speech the boundary sits at the join,
+**Decision.** At a TBU edge where the voice runs on (every frame within 3 on either side is above
+the quiet level by half the speech margin, 5 dB) and the pitch runs on (the frames either side of
+the edge are both voiced), the 3 frames (30 ms) beside the edge, at most a quarter of the TBU, are
+left out of the nucleus's voiced part. The reported span (R55) is unchanged. **Why.** In fluent speech the boundary sits at the join,
 in the middle of the pitch's glide from one tone to the next: a tone 2 after a tone 1 started at
 Chao 4.3 instead of 3 and graded as tone 1 at 0.62 to 0.68. Pauses, consonants, the speech region's
-edges and pitch breaks are not joins, so gapped speech is untouched. Requiring the pitch on both
+edges and pitch breaks are not joins, so gapped speech is untouched. Half the speech margin, not
+the full one, because in a noisy room (20 dB SNR) a 12 dB dip between two voiced syllables falls
+below the speech threshold while the pitch glides straight through it. Requiring the pitch on both
 sides keeps pYIN's dropouts inside a fast falling tone 4 from being trimmed as joins. **Cost if
 wrong.** Real carryover from the previous tone lasts longer than 30 ms, so onsets keep some of it;
 and at a join a tone's own first or last 30 ms is not measured, which P1's calibration on real

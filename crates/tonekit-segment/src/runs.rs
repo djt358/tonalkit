@@ -8,6 +8,10 @@
 
 use tonekit_core::{voiced_runs, F0Track, MIN_RUN_FRAMES};
 
+/// A peak is voiced if pYIN reports a pitch on any frame within this many frames of it (ruling
+/// R27), and a frame this close to a long run belongs to it.
+pub(crate) const VOICING_RADIUS: usize = 2;
+
 /// A long voiced run (at least [`MIN_RUN_FRAMES`] voiced frames): its first and last voiced frame.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct Run {

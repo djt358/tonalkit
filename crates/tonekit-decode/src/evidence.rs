@@ -8,10 +8,11 @@
 //! syllable on a nucleus is scored on that one shape, so no reading can choose the frames that
 //! suit it best, and the closed-set decode and the lattice see the same evidence.
 
-use tonekit_core::{Analysis, MeasureIssue, TbuSpan};
+use tonekit_core::{Analysis, EnergyTrack, MeasureIssue, TbuSpan};
 use tonekit_shape::{extract_nucleus, Extracted, Joins, JOIN_TRIM_FRAMES};
 
-use crate::closed::speech_mask;
+use tonekit_segment::{speech_frames, SegmentParams};
+
 use crate::count_u32;
 
 /// A TBU's shape, or why there is none.
@@ -29,7 +30,7 @@ pub(crate) struct Tbu {
 /// run there, normalised by the analysis's register, with the frames beside a coarticulated edge
 /// left out ([`joins`], ruling R61).
 pub(crate) fn tbus(a: &Analysis) -> Vec<Tbu> {
-    let speech = speech_mask(&a.energy);
+    let voice_level = voice_level_frames(&a.energy);
     let pitched: Vec<bool> = a.f0.frames.iter().map(|f| f.hz.is_some()).collect();
     let mut nuclei: Vec<u32> = a.nuclei.iter().map(|n| n.frame).collect();
     nuclei.sort_unstable();
@@ -47,24 +48,39 @@ pub(crate) fn tbus(a: &Analysis) -> Vec<Tbu> {
                 &span,
                 nucleus,
                 &a.register,
-                joins(&speech, &pitched, &span),
+                joins(&voice_level, &pitched, &span),
             ),
             span,
         })
         .collect()
 }
 
-/// Which edges of `span` are coarticulated joins (ruling R61): every frame within
-/// [`JOIN_TRIM_FRAMES`] on either side of the edge is speech (`speech[i]`), so the voice runs
-/// from one syllable straight into the next. A pause or a consonant's silence anywhere near the
-/// edge, the speech region's own edges and the ends of the track are not joins.
-fn joins(speech: &[bool], pitched: &[bool], span: &TbuSpan) -> Joins {
+/// Which frames are loud enough to be a voice rather than the room (ruling R61): above the quiet
+/// level by half the speech margin. A dip between two syllables can fall below the speech
+/// threshold in a noisy room and still be voice; silence and room noise cannot rise above this.
+fn voice_level_frames(e: &EnergyTrack) -> Vec<bool> {
+    let p = SegmentParams::default();
+    speech_frames(
+        e,
+        &SegmentParams {
+            speech_margin_db: p.speech_margin_db / 2.0,
+            ..p
+        },
+    )
+}
+
+/// Which edges of `span` are coarticulated joins (ruling R61): the voice runs from one syllable
+/// straight into the next, so every frame within [`JOIN_TRIM_FRAMES`] on either side of the edge
+/// is at voice level (`voice_level[i]`) and the frames either side of it both have a pitch
+/// (`pitched[i]`). A pause, a consonant's silence or noise, a pitch break, the speech region's own
+/// edges and the ends of the track are not joins.
+fn joins(voice_level: &[bool], pitched: &[bool], span: &TbuSpan) -> Joins {
     let reach = JOIN_TRIM_FRAMES as usize;
     let join = |edge: u32| {
         let edge = edge as usize;
         edge >= reach
-            && edge + reach <= speech.len()
-            && speech[edge - reach..edge + reach].iter().all(|&s| s)
+            && edge + reach <= voice_level.len()
+            && voice_level[edge - reach..edge + reach].iter().all(|&v| v)
             && pitched
                 .get(edge - 1..=edge)
                 .is_some_and(|p| p.iter().all(|&v| v))

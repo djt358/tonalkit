@@ -1,8 +1,7 @@
 use tonekit_core::{EnergyTrack, F0Track, FrameRange, Nucleus};
 
-use crate::nuclei::VOICING_RADIUS;
 use crate::region::speech_frames;
-use crate::runs::{long_runs, run_of};
+use crate::runs::{long_runs, run_of, VOICING_RADIUS};
 use crate::smooth::{argmin_middle, frame, local_extrema, shallow_valley, smoothed_db, Extremum};
 use crate::SegmentParams;
 
@@ -31,7 +30,7 @@ pub fn boundaries(
 /// 1. the region edges;
 /// 2. the frame of minimum smoothed dB between each pair of adjacent `nuclei` (the middle of a
 ///    flat minimum); or, when the two lie in different long voiced runs and the level between
-///    them does not dip by more than `p.dip_db` (ruling R58: syllables run together with no dip,
+///    them does not dip by more than `p.dip_db` (ruling R59: syllables run together with no dip,
 ///    told apart only by the pitch break), the edges of that break instead: the frame after the
 ///    first run's last voiced frame and the second run's first voiced frame. A minimum of a flat
 ///    level is noise, and as the edge of a nucleus's TBU (ruling R50) it would cut the syllable's

@@ -1,12 +1,9 @@
 use tonekit_core::{EnergyTrack, F0Track, FrameRange, Nucleus};
 
 use crate::region::floor_db;
-use crate::runs::{in_separate_runs, long_runs, run_of, Run};
+use crate::runs::{in_separate_runs, long_runs, run_of, Run, VOICING_RADIUS};
 use crate::smooth::{argmax_middle, frame, local_extrema, shallow_valley, smoothed_db, Extremum};
 use crate::SegmentParams;
-
-/// A peak is voiced if pYIN reports a pitch on any frame within this many frames of it.
-pub(crate) const VOICING_RADIUS: usize = 2;
 
 /// Syllable nuclei inside `region`: energy peaks that are voiced, at least one per long voiced run.
 ///
@@ -46,65 +43,91 @@ pub fn nuclei(
     let Some(floor) = floor_db(e) else {
         return Vec::new();
     };
-    let threshold = floor + p.speech_margin_db;
-    let s = smoothed_db(&e.db);
-    let (start, end) = (region.start as usize, (region.end as usize).min(s.len()));
-
-    let mut candidates: Vec<usize> = local_extrema(&s, start, end, Extremum::Max)
-        .into_iter()
-        .filter(|&peak| {
-            let voiced = (peak.saturating_sub(VOICING_RADIUS)..=peak + VOICING_RADIUS)
-                .any(|i| f0.frames.get(i).is_some_and(|f| f.hz.is_some()));
-            s[peak] >= threshold && voiced
-        })
-        .collect();
+    let level = Level {
+        s: smoothed_db(&e.db),
+        threshold: floor + p.speech_margin_db,
+        start: region.start as usize,
+        end: (region.end as usize).min(e.db.len()),
+    };
     let runs = long_runs(f0);
-    for run in &runs {
-        let (lo, hi) = (run.first.max(start), (run.last + 1).min(end));
-        if lo < hi
-            && !candidates
-                .iter()
-                .any(|&c| (run.first..=run.last).contains(&c))
-        {
-            let top = argmax_middle(&s, lo, hi - 1);
-            let around =
-                &s[top.saturating_sub(VOICING_RADIUS)..(top + VOICING_RADIUS + 1).min(s.len())];
-            let flank = around.iter().any(|&d| d > s[top] + p.dip_db);
-            if s[top] >= threshold && !flank {
-                candidates.push(top);
-            }
+
+    let mut candidates: Vec<usize> = voiced_peaks(&level, f0)
+        .into_iter()
+        .map(|c| onto_run(&level, &runs, c))
+        .collect();
+    for (k, run) in runs.iter().enumerate() {
+        let held = candidates
+            .iter()
+            .any(|&c| run_of(&runs, c, VOICING_RADIUS) == Some(k));
+        if !held {
+            candidates.extend(run_top(&level, run, p.dip_db));
         }
     }
-    let mut candidates: Vec<usize> = candidates
-        .into_iter()
-        .map(|c| {
-            let on = onto_run(&runs, c);
-            if (start..end).contains(&on) && s[on] >= threshold {
-                on
-            } else {
-                c
-            }
-        })
-        .collect();
     candidates.sort_unstable();
     candidates.dedup();
 
     let mut kept: Vec<usize> = Vec::new();
     for peak in candidates {
-        push_merging(&mut kept, peak, &s, &runs, p);
+        push_merging(&mut kept, peak, &level.s, &runs, p);
     }
     kept.into_iter()
         .map(|i| Nucleus {
             frame: frame(i),
-            strength_db: s[i] - floor,
+            strength_db: level.s[i] - floor,
         })
         .collect()
 }
 
-/// `at` moved onto the nearest frame of its long run when it lies just outside one; otherwise `at`.
-fn onto_run(runs: &[Run], at: usize) -> usize {
+/// The smoothed frame dB, the speech threshold, and the region's frames `start..end`.
+struct Level {
+    s: Vec<f32>,
+    threshold: f32,
+    start: usize,
+    end: usize,
+}
+
+impl Level {
+    /// In the region and at or above the speech threshold.
+    fn speech(&self, at: usize) -> bool {
+        (self.start..self.end).contains(&at) && self.s[at] >= self.threshold
+    }
+}
+
+/// The local maxima of the level in the region that are speech and have a pitch within
+/// [`VOICING_RADIUS`] frames (ruling R27).
+fn voiced_peaks(level: &Level, f0: &F0Track) -> Vec<usize> {
+    local_extrema(&level.s, level.start, level.end, Extremum::Max)
+        .into_iter()
+        .filter(|&peak| {
+            (peak.saturating_sub(VOICING_RADIUS)..=peak + VOICING_RADIUS)
+                .any(|i| f0.frames.get(i).is_some_and(|f| f.hz.is_some()))
+                && level.speech(peak)
+        })
+        .collect()
+}
+
+/// The candidate of a long run that holds no peak (ruling R58): the loudest frame of its part of
+/// the region (the middle of a flat top), if it is speech and no frame within [`VOICING_RADIUS`]
+/// of it is more than `dip_db` louder.
+fn run_top(level: &Level, run: &Run, dip_db: f32) -> Option<usize> {
+    let (lo, hi) = (run.first.max(level.start), (run.last + 1).min(level.end));
+    if lo >= hi {
+        return None;
+    }
+    let top = argmax_middle(&level.s, lo, hi - 1);
+    let around =
+        &level.s[top.saturating_sub(VOICING_RADIUS)..(top + VOICING_RADIUS + 1).min(level.s.len())];
+    let flank = around.iter().any(|&d| d > level.s[top] + dip_db);
+    (level.speech(top) && !flank).then_some(top)
+}
+
+/// `at` moved onto the nearest frame of its long run when it lies just outside one and that frame
+/// is speech (ruling R58); otherwise `at`.
+fn onto_run(level: &Level, runs: &[Run], at: usize) -> usize {
     match run_of(runs, at, VOICING_RADIUS) {
-        Some(k) => at.clamp(runs[k].first, runs[k].last),
+        Some(k) => Some(at.clamp(runs[k].first, runs[k].last))
+            .filter(|&on| level.speech(on))
+            .unwrap_or(at),
         None => at,
     }
 }
