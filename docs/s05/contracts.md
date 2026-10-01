@@ -30,7 +30,7 @@ title = "Mandarin tones: phrases and words"
 
 [[card]]
 id = "g01-c"                     # unique in the deck; [a-z0-9-]+
-set = "gate"                     # gate | diag_t23 | diag_count | diag_minimal | register | quiet
+set = "gate"                     # gate | diag_t23 | diag_count | diag_minimal | diag_context | register | quiet
 pair = "g01"                     # required for gate/diag pairs, else omitted
 label = "correct"                # correct | tone_error | n/a
 text = "一杯水"                   # what the card shows (simplified)
@@ -65,9 +65,13 @@ Rules the model enforces:
 - `produced_tones` has the intended length;
 - `correct` ⇒ `produced_tones == intended.tones`;
 - `tone_error` ⇒ they differ in exactly one position;
-- pairs are scoped to `(set, pair)`; `pair` is required in `gate`, `diag_t23` and `diag_minimal`
-  and optional elsewhere; every pair is exactly one `correct` and one `tone_error` card with equal
-  `intended.tones` (R66);
+- pairs are scoped to `(set, pair)`; `pair` is required in `gate` and `diag_t23` and optional
+  elsewhere; a pair in those sets is exactly one `correct` and one `tone_error` card with equal
+  `intended.tones` (R66). `diag_minimal` cards are all `correct` readings of different words; a
+  card lists the other members of its set as `distractors`, and their `pair` (if any) only groups
+  them (R76);
+- `diag_context` cards contrast the citation ("solitaire", `isolated`) and sandhi (`phrase`)
+  readings of the same syllables: 一 / 一杯 / 一块, 不 / 不对, 水 / 水果 (R76);
 - `context = "phrase"` ⇒ each card's own `produced_tones` equal the sandhi of its own
   `citation_pinyin` (一, 不, T3 runs with every binary bracketing; R63–R65), and `pinyin` shows
   `produced_tones`. On a correct card that is also `intended.tones`; on an error card it is the
