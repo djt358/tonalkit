@@ -1,0 +1,6 @@
+{
+  "name": "tonekit-kit",
+  "private": true,
+  "description": "The volunteer recording kit: static ES modules, no dependencies, no build step.",
+  "type": "module"
+}
