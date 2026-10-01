@@ -4,7 +4,7 @@ Here is exactly what happens to what you record.
 ## What we record
 
 - Your voice reading about 70 short cards. Only your last take of each card is kept.
-- Three quick answers about you: how you speak Mandarin, which Mandarin you grew up hearing, and how you like to see the cards. You can choose **Prefer not to say** on the first two.
+- Three quick answers about you: how you'd describe yourself as a Mandarin speaker, which Mandarin you grew up hearing, and how you like to see the cards. You can choose **Prefer not to say** on the first two.
 - Your phone model and microphone settings, to check audio quality.
 - No name, email or phone number. Recordings carry a random six-character code, not your name.
 
