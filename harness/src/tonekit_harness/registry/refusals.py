@@ -69,7 +69,7 @@ def _synthetic_problems(items: list[CorpusClip]) -> list[str]:
         n = sum(clearance.is_synthetic(i.clip) for i in mine)
         if n:
             who = ", ".join(sorted({i.qualified_speaker for i in mine if clearance.is_synthetic(i.clip)}))
-            problems.append(f"{corpus_id}: {_clips(n)} are synthetic (speakers {who}); a gate is measured on real recordings")
+            problems.append(f"{corpus_id}: synthetic clips ({_clips(n)}, speakers {who}); a gate is measured on real recordings")
     return problems
 
 
