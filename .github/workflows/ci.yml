@@ -18,6 +18,13 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  # The repository is public: no recordings of people, ever (scripts/check-no-audio.sh).
+  no-audio:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: scripts/check-no-audio.sh
+
   fmt:
     runs-on: ubuntu-latest
     steps:
