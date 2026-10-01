@@ -82,7 +82,10 @@ class SessionClip(StrictModel):
 class Session(StrictModel):
     schema_: Literal["tonekit.session.v1"] = Field(alias="schema")
     deck: DeckRef
-    session: str = Field(pattern=SESSION_CODE_PATTERN)  # the only key for a deletion request
+    # the only key for a deletion request
+    session: str = Field(
+        pattern=SESSION_CODE_PATTERN, description=f"six characters from {SESSION_ALPHABET}, random, made by the kit"
+    )
     started_at: AwareDatetime
     finished_at: AwareDatetime
     consent: Consent

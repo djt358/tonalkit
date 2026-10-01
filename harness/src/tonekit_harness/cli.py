@@ -17,9 +17,9 @@ import importlib
 import sys
 from collections.abc import Callable
 
-from . import bakeoff, evaluate, ingest, provenance
+from . import bakeoff, evaluate, ingest, provenance, schema
 
-MODULES = [ingest, provenance, evaluate, bakeoff]
+MODULES = [ingest, provenance, evaluate, bakeoff, schema]
 OPTIONAL_MODULES = ["synth", "adversary"]  # tonekit_harness.<name>; both need pyworld
 
 

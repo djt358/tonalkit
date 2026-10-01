@@ -72,6 +72,10 @@ is an error instead of silently dropped data. The schema is `manifest.Clip`.
 | `source` | string | A `data-register.csv` id: `dj-corpus` for these recordings, `synthetic-world` for synthetic clips. `tkh eval` and `tkh bakeoff --gate` reject an id that is not in the register. |
 | `synthetic` | object or null | For synthetic clips, how they were derived (source clip, perturbation). Null for real recordings. It is set exactly when `set` is `synthetic`: any other combination is an error. |
 | `needs_listen` | bool (default false) | Set when a person must listen to the clip before its label is trusted (gate failures and adversarial finds). |
+| `card` | string or null | The deck card id, for clips recorded from a deck (`docs/s05/contracts.md` section 4). |
+| `deck` | string or null | The deck id the card belongs to. |
+| `take` | integer (at least 1) or null | How many takes were recorded for the kept clip. |
+| `context` | `phrase`, `isolated` or null | Whether sandhi applies to the reading (`phrase`) or it is the citation reading (`isolated`). |
 
 A candidate is `{"id": string, "tones": [string], "labels": [string]}`. `tones` has one entry per
 syllable (cmn tone ids are `"1"` to `"5"`). `labels` may be shorter than `tones`, in which case the

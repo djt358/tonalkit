@@ -1,0 +1,320 @@
+{
+  "$defs": {
+    "Criterion": {
+      "additionalProperties": false,
+      "properties": {
+        "max": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max"
+        },
+        "metric": {
+          "minLength": 1,
+          "title": "Metric",
+          "type": "string"
+        },
+        "min": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Min"
+        }
+      },
+      "required": [
+        "metric"
+      ],
+      "title": "Criterion",
+      "type": "object"
+    },
+    "GateInput": {
+      "additionalProperties": false,
+      "description": "A metric measured elsewhere: `file` holds its value and provenance. A missing file makes\nthe verdict INCOMPLETE.",
+      "properties": {
+        "file": {
+          "title": "File",
+          "type": "string"
+        },
+        "metric": {
+          "minLength": 1,
+          "title": "Metric",
+          "type": "string"
+        },
+        "summary": {
+          "default": "",
+          "title": "Summary",
+          "type": "string"
+        }
+      },
+      "required": [
+        "metric",
+        "file"
+      ],
+      "title": "GateInput",
+      "type": "object"
+    },
+    "GateMeta": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "pattern": "^[a-z0-9][a-z0-9-]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "phase": {
+          "minLength": 1,
+          "title": "Phase",
+          "type": "string"
+        },
+        "summary": {
+          "minLength": 1,
+          "title": "Summary",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "phase",
+        "summary"
+      ],
+      "title": "GateMeta",
+      "type": "object"
+    },
+    "PathsUnchanged": {
+      "additionalProperties": false,
+      "description": "No diff since `base` (a git ref) in `paths` (git pathspecs: `git diff <base> -- <paths>`;\n\":(exclude)dir\" allows changes in dir, so \"no diff outside packs/\" is [\".\", \":(exclude)packs\"]).",
+      "properties": {
+        "base": {
+          "minLength": 1,
+          "title": "Base",
+          "type": "string"
+        },
+        "id": {
+          "pattern": "^[a-z0-9][a-z0-9-]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "const": "paths_unchanged",
+          "title": "Kind",
+          "type": "string"
+        },
+        "paths": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Paths",
+          "type": "array"
+        },
+        "summary": {
+          "default": "",
+          "title": "Summary",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "base",
+        "paths"
+      ],
+      "title": "PathsUnchanged",
+      "type": "object"
+    },
+    "Report": {
+      "additionalProperties": false,
+      "properties": {
+        "by": {
+          "default": [],
+          "items": {
+            "enum": [
+              "speaker",
+              "background",
+              "grew_up_hearing",
+              "context"
+            ],
+            "type": "string"
+          },
+          "title": "By",
+          "type": "array"
+        },
+        "diagnostics": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Diagnostics",
+          "type": "array"
+        }
+      },
+      "title": "Report",
+      "type": "object"
+    },
+    "Requires": {
+      "additionalProperties": false,
+      "properties": {
+        "l1_min": {
+          "default": 1,
+          "minimum": 1,
+          "title": "L1 Min",
+          "type": "integer"
+        },
+        "speakers_min": {
+          "default": 1,
+          "minimum": 1,
+          "title": "Speakers Min",
+          "type": "integer"
+        }
+      },
+      "title": "Requires",
+      "type": "object"
+    },
+    "Select": {
+      "additionalProperties": false,
+      "properties": {
+        "corpora": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Corpora",
+          "type": "array"
+        },
+        "kinds": {
+          "items": {
+            "enum": [
+              "recorded",
+              "public",
+              "synthetic"
+            ],
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Kinds",
+          "type": "array"
+        },
+        "sets": {
+          "items": {
+            "enum": [
+              "gate",
+              "diag_t23",
+              "diag_count",
+              "diag_minimal",
+              "quiet",
+              "register"
+            ],
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Sets",
+          "type": "array"
+        },
+        "splits": {
+          "items": {
+            "enum": [
+              "gate",
+              "dev",
+              "calib",
+              "heldout"
+            ],
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Splits",
+          "type": "array"
+        }
+      },
+      "required": [
+        "corpora",
+        "kinds",
+        "splits",
+        "sets"
+      ],
+      "title": "Select",
+      "type": "object"
+    },
+    "Thresholds": {
+      "additionalProperties": false,
+      "properties": {
+        "method": {
+          "enum": [
+            "loso",
+            "lopo"
+          ],
+          "title": "Method",
+          "type": "string"
+        }
+      },
+      "required": [
+        "method"
+      ],
+      "title": "Thresholds",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "check": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/PathsUnchanged"
+      },
+      "title": "Check",
+      "type": "array"
+    },
+    "criterion": {
+      "items": {
+        "$ref": "#/$defs/Criterion"
+      },
+      "minItems": 1,
+      "title": "Criterion",
+      "type": "array"
+    },
+    "gate": {
+      "$ref": "#/$defs/GateMeta"
+    },
+    "input": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/GateInput"
+      },
+      "title": "Input",
+      "type": "array"
+    },
+    "report": {
+      "$ref": "#/$defs/Report"
+    },
+    "requires": {
+      "$ref": "#/$defs/Requires"
+    },
+    "select": {
+      "$ref": "#/$defs/Select"
+    },
+    "thresholds": {
+      "$ref": "#/$defs/Thresholds"
+    }
+  },
+  "required": [
+    "gate",
+    "select",
+    "thresholds",
+    "criterion"
+  ],
+  "title": "GateFile",
+  "type": "object"
+}
