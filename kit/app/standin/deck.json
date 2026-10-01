@@ -1,0 +1,123 @@
+{
+  "deck": {
+    "id": "standin-v1",
+    "lect": "cmn",
+    "version": 1,
+    "title": "Stand-in deck (kit tests and dev mode only)"
+  },
+  "card": [
+    {
+      "id": "g01-c",
+      "set": "gate",
+      "pair": "g01",
+      "label": "correct",
+      "text": "一杯水",
+      "pinyin": "yì bēi shuǐ",
+      "citation_pinyin": "yī bēi shuǐ",
+      "context": "phrase",
+      "intended": {
+        "id": "g01",
+        "tones": [
+          "4",
+          "1",
+          "3"
+        ],
+        "labels": [
+          "yi",
+          "bei",
+          "shui"
+        ]
+      },
+      "produced_tones": [
+        "4",
+        "1",
+        "3"
+      ],
+      "distractors": [],
+      "prompt_note": "",
+      "status": "unverified"
+    },
+    {
+      "id": "g01-e",
+      "set": "gate",
+      "pair": "g01",
+      "label": "tone_error",
+      "text": "一杯睡",
+      "pinyin": "yì bēi shuì",
+      "citation_pinyin": "yī bēi shuì",
+      "context": "phrase",
+      "intended": {
+        "id": "g01",
+        "tones": [
+          "4",
+          "1",
+          "3"
+        ],
+        "labels": [
+          "yi",
+          "bei",
+          "shui"
+        ]
+      },
+      "produced_tones": [
+        "4",
+        "1",
+        "4"
+      ],
+      "distractors": [],
+      "prompt_note": "Read it as written: 睡 as in 睡觉.",
+      "status": "unverified"
+    },
+    {
+      "id": "r01",
+      "set": "register",
+      "label": "correct",
+      "text": "一",
+      "pinyin": "yī",
+      "citation_pinyin": "yī",
+      "context": "isolated",
+      "intended": {
+        "id": "r01",
+        "tones": [
+          "1"
+        ],
+        "labels": [
+          "yi"
+        ]
+      },
+      "produced_tones": [
+        "1"
+      ],
+      "distractors": [],
+      "prompt_note": "",
+      "status": "unverified"
+    },
+    {
+      "id": "r02",
+      "set": "register",
+      "label": "correct",
+      "text": "不对",
+      "pinyin": "bú duì",
+      "citation_pinyin": "bù duì",
+      "context": "phrase",
+      "intended": {
+        "id": "r02",
+        "tones": [
+          "2",
+          "4"
+        ],
+        "labels": [
+          "bu",
+          "dui"
+        ]
+      },
+      "produced_tones": [
+        "2",
+        "4"
+      ],
+      "distractors": [],
+      "prompt_note": "",
+      "status": "unverified"
+    }
+  ]
+}
