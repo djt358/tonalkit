@@ -7,7 +7,7 @@ import difflib
 import tomllib
 from collections import Counter
 from collections.abc import Collection
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 from textwrap import indent
 from typing import Annotated, Literal
 
@@ -16,6 +16,7 @@ from pydantic import Field, ValidationError, ValidationInfo, model_validator
 from ..manifest import CardSet
 from .base import StrictModel, format_validation_error
 from .registry import Kind, Split
+from .relpath import is_relative_inside
 
 _ID = r"^[a-z0-9][a-z0-9-]*$"
 _Nonempty = Annotated[str, Field(min_length=1)]
@@ -87,8 +88,7 @@ class GateInput(StrictModel):
 
     @model_validator(mode="after")
     def _file_is_relative(self) -> GateInput:
-        path = PurePosixPath(self.file)
-        if not self.file or path.is_absolute() or ".." in path.parts:
+        if not is_relative_inside(self.file):
             raise ValueError(f"input {self.metric!r}: file {self.file!r} must be a relative path with no '..'")
         return self
 

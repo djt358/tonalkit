@@ -15,9 +15,9 @@ from ..manifest import Candidate, CardLabel, CardSet, Context
 from .base import StrictModel, format_validation_error
 from .deck_rules import deck_problems, fmt
 from .deck_sets import CORRECT_ONLY_SETS, PAIR_SETS
+from .ids import CARD_ID_PATTERN, CardId
 from .pack import PackInfo, load_pack_info
 
-_ID = r"^[a-z0-9-]+$"
 _Text = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
 
 
@@ -26,16 +26,16 @@ class DeckError(ValueError):
 
 
 class DeckMeta(StrictModel):
-    id: str = Field(pattern=_ID)
+    id: str = Field(pattern=CARD_ID_PATTERN)  # the deck id, same characters as a card id
     lect: str = Field(min_length=1)
     version: int = Field(ge=1)
     title: _Text
 
 
 class Card(StrictModel):
-    id: str = Field(pattern=_ID)  # unique in the deck
+    id: CardId  # unique in the deck
     set: CardSet
-    pair: str | None = Field(default=None, pattern=_ID)
+    pair: CardId | None = None
     label: CardLabel
     text: _Text  # what the card shows (simplified)
     text_traditional: _Text | None = None  # shown instead when the speaker reads traditional (R74)

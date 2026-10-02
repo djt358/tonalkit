@@ -14,12 +14,13 @@ from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 from textwrap import indent
-from typing import Annotated, Literal
+from typing import Literal
 
 from pydantic import AwareDatetime, Field, ValidationError, model_validator
 
 from .base import StrictModel, format_validation_error
 from .enums import Background, GrewUpHearing, Script
+from .ids import CARD_ID_CHARS, CARD_ID_PATTERN, CardId
 
 # Six characters from this alphabet: A-Z and 2-9 without 0, O, 1 and I.
 SESSION_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
@@ -27,9 +28,7 @@ SESSION_CODE_PATTERN = r"^[A-HJ-NP-Z2-9]{6}$"
 SESSION_FILE = "session.json"
 CLIP_RATE, CLIP_CHANNELS, CLIP_SAMPLE_WIDTH = 16_000, 1, 2  # Hz, mono, 16-bit bytes
 
-_CARD_ID = r"^[a-z0-9-]+$"
-CardId = Annotated[str, Field(pattern=_CARD_ID)]
-_CLIP_MEMBER = re.compile(r"clips/[a-z0-9-]+\.wav")
+_CLIP_MEMBER = re.compile(rf"clips/{CARD_ID_CHARS}\.wav")
 
 
 class BundleError(ValueError):
@@ -37,7 +36,7 @@ class BundleError(ValueError):
 
 
 class DeckRef(StrictModel):
-    id: str = Field(pattern=_CARD_ID)
+    id: str = Field(pattern=CARD_ID_PATTERN)  # the deck id
     sha256: str = Field(pattern=r"^[0-9a-f]{64}$")  # of the deck file the kit loaded
 
 

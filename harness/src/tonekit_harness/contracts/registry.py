@@ -12,7 +12,7 @@ import re
 import tomllib
 from collections import Counter
 from collections.abc import Mapping
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 from textwrap import indent
 from typing import Annotated, Literal
 
@@ -23,6 +23,7 @@ from .bundle import SESSION_ALPHABET, SESSION_CODE_PATTERN
 from .enums import Background, GrewUpHearing
 from .lects import LectError, lect_rules
 from .pack import PackInfo, load_pack_info
+from .relpath import is_relative_inside
 
 DATA_ENV = "TONEKIT_DATA"
 DEFAULT_DATA_DIRNAME = "tonekit-data"
@@ -97,8 +98,7 @@ class CorpusMeta(StrictModel):
 
     @model_validator(mode="after")
     def _manifest_stays_in_the_corpus_directory(self) -> CorpusMeta:
-        path = PurePosixPath(self.manifest)
-        if not self.manifest or path.is_absolute() or ".." in path.parts:
+        if not is_relative_inside(self.manifest):
             raise ValueError(f"manifest {self.manifest!r} must be a relative path inside the corpus directory")
         return self
 
