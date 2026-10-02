@@ -186,6 +186,6 @@ console.log(JSON.stringify({{ id: deck.id, n: deck.cards.length, sha: deck.sha25
 def test_the_sources_hold_no_gmeasure_table():
     # DJ's real g_measure CSV never enters the repository; the stand-in is flagged by its name
     assert sorted(p.name for p in SOURCES.iterdir()) == sorted(
-        ["deck.toml", "diag_context.csv", "diag_count.csv", "diag_minimal.csv", "diag_t23.csv",
+        ["meta.toml", "diag_context.csv", "diag_count.csv", "diag_minimal.csv", "diag_t23.csv",
          "gate_standin.csv", "register.csv", "tone_variants.csv"]
     )  # fmt: skip

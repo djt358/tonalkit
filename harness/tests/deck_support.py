@@ -12,45 +12,47 @@ from tonekit_harness.repo import repo_root
 SOURCES = repo_root() / "kit" / "deck" / "sources"
 DECK_DIR = repo_root() / "kit" / "deck"
 
-# one card each for the three things C0's fix round adds to the contract (R74, R76)
+
+def _probe_card(card_id: str, set_: str, text: str, pinyin: str, tone: str, **extra) -> dict:
+    return {
+        "id": card_id, "set": set_, "label": "correct", "text": text, "pinyin": pinyin, "citation_pinyin": pinyin,
+        "context": "isolated", "intended": {"id": card_id, "tones": [tone], "labels": [text]},
+        "produced_tones": [tone], **extra,
+    }  # fmt: skip
+
+
+# what C0's fix round adds to the contract (R74, R76, R81): a diag_context card, a traditional text,
+# and a diag_minimal group of correct words that name each other as distractors
 _PROBE = {
     "deck": {"id": "probe", "lect": "cmn", "version": 1, "title": "probe"},
     "card": [
-        {
-            "id": f"p{i}",
-            "set": "diag_context",
-            "label": "correct",
-            "text": "水",
-            "text_traditional": "水",
-            "pinyin": "shuǐ",
-            "citation_pinyin": "shuǐ",
-            "context": "isolated",
-            "intended": {"id": f"p{i}", "tones": ["3"], "labels": ["shui"]},
-            "produced_tones": ["3"],
-        }
-        for i in range(1)
-    ]
-    + [
-        {
-            "id": f"m{i}",
-            "set": "diag_minimal",
-            "pair": "m1",
-            "label": "correct",
-            "text": text,
-            "pinyin": pinyin,
-            "citation_pinyin": pinyin,
-            "context": "isolated",
-            "intended": {"id": f"m{i}", "tones": [tone], "labels": ["mai"]},
-            "produced_tones": [tone],
-        }
-        for i, (text, pinyin, tone) in enumerate([("买", "mǎi", "3"), ("卖", "mài", "4")])
+        _probe_card("p1", "diag_context", "水", "shuǐ", "3", text_traditional="水"),
+        _probe_card(
+            "m3",
+            "diag_minimal",
+            "买",
+            "mǎi",
+            "3",
+            pair="m",
+            distractors=[{"id": "m4", "tones": ["4"], "labels": ["x"]}],
+        ),
+        _probe_card(
+            "m4",
+            "diag_minimal",
+            "卖",
+            "mài",
+            "4",
+            pair="m",
+            distractors=[{"id": "m3", "tones": ["3"], "labels": ["x"]}],
+        ),
     ],
 }
 
 
 def c0_fix_landed() -> bool:
     """True once the contract models take `text_traditional`, the `diag_context` set and
-    `diag_minimal` pairs of correct readings (C0's fix round, R74 and R76)."""
+    `diag_minimal` groups of correct readings that name each other as distractors (C0's fix round,
+    R74, R76 and R81)."""
     try:
         parse_deck(_PROBE)
     except DeckError:

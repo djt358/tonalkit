@@ -3,7 +3,8 @@
 The table's own columns are not fixed here. Each field the builder needs is looked up under the
 names in ALIASES (first one present in the header wins), or under the column named with
 `--gmeasure-map FIELD=COLUMN`. The phrase may also be put together from a measure word column and a
-noun column ("一" + measure + word). Columns that are not listed (weight, referent, register, tile
+noun column (the numeral column if there is one, otherwise "一", + measure + word). Pinyin written
+in words ("kāfēi") is spaced into syllables. Columns that are not listed (weight, referent, register, tile
 ids, DJ's status) are ignored. The pinyin columns are DJ's own and are checked against the sandhi
 rules like everything else: a row whose spoken pinyin disagrees is reported, not used."""
 
@@ -15,6 +16,7 @@ from pathlib import Path
 from .errors import BuildError
 from .gate import GateRow
 from .gate_select import Left
+from .pinyin_spacing import space_pinyin
 from .reading import Reading
 from .rows import read_rows
 
@@ -23,6 +25,7 @@ ALIASES = {
     "citation_pinyin": ("citation_pinyin",),
     "spoken_pinyin": ("spoken_pinyin",),
     "text_traditional": ("text_traditional", "traditional", "phrase_traditional"),
+    "numeral": ("numeral", "num"),
     "measure": ("measure", "measure_word", "classifier", "mw"),
     "word": ("word", "noun"),
 }
@@ -68,18 +71,24 @@ def read_gmeasure(path: str | Path, overrides: Mapping[str, str] | None = None) 
     def value(row, field: str) -> str:
         return row.get(cols[field]) if cols[field] else ""
 
+    def phrase(row) -> str:
+        if text := value(row, "text"):
+            return text
+        measure, word = value(row, "measure"), value(row, "word")
+        return (value(row, "numeral") or "一") + measure + word if measure and word else ""
+
     gate_rows: list[GateRow] = []
     left: list[Left] = []
     for row in rows:
-        text = value(row, "text") or (
-            "一" + value(row, "measure") + value(row, "word") if cols["measure"] and cols["word"] else ""
-        )
+        text = phrase(row)
         citation, spoken = value(row, "citation_pinyin"), value(row, "spoken_pinyin")
-        if not text or text == "一":
-            left.append(Left(row.where, text, "no phrase"))
+        if not text:
+            left.append(Left(row.where, "", "no phrase (no text, or no measure word or noun to make one)"))
         elif not citation or not spoken:
             left.append(Left(row.where, text, "citation_pinyin or spoken_pinyin is empty"))
         else:
-            reading = Reading(text, citation, spoken, "phrase", value(row, "text_traditional") or None)
+            reading = Reading(
+                text, space_pinyin(citation), space_pinyin(spoken), "phrase", value(row, "text_traditional") or None
+            )
             gate_rows.append(GateRow(row.where, reading))
     return gate_rows, left

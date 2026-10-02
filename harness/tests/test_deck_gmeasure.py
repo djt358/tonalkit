@@ -52,11 +52,10 @@ def test_the_phrase_is_put_together_from_measure_and_word_and_other_columns_are_
         "一辆车",
         "一张纸",
         "一杯咖啡",
-        "一杯",
     ]
     assert rows[0].reading.citation_pinyin == "yī bēi shuǐ" and rows[0].reading.spoken_pinyin == "yì bēi shuǐ"
-    assert [(x.where, x.reason) for x in left] == [("g_measure.csv:10", "citation_pinyin or spoken_pinyin is empty")]
-    assert left[0].text == "一束花"
+    assert [(x.where, x.text) for x in left] == [("g_measure.csv:9", ""), ("g_measure.csv:10", "一束花")]
+    assert left[0].reason.startswith("no phrase") and left[1].reason == "citation_pinyin or spoken_pinyin is empty"
 
 
 def test_a_table_of_phrases_with_other_column_names_is_mapped_by_hand(tmp_path):
@@ -90,6 +89,19 @@ def test_pairs_are_chosen_from_the_table_and_every_row_left_out_says_why(tmp_pat
     reasons = {x.text: x.reason for x in built.unusable + built.passed_over}
     assert reasons["一张纸"].startswith("its own pinyin does not hold") and "1-1-3" in reasons["一张纸"]
     assert "啡 has no tone variant" in reasons["一杯咖啡"]
-    assert "3 syllables" in reasons["一杯"] or "not 2" in reasons["一杯"]
     assert reasons["一束花"] == "citation_pinyin or spoken_pinyin is empty"
     assert reasons["一条鱼"].startswith("not needed") and reasons["一碗饭"].startswith("not needed")
+
+
+def test_a_numeral_column_is_used_and_pinyin_written_in_words_is_spaced(tmp_path):
+    path = table(
+        tmp_path,
+        "numeral,measure,word,citation_pinyin,spoken_pinyin\n"
+        "一,杯,咖啡,yī bēi kāfēi,yì bēi kāfēi\n两,杯,水,liǎng bēi shuǐ,liǎng bēi shuǐ\n",
+    )
+    rows, left = read_gmeasure(path)
+    assert left == [] and [r.reading.text for r in rows] == ["一杯咖啡", "两杯水"]
+    assert rows[0].reading.citation_pinyin == "yī bēi kā fēi" and rows[0].reading.spoken_pinyin == "yì bēi kā fēi"
+    with pytest.raises(BuildError) as e:  # 一杯咖啡 has no error word in the lexicon, 两杯水 is not a 一 phrase
+        build_gate(rows, load_lexicon(SOURCES / "tone_variants.csv"), 1)
+    assert "can't use g_measure.csv:3 两杯水: not a phrase that starts with the numeral 一" in str(e.value)

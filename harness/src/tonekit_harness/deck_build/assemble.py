@@ -20,7 +20,7 @@ from .minimal_set import minimal_cards
 from .single_cards import single_cards
 from .t23_set import t23_cards
 
-META = "deck.toml"
+META = "meta.toml"
 LEXICON = "tone_variants.csv"
 STANDIN = "gate_standin.csv"
 

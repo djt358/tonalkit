@@ -114,7 +114,10 @@ def build_gate(
             continue
         seen.add(row.reading.text)
         result = usable_or_left(row, lexicon)
-        (usable if isinstance(result, Usable) else out.unusable).append(result)  # type: ignore[arg-type]
+        if isinstance(result, Usable):
+            usable.append(result)
+        else:
+            out.unusable.append(result)
     out.selected, out.passed_over = select(usable, pairs)
     if len(out.selected) < pairs:
         raise BuildError(
