@@ -2,12 +2,16 @@ name: pages
 
 # Publishes the volunteer recording kit (kit/) to GitHub Pages: HTTPS, which iOS Safari needs for
 # the microphone. The site is static: app/, copy.json, CONSENT.md, deck/*.json (kit/assemble-site.sh).
+#
+# Deploys are manual (R84): DJ runs this workflow (Actions > pages > Run workflow) before the
+# recording weekend, and nothing deploys mid-weekend, so a resumed session never meets new code.
+# To deploy on every push to main again later, restore this trigger above workflow_dispatch:
+#   push:
+#     branches: [main]
+#     paths:
+#       - "kit/**"
+#       - ".github/workflows/pages.yml"
 on:
-  push:
-    branches: [main]
-    paths:
-      - "kit/**"
-      - ".github/workflows/pages.yml"
   workflow_dispatch:
 
 permissions:
