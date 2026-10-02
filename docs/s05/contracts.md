@@ -30,10 +30,11 @@ title = "Mandarin tones: phrases and words"
 
 [[card]]
 id = "g01-c"                     # unique in the deck; [a-z0-9-]+
-set = "gate"                     # gate | diag_t23 | diag_count | diag_minimal | register | quiet
+set = "gate"                     # gate | diag_t23 | diag_count | diag_minimal | diag_context | register | quiet
 pair = "g01"                     # required for gate/diag pairs, else omitted
 label = "correct"                # correct | tone_error | n/a
-text = "一杯水"                   # what the card shows
+text = "一杯水"                   # what the card shows (simplified)
+text_traditional = "一杯水"       # optional; shown when the speaker reads traditional (R74); default `text`
 pinyin = "yì bēi shuǐ"           # surface (spoken) form, sandhi applied; shown in hanzi+pinyin mode
 citation_pinyin = "yī bēi shuǐ"  # dictionary form, for the sandhi check
 context = "phrase"               # phrase (sandhi applies) | isolated (citation, "solitaire")
@@ -64,10 +65,20 @@ Rules the model enforces:
 - `produced_tones` has the intended length;
 - `correct` ⇒ `produced_tones == intended.tones`;
 - `tone_error` ⇒ they differ in exactly one position;
-- each gate pair has one `correct` and one `tone_error` card;
-- `context = "phrase"` ⇒ `intended.tones` equals the sandhi of `citation_pinyin`'s tones (一, 不,
-  T3+T3; the deck builder's checker);
-- `context = "isolated"` ⇒ they're equal with no sandhi.
+- pairs are scoped to `(set, pair)`; `pair` is required in `gate` and `diag_t23` and optional
+  elsewhere; a pair in those two sets is exactly one `correct` and one `tone_error` card with equal
+  `intended.tones` (R66, R81). In other sets `pair` only groups cards. `diag_minimal` cards are all `correct` readings of different words; a
+  card lists at least one other member's intended reading as a `distractor` (R76, R81);
+- `diag_context` cards contrast the citation ("solitaire", `isolated`) and sandhi (`phrase`)
+  readings of the same syllables: 一 / 一杯 / 一块, 不 / 不对, 水 / 水果; they are `correct`
+  readings (R76, R81);
+- `context = "phrase"` ⇒ each card's own `produced_tones` equal the sandhi of its own
+  `citation_pinyin` (一, 不, T3 runs with every binary bracketing; R63–R65), and `pinyin` shows
+  `produced_tones`. On a correct card that is also `intended.tones`; on an error card it is the
+  erroneous surface form. An error whose changed syllable alters a neighbour's sandhi changes two
+  surface tones and is refused: pick error words that change one surface tone only;
+- `context = "isolated"` ⇒ `produced_tones` equal the citation tones, no sandhi;
+- `text_traditional`, when present, has the same length as `text`.
 
 `status = "approved"` is set by DJ's audit only.
 
@@ -92,7 +103,8 @@ tonekit-<deck id>-<session code>.zip
   "speaker": {
     "background": "native",
     "grew_up_hearing": "taiwan",
-    "reading": "hanzi+pinyin"
+    "reading": "hanzi+pinyin",
+    "script": "traditional"
   },
   "device": {
     "user_agent": "...",
@@ -114,8 +126,12 @@ tonekit-<deck id>-<session code>.zip
   - `grew_up_hearing`: `mainland`, `taiwan`, `singapore_malaysia`, `hong_kong_macau`, `other`
     or `prefer_not`.
   - `reading`: `hanzi` or `hanzi+pinyin`.
+  - `script`: `simplified` or `traditional` (R74), asked with the reading question; the kit shows
+    `text_traditional` where a card has one.
 - **`device`** records the actual input rate and the constraints the browser reported, not the
-  ones requested.
+  ones requested. `constraints` always has all three keys, each `true`, `false` or `null`; `null`
+  means the browser didn't report it (iOS Safari omits `noiseSuppression` and `autoGainControl`;
+  R83).
 
 ## 3. Data root and corpus registry (`$TONEKIT_DATA`)
 
@@ -128,6 +144,7 @@ $TONEKIT_DATA/
   corpora/<corpus id>/manifest.jsonl
   corpora/<corpus id>/audio/...
   inbox/                      # bundles waiting for intake
+  stale/<corpus id>.json      # outputs made from this corpus are stale (purge, relabel); cleared by the next run
   purge-log.jsonl
 ```
 
@@ -145,7 +162,7 @@ manifest = "manifest.jsonl"
 id = "v-k7q2md"                # v-<session code> for volunteers; corpus-native ids for public sets
 background = "native"
 grew_up_hearing = "taiwan"
-accent = "cmn-TW"              # the accent this speaker is graded against (pack accent id)
+accent = "cmn-TW"              # optional: the pack accent id this speaker is graded against (R82)
 split = "gate"                 # gate | dev | calib | heldout
 sessions = ["K7Q2MD"]
 ```
@@ -153,8 +170,10 @@ sessions = ["K7Q2MD"]
 - **Splits.**
   - Volunteer and DJ speakers default to `gate`.
   - Public corpora are split by speaker, deterministically by hash: calib 60%, dev 20%,
-    heldout 20%.
-- **Default `accent`.** `taiwan` maps to `cmn-TW` and everything else to `cmn-standard`.
+    heldout 20% (R69). For `public` and `synthetic` corpora the model refuses a stored split that
+    differs from the hash; `recorded` corpora can move speakers between splits (R72, R82).
+- **Default `accent`.** When a speaker has none: `taiwan` maps to `cmn-TW` and everything else to
+  `cmn-standard`. Accents are checked against the pack's accent ids at load (R82).
 - **Refusals.**
   - Anything that fits parameters refuses `gate` and `heldout` speakers.
   - Gates refuse `synthetic` corpora, plus any source not cleared in the register for the use.
@@ -203,7 +222,8 @@ max = 0.10
 
 [requires]
 speakers_min = 1
-l1_min = 1                       # P1's gate sets 3, and needs English among them
+# P1 adds l1 requirements (speakers_l1_min, l1_include) with a Speaker.l1 field (R73); until then
+# p1.toml reports them as missing inputs.
 
 [report]
 by = ["speaker", "background", "grew_up_hearing", "context"]
@@ -212,10 +232,12 @@ diagnostics = ["candidate_id_accuracy", "count_robustness", "t23_confusion"]
 
 - **Metrics** are named entries in one registry in `metrics.py`, and unknown names are errors.
 - **Measured elsewhere.** A metric that can't be computed here (P1's iPhone 12 latency) names an
-  `[[input]]` file with its value and provenance. A missing input makes the verdict
-  `INCOMPLETE`, listing what's missing.
+  `[[input]]` (`metric`, `file` relative to the gate file with no `..`, `summary`) holding its
+  value and provenance. A missing input makes the verdict `INCOMPLETE`, listing what's missing
+  (R67).
 - **P2's code check.** P2's "no diff outside `packs/` and the harness loaders" is a
-  `[[check]] kind = "paths_unchanged"` entry against a base ref.
+  `[[check]]` entry (`id`, `kind = "paths_unchanged"`, `base`, `paths` as git pathspecs for
+  `git diff <base> -- <paths>`, `summary`; R67).
 
 ## 6. Purge (`tkh purge --session CODE`)
 
@@ -225,10 +247,15 @@ Removes, for that session:
 - the speaker entry;
 - analysis-cache entries (keyed by WAV hash);
 - review pages that embed the audio;
+- everything intake wrote for it: the copy of `session.json`, its QC rows and QC report lines;
 - any bundle left in `inbox/`.
+
+What the engine can't reach is DJ's: the original zip in Messages, Mail, Downloads or Files. The
+purge output ends with that reminder.
 
 Then:
 - **Stale outputs:** it marks the scoreboard and any calibration fitted on that corpus as stale.
   The next `tkh score` re-runs, and a stale calibration can't ship.
-- **Log:** it appends `{"session", "purged_at", "files_removed", "corpora"}` to `purge-log.jsonl`.
+- **Log:** it appends `{"session", "purged_at", "files_removed", "corpora"}` to `purge-log.jsonl`;
+  `files_removed` is a count, never names (R68).
 - **Repeat runs:** it is idempotent, and it reports "nothing found" for an unknown code.
