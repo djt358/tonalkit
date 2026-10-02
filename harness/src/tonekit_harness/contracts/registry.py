@@ -16,12 +16,13 @@ from pathlib import Path, PurePosixPath
 from textwrap import indent
 from typing import Annotated, Literal
 
-from pydantic import AwareDatetime, Field, ValidationError, model_validator
+from pydantic import AwareDatetime, Field, ValidationError, ValidationInfo, model_validator
 
 from .base import StrictModel, format_validation_error
 from .bundle import SESSION_ALPHABET, SESSION_CODE_PATTERN
 from .enums import Background, GrewUpHearing
-from .lects import lect_rules
+from .lects import LectError, lect_rules
+from .pack import PackInfo, load_pack_info
 
 DATA_ENV = "TONEKIT_DATA"
 DEFAULT_DATA_DIRNAME = "tonekit-data"
@@ -71,7 +72,8 @@ class Speaker(StrictModel):
     id: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]*$")  # v-<session code> for volunteers
     background: Background | None = None  # public corpora do not say
     grew_up_hearing: GrewUpHearing | None = None
-    accent: str = Field(min_length=1)  # the pack accent id this speaker is graded against
+    # The pack accent id this speaker is graded against; None means `speaker_accent`'s default (R82).
+    accent: str | None = Field(default=None, min_length=1)
     split: Split
     sessions: list[SessionCode] = []
 
@@ -106,28 +108,74 @@ class CorpusFile(StrictModel):
     speaker: list[Speaker] = []
 
     @model_validator(mode="after")
-    def _speakers_and_sessions_are_unique(self) -> CorpusFile:
-        ids = Counter(s.id for s in self.speaker)
-        sessions = Counter(code for s in self.speaker for code in s.sessions)
-        problems = [f"speaker {i!r} appears more than once" for i, n in ids.items() if n > 1]
-        problems += [f"session {c!r} belongs to more than one speaker" for c, n in sessions.items() if n > 1]
+    def _rules(self, info: ValidationInfo) -> CorpusFile:
+        # The accents are the pack's: pass it as validation context (`parse_corpus` does); without,
+        # the default pack (packs/cmn/cmn.toml) stands in.
+        pack = (info.context or {}).get("pack") or load_pack_info(None)
+        problems = _unique_problems(self) + _split_problems(self) + _accent_problems(self, pack)
         if problems:
             raise ValueError("\n".join(problems))
         return self
 
 
-def load_corpus_file(path: str | Path) -> CorpusFile:
-    """Read and validate a `corpus.toml`. Raises `RegistryError` listing every problem."""
+def _unique_problems(corpus: CorpusFile) -> list[str]:
+    ids = Counter(s.id for s in corpus.speaker)
+    sessions = Counter(code for s in corpus.speaker for code in s.sessions)
+    return [f"speaker {i!r} appears more than once" for i, n in ids.items() if n > 1] + [
+        f"session {c!r} belongs to more than one speaker" for c, n in sessions.items() if n > 1
+    ]
+
+
+def _split_problems(corpus: CorpusFile) -> list[str]:
+    """Public and synthetic corpora store the hash split: a hand-edited corpus.toml must not put a
+    held-out speaker into fitting. Recorded corpora can move speakers between splits (R82)."""
+    kind = corpus.corpus.kind
+    if kind == "recorded":
+        return []
+    return [
+        f"speaker {s.id!r}: split {s.split!r} but a {kind} corpus stores the hash split {hashed_split(s.id)!r}"
+        for s in corpus.speaker
+        if s.split != hashed_split(s.id)
+    ]
+
+
+def _accent_problems(corpus: CorpusFile, pack: PackInfo) -> list[str]:
+    lect = corpus.corpus.lect
+    if lect != pack.lect:
+        return [f"corpus lect {lect!r} but the pack is for {pack.lect!r}"]
+    known = ", ".join(sorted(pack.accent_ids))
+    problems = []
+    for s in corpus.speaker:
+        try:
+            accent = speaker_accent(s, lect)
+        except LectError as e:
+            problems.append(f"speaker {s.id!r}: {e}")
+            continue
+        if accent not in pack.accent_ids:
+            what = "accent" if s.accent else "default accent"
+            problems.append(f"speaker {s.id!r}: {what} {accent!r} is not an accent of the pack (known: {known})")
+    return problems
+
+
+def parse_corpus(data: dict, *, pack: str | Path | PackInfo | None = None, source: str = "corpus") -> CorpusFile:
+    """Validate a corpus file's data (its TOML as a dict) against the contract and the accents of
+    `pack` (a pack TOML path; default packs/cmn/cmn.toml). Raises `RegistryError` listing every problem."""
+    info = pack if isinstance(pack, PackInfo) else load_pack_info(pack)
+    try:
+        return CorpusFile.model_validate(data, context={"pack": info})
+    except ValidationError as e:
+        problems = format_validation_error(e, data, {"speaker": "id"})
+        raise RegistryError(f"{source}: invalid corpus file\n{indent(problems, '  ')}") from e
+
+
+def load_corpus_file(path: str | Path, *, pack: str | Path | PackInfo | None = None) -> CorpusFile:
+    """Read and validate a `corpus.toml` (see `parse_corpus`). Raises `RegistryError` listing every problem."""
     path = Path(path)
     try:
         data = tomllib.loads(path.read_text(encoding="utf-8"))
     except tomllib.TOMLDecodeError as e:
         raise RegistryError(f"{path}: invalid TOML: {e}") from e
-    try:
-        return CorpusFile.model_validate(data)
-    except ValidationError as e:
-        problems = format_validation_error(e, data, {"speaker": "id"})
-        raise RegistryError(f"{path}: invalid corpus file\n{indent(problems, '  ')}") from e
+    return parse_corpus(data, pack=pack, source=str(path))
 
 
 # ---- format rules: ids, accents, splits ---------------------------------------------------
@@ -140,10 +188,16 @@ def volunteer_speaker_id(session_code: str) -> str:
     return f"v-{session_code.lower()}"
 
 
-def default_accent(grew_up_hearing: str, lect: str = "cmn") -> str:
-    """The pack accent a speaker is graded against, from where they grew up hearing the lect
-    (cmn: `taiwan` is cmn-TW, everything else cmn-standard). The CLI's `--accent` overrides it."""
+def default_accent(grew_up_hearing: str | None, lect: str = "cmn") -> str:
+    """The pack accent a speaker is graded against when none is stated, from where they grew up
+    hearing the lect (cmn: `taiwan` is cmn-TW, everything else, or unknown, cmn-standard)."""
     return lect_rules(lect).default_accent(grew_up_hearing)
+
+
+def speaker_accent(speaker: Speaker, lect: str = "cmn") -> str:
+    """The pack accent id a speaker is graded against: their own `accent`, else the default for
+    where they grew up hearing the lect (R82). The CLI's `--accent` overrides both."""
+    return speaker.accent or default_accent(speaker.grew_up_hearing, lect)
 
 
 def hashed_split(speaker_id: str) -> Split:

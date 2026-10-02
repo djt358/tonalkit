@@ -15,6 +15,7 @@ def test_cmn_rules_parse_and_apply_sandhi():
 @pytest.mark.parametrize("grew_up_hearing,accent", [
     ("taiwan", "cmn-TW"), ("mainland", "cmn-standard"), ("singapore_malaysia", "cmn-standard"),
     ("hong_kong_macau", "cmn-standard"), ("other", "cmn-standard"), ("prefer_not", "cmn-standard"),
+    (None, "cmn-standard"),
 ])
 def test_cmn_default_accent(grew_up_hearing, accent):
     assert lect_rules("cmn").default_accent(grew_up_hearing) == accent
