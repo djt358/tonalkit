@@ -4,10 +4,8 @@ headers; decoding and quality control of the audio is intake's job."""
 
 from __future__ import annotations
 
-import io
 import json
 import re
-import wave
 import zipfile
 import zlib
 from collections import Counter
@@ -21,12 +19,12 @@ from pydantic import AwareDatetime, Field, ValidationError, model_validator
 from .base import StrictModel, format_validation_error
 from .enums import Background, GrewUpHearing, Script
 from .ids import CARD_ID_CHARS, CARD_ID_PATTERN, CardId
+from .wav_check import WavHeader, check_wav
 
 # Six characters from this alphabet: A-Z and 2-9 without 0, O, 1 and I.
 SESSION_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 SESSION_CODE_PATTERN = r"^[A-HJ-NP-Z2-9]{6}$"
 SESSION_FILE = "session.json"
-CLIP_RATE, CLIP_CHANNELS, CLIP_SAMPLE_WIDTH = 16_000, 1, 2  # Hz, mono, 16-bit bytes
 
 _CLIP_MEMBER = re.compile(rf"clips/{CARD_ID_CHARS}\.wav")
 
@@ -107,18 +105,6 @@ class Session(StrictModel):
         if problems:
             raise ValueError("\n".join(problems))
         return self
-
-
-@dataclass(frozen=True)
-class WavHeader:
-    sample_rate: int
-    channels: int
-    sample_width: int  # bytes per sample
-    frames: int
-
-    @property
-    def duration_s(self) -> float:
-        return self.frames / self.sample_rate
 
 
 @dataclass(frozen=True)
@@ -225,28 +211,7 @@ def _read_headers(members: dict[str, bytes], session: Session) -> tuple[dict[str
         if data is None:
             continue  # missing, repeated or damaged: already reported
         try:
-            audio[clip.card] = _check_wav(data)
+            audio[clip.card] = check_wav(data)
         except ValueError as e:
             problems.append(f"{clip.file}: {e}")
     return audio, problems
-
-
-def _check_wav(data: bytes) -> WavHeader:
-    """The header of a 16 kHz mono 16-bit PCM WAV with all its audio, else ValueError."""
-    try:
-        with wave.open(io.BytesIO(data), "rb") as w:
-            header = WavHeader(w.getframerate(), w.getnchannels(), w.getsampwidth(), w.getnframes())
-            whole = len(w.readframes(header.frames)) == header.frames * header.channels * header.sample_width
-    except (wave.Error, EOFError) as e:
-        raise ValueError(f"not a PCM WAV ({e})") from None
-    if (header.sample_rate, header.channels, header.sample_width) != (CLIP_RATE, CLIP_CHANNELS, CLIP_SAMPLE_WIDTH):
-        s = "s" if header.channels != 1 else ""
-        raise ValueError(
-            f"is {header.sample_rate} Hz, {header.channels} channel{s}, {8 * header.sample_width}-bit; "
-            "need 16000 Hz, 1 channel, 16-bit"
-        )
-    if header.frames == 0:
-        raise ValueError("has no audio")
-    if not whole:
-        raise ValueError("truncated: the file ends before the audio the header promises")
-    return header
