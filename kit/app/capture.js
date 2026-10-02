@@ -10,12 +10,22 @@ export const CONSTRAINTS = Object.freeze({
   autoGainControl: false,
   channelCount: 1,
 });
-// What session.json's device.constraints records: these settings as the browser reports them
-// (a setting the browser doesn't report is left out). deviceId/groupId are never recorded.
+// What session.json's device.constraints records: these settings as the browser reports them,
+// null where it doesn't (iOS Safari reports echoCancellation only; R83). deviceId, groupId and
+// labels are never recorded.
 const REPORTED = ["echoCancellation", "noiseSuppression", "autoGainControl"];
+
+/** @param {MediaTrackSettings|undefined} settings @returns {Record<string, boolean|null>} */
+export function reportedConstraints(settings) {
+  return Object.fromEntries(REPORTED.map((k) => [k, typeof settings?.[k] === "boolean" ? settings[k] : null]));
+}
 export const PRE_ROLL_S = 0.3;
 export const POST_ROLL_S = 0.3;
 const LEVEL_S = 0.05;
+// iOS can leave ctx.resume() pending for good after a call or Siri: wait this long, then rebuild.
+const RESUME_TIMEOUT_MS = 3000;
+
+const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export class MicError extends Error {
   /** @param {"blocked"|"unsupported"|"generic"} kind */
@@ -58,6 +68,7 @@ export class Capture {
     this.onInterrupt = () => {};
     this.take = null; // {id, chunks, ended: Promise}
     this.nextId = 1;
+    this.resumeTimeoutMs = RESUME_TIMEOUT_MS;
   }
 
   get rate() {
@@ -70,9 +81,7 @@ export class Capture {
 
   /** session.device: the rate takes are captured at and the settings the browser applied. */
   get device() {
-    const settings = this.track?.getSettings?.() ?? {};
-    const constraints = {};
-    for (const key of REPORTED) if (key in settings) constraints[key] = settings[key];
+    const constraints = reportedConstraints(this.track?.getSettings?.());
     return { user_agent: navigator.userAgent, input_sample_rate: this.rate, constraints };
   }
 
@@ -97,12 +106,33 @@ export class Capture {
   }
 
   async finishOpen(resumed) {
-    if (this.track?.readyState !== "live") await this.attachStream();
+    // A track iOS left muted after an interruption is live but silent: get a fresh one.
+    if (this.track?.readyState !== "live" || this.track.muted) await this.attachStream();
     if (!this.node) await this.createGraph();
     else if (!this.source) this.connectSource();
-    await resumed;
-    await this.resume();
-    if (this.ctx.state !== "running") throw new MicError("generic", new Error(`audio ${this.ctx.state}`));
+    if (await this.started(resumed)) return;
+    // The context is stuck (suspended or "interrupted" with resume() never settling): rebuild it
+    // around the same microphone stream.
+    this.rebuildContext();
+    await this.createGraph();
+    if (!(await this.started(this.resume()))) {
+      throw new MicError("generic", new Error(`audio ${this.ctx.state}`));
+    }
+  }
+
+  /** Whether the context runs after `resuming` and one more resume, each given resumeTimeoutMs. */
+  async started(resuming) {
+    for (const attempt of [resuming, null]) {
+      if (this.ctx.state === "running") return true;
+      await Promise.race([attempt ?? this.resume(), delay(this.resumeTimeoutMs)]);
+    }
+    return this.ctx.state === "running";
+  }
+
+  rebuildContext() {
+    const stuck = this.ctx;
+    this.createContext();
+    stuck?.close().catch(() => {});
   }
 
   async attachStream() {
@@ -172,17 +202,14 @@ export class Capture {
     return () => this.levelListeners.delete(listener);
   }
 
-  /** The room's level (dBFS RMS) over `seconds`. */
-  ambient(seconds = 2) {
+  /** The level frames (dBFS RMS, one per 50 ms) over the next `seconds`. */
+  levels(seconds) {
     return new Promise((resolve) => {
-      let energy = 0, count = 0;
-      const off = this.onLevel((db) => {
-        energy += Math.pow(10, db / 10);
-        count++;
-      });
+      const frames = [];
+      const off = this.onLevel((db) => frames.push(db));
       setTimeout(() => {
         off();
-        resolve(count ? toDb(Math.sqrt(energy / count)) : -Infinity);
+        resolve(frames);
       }, seconds * 1000);
     });
   }

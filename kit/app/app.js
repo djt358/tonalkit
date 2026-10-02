@@ -1,17 +1,18 @@
 // The flow: welcome -> consent -> background -> microphone check -> cards -> done -> share.
-// Progress is saved after every step, so a closed tab resumes where it left off.
-import { $, show, applyCopy, setMeter, setText, choiceGroup, currentScreen, onTap } from "./ui.js";
+// Progress is saved after every step, so a closed tab resumes where it left off. The recordings
+// stay on the phone until the person deletes them (R77), even after sharing.
+import { $, show, applyCopy, setMeter, setText, choiceGroup, selectChoice, currentScreen, onTap } from "./ui.js";
 import { loadCopy, optionKey } from "./copy.js";
 import { loadDeck, deckFromStored, DEFAULT_DECK_ID } from "./deck.js";
-import { createSession, isoUtc, SPEAKER_OPTIONS } from "./session.js";
+import { createSession, isoUtc, SPEAKER_OPTIONS, defaultScript, sessionDevice } from "./session.js";
 import { Capture, captureSupported } from "./capture.js";
+import { isInAppBrowser } from "./browser.js";
+import { micVerdict, MIC_CHECK_S } from "./miccheck.js";
 import { openStore } from "./store.js";
 import { buildBundle, shareBundle, bundleName } from "./export.js";
 import { cardScreen } from "./cards.js";
 
-const AMBIENT_S = 2;
-const NOISY_DB = -45; // room level above this: "a bit noisy"
-const SILENT_DB = -85; // below this the microphone is probably covered or not delivering
+const VERDICT_COPY = { ok: "mic.level_ok", noisy: "mic.noisy", low: "mic.level_low" };
 
 const params = new URLSearchParams(location.search);
 const dev = params.get("dev") === "1";
@@ -70,6 +71,17 @@ function showConsent() {
   show("consent");
 }
 
+// Until the person taps a script, it follows where they grew up hearing Mandarin (R74).
+function pickAnswer(name, value) {
+  const { session } = app;
+  session.speaker[name] = value;
+  if (name === "script") session.script_chosen = true;
+  if (name === "grew_up_hearing" && !session.script_chosen) {
+    session.speaker.script = defaultScript(value);
+    selectChoice("script", session.speaker.script);
+  }
+}
+
 function showBackground() {
   const box = $("background-questions");
   box.replaceChildren(
@@ -79,7 +91,7 @@ function showBackground() {
         label: app.t(`background.${name}.label`),
         options: values.map((value) => ({ value, label: app.t(optionKey(name, value)) })),
         selected: app.session.speaker[name],
-        onPick: (value) => (app.session.speaker[name] = value),
+        onPick: (value) => pickAnswer(name, value),
       }),
     ),
   );
@@ -97,7 +109,11 @@ function showMic() {
 
 async function openMic() {
   await app.capture.open();
-  app.session.device = app.capture.device;
+  const { device, change } = sessionDevice(app.session.device, app.capture.device);
+  // session.json has one device: the first microphone's. Takes are resampled from whatever rate
+  // they were captured at, so a change (AirPods) only needs noting.
+  if (change) console.info(`microphone changed mid-session (kept the first values): ${change}`);
+  app.session.device = device;
   await save();
 }
 
@@ -107,12 +123,19 @@ function showCards() {
   show("cards");
 }
 
+function markShared() {
+  $("share-button").textContent = app.t("share.again");
+  setText($("share-status"), app.t("share.done"));
+}
+
 async function showDone() {
   $("done-code").textContent = app.session.code;
   $("share-button").disabled = true;
   $("share-button").hidden = false;
   $("share-fallback").hidden = true;
+  $("done-delete").hidden = false;
   setText($("share-status"), "");
+  if (app.session.shared) markShared();
   show("done");
   app.capture.close(); // the recording indicator goes off: nothing more is recorded
   try {
@@ -135,6 +158,20 @@ function showDownload() {
   link.download = app.bundle.name ?? bundleName(app.session);
   link.hidden = false;
   $("share-button").hidden = true;
+}
+
+/** "Delete from this phone": the only way, short of ?new=1, that the recordings are removed. */
+async function deleteFromPhone() {
+  if (!confirm(app.t("done.delete_confirm"))) return;
+  await app.store.clear();
+  app.clips.clear();
+  const link = $("share-fallback");
+  if (link.href) URL.revokeObjectURL(link.href);
+  link.removeAttribute("href");
+  app.session = null;
+  app.bundle = null;
+  for (const id of ["share-button", "share-fallback", "done-delete"]) $(id).hidden = true;
+  setText($("share-status"), app.t("done.deleted"));
 }
 
 function pause() {
@@ -183,7 +220,7 @@ function wire() {
   onTap("consent-decline", async () => {
     await app.store.clear();
     app.session = null;
-    show("welcome");
+    show("declined");
   });
 
   onTap("background-next", async () => {
@@ -206,9 +243,9 @@ function wire() {
     }
     allow.hidden = true;
     setText($("mic-status"), app.t("mic.checking"));
-    const db = await app.capture.ambient(AMBIENT_S);
-    $("mic-status").dataset.db = db.toFixed(1);
-    setText($("mic-status"), app.t(db < SILENT_DB ? "mic.level_low" : db > NOISY_DB ? "mic.noisy" : "mic.level_ok"));
+    const { verdict, floor, speech } = micVerdict(await app.capture.levels(MIC_CHECK_S));
+    Object.assign($("mic-status").dataset, { verdict, floor: floor.toFixed(1), speech: speech.toFixed(1) });
+    setText($("mic-status"), app.t(VERDICT_COPY[verdict]));
     $("mic-continue").hidden = false;
   });
 
@@ -237,17 +274,21 @@ function wire() {
     else showCards();
   });
 
+  // A share iOS calls a success may be Copy, Save to Files or a send that fails later, so the
+  // recordings stay and the button offers to send again (R77).
   onTap("share-button", async () => {
     if (!app.bundle) return;
     const result = await shareBundle(app.bundle); // first thing in the tap (iOS)
     if (result === "shared") {
-      await app.store.clear();
-      $("share-button").hidden = true;
-      setText($("share-status"), app.t("share.done"));
+      app.session.shared = true;
+      markShared();
+      await save();
     } else if (result !== "cancelled") {
       showDownload();
     }
   });
+
+  onTap("done-delete", deleteFromPhone);
 
   app.capture.onLevel((db) => setMeter(db));
   // Leaving the page (screen lock, another app, a call) while the microphone is open pauses
@@ -271,8 +312,10 @@ async function boot() {
   app.t = app.copy.t;
   applyCopy(app.t);
   document.title = app.t("welcome.title");
+  // R84: WeChat and friends stop here, before consent and before anything is stored.
+  if (isInAppBrowser(navigator.userAgent)) return fatal("error.in_app_browser");
   if (!captureSupported()) return fatal("error.unsupported");
-  if (!dev && app.copy.consentIsStandin) return fatal("error.generic", "kit/CONSENT.md is not deployed.");
+  if (!dev && app.copy.consentProblem) return fatal("error.generic", app.copy.consentProblem);
 
   app.store = await openStore();
   if (!app.store.persistent) banner(app.t("error.storage"));

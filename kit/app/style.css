@@ -21,6 +21,8 @@
   --sans: -apple-system, BlinkMacSystemFont, "Helvetica Neue", "Segoe UI", Roboto, sans-serif;
   --cjk: "PingFang SC", "PingFang TC", "Hiragino Sans GB", "Noto Sans CJK SC", "Noto Sans SC",
     "Microsoft YaHei", sans-serif;
+  --cjk-tc: "PingFang TC", "PingFang HK", "PingFang SC", "Hiragino Sans CNS", "Noto Sans CJK TC",
+    "Noto Sans TC", "Microsoft JhengHei", sans-serif;
   color-scheme: light dark;
 }
 
@@ -172,6 +174,11 @@ button:focus-visible,
   font-weight: 500;
 }
 
+.quiet.small {
+  min-height: 2.75rem;
+  font-size: 0.95rem;
+}
+
 .actions {
   display: flex;
   flex-direction: column;
@@ -237,6 +244,7 @@ button:focus-visible,
 }
 
 .error-text {
+  white-space: pre-line;
   margin: 0;
   padding: 0.75rem 1rem;
   border-radius: var(--radius);
@@ -276,6 +284,11 @@ button:focus-visible,
   font: 500 clamp(3rem, 17vw, 5.5rem) / 1.2 var(--cjk);
   letter-spacing: 0.04em;
   overflow-wrap: anywhere;
+}
+
+/* Traditional readers (R74): Traditional Chinese glyph shapes first. */
+.card-text:lang(zh-Hant) {
+  font-family: var(--cjk-tc);
 }
 
 .card-text.long {

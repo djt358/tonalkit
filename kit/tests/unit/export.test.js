@@ -13,11 +13,12 @@ function finishedSession() {
     started_at: "2026-10-03T18:02:11Z",
     finished_at: "2026-10-03T18:24:40Z",
     consent: { version: "v1", agreed_at: "2026-10-03T18:02:30Z" },
-    speaker: { background: "native", grew_up_hearing: "taiwan", reading: "hanzi+pinyin" },
+    speaker: { background: "native", grew_up_hearing: "taiwan", script: "traditional", reading: "hanzi+pinyin" },
+    script_chosen: true,
     device: {
       user_agent: "Mozilla/5.0 (iPhone)",
       input_sample_rate: 48000,
-      constraints: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+      constraints: { echoCancellation: false, noiseSuppression: null, autoGainControl: null },
     },
     order: ["g01-c", "r01", "g01-e", "r02"],
     index: 3,
@@ -40,11 +41,11 @@ test("session.json has exactly the contract's fields, in reading order", () => {
     started_at: "2026-10-03T18:02:11Z",
     finished_at: "2026-10-03T18:24:40Z",
     consent: { version: "v1", agreed_at: "2026-10-03T18:02:30Z" },
-    speaker: { background: "native", grew_up_hearing: "taiwan", reading: "hanzi+pinyin" },
+    speaker: { background: "native", grew_up_hearing: "taiwan", reading: "hanzi+pinyin", script: "traditional" },
     device: {
       user_agent: "Mozilla/5.0 (iPhone)",
       input_sample_rate: 48000,
-      constraints: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+      constraints: { echoCancellation: false, noiseSuppression: null, autoGainControl: null },
     },
     clips: [
       { card: "g01-c", file: "clips/g01-c.wav", takes: 2, duration_s: 1.42, peak: 0.51 },

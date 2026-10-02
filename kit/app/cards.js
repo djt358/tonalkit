@@ -1,6 +1,8 @@
-// The card screen: one card at a time, record / stop / play / redo / skip / next.
+// The card screen: one card at a time, record / stop / play / redo / skip / next, and a quiet
+// "finish and send what I have" once something is kept.
 import { $, setText, currentScreen } from "./ui.js";
-import { cardState } from "./session.js";
+import { cardState, hasKeptTake, skipRemaining } from "./session.js";
+import { cardFace } from "./deck.js";
 import { processTake } from "./take.js";
 
 const MAX_TAKE_S = 30; // a forgotten Stop ends the take here (it is kept, not thrown away)
@@ -47,6 +49,8 @@ export function cardScreen(app) {
     skip.disabled = busy;
     skip.setAttribute("aria-pressed", String(Boolean(state?.skipped)));
     $("card-next").disabled = busy || recording || !(kept || state?.skipped);
+    $("card-finish").hidden = recording || !hasKeptTake(app.session);
+    $("card-finish").disabled = busy;
     let status = "";
     if (kept && !recording) status = app.t("card.saved") + (state.quiet ? ` ${app.t("mic.level_low")}` : "");
     $("card-status").textContent = status;
@@ -59,9 +63,11 @@ export function cardScreen(app) {
     setClip(id, null);
     window.scrollTo(0, 0);
     $("card-progress").textContent = app.t("card.progress", { n: app.session.index + 1, total: app.session.order.length });
+    const face = cardFace(card, app.session.speaker.script);
     const text = $("card-text");
-    text.textContent = card.text;
-    text.classList.toggle("long", [...card.text].length > LONG_TEXT);
+    text.textContent = face.text;
+    text.lang = face.lang;
+    text.classList.toggle("long", [...face.text].length > LONG_TEXT);
     setText($("card-pinyin"), app.session.speaker.reading === "hanzi+pinyin" ? card.pinyin ?? "" : "");
     const hintKey = { isolated: "card.isolated_hint", phrase: "card.phrase_hint" }[card.context];
     setText($("card-hint"), hintKey ? app.t(hintKey) : "");
@@ -133,6 +139,13 @@ export function cardScreen(app) {
     cardState(app.session, currentId()).skipped = true;
     update();
     await app.save();
+  });
+  // Finishing early: the cards not yet read count as skipped, and the done screen follows.
+  $("card-finish").addEventListener("click", async () => {
+    if (busy || recordingId || !confirm(app.t("card.finish_early_confirm"))) return;
+    stopPlayback();
+    skipRemaining(app.session);
+    await app.finish();
   });
   $("card-next").addEventListener("click", async () => {
     if ($("card-next").disabled) return;

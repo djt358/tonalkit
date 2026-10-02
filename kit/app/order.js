@@ -1,7 +1,8 @@
 // The order cards are read in: deck order, except that the cards of each pair (a correct
 // reading and its deliberate-error twin) are shuffled within their set's block, seeded by the
 // session code, so twins are never next to each other (and usually at least three apart).
-// Cards without a twin keep their deck positions.
+// Twins are the two cards of one (set, pair) (R66). Cards without a twin keep their deck
+// positions, and no card ever leaves its set's block.
 
 const ATTEMPTS = 200;
 const WANTED_GAP = 3; // positions between twins we aim for; adjacency (gap 1) is never accepted
@@ -48,8 +49,9 @@ function closeness(order, twinOf) {
 
 const worse = (a, b) => a[0] > b[0] || (a[0] === b[0] && a[1] > b[1]);
 
-// Last resort for blocks too small to shuffle apart: move the second twin of each adjacent
-// pair to the nearest place where it doesn't touch its own twin.
+// Last resort for a block too small to shuffle apart: move the second twin of each adjacent
+// pair to the nearest place in the block where it doesn't touch its own twin. `order` is the
+// block's slice.
 function separate(order, twinOf) {
   const out = order.slice();
   const touches = (arr, id, at) =>
@@ -82,7 +84,11 @@ function separate(order, twinOf) {
  */
 export function cardOrder(cards, code) {
   const byPair = new Map();
-  for (const c of cards) if (c.pair) byPair.set(c.pair, [...(byPair.get(c.pair) ?? []), c.id]);
+  for (const c of cards) {
+    if (!c.pair) continue;
+    const key = `${c.set}\0${c.pair}`;
+    byPair.set(key, [...(byPair.get(key) ?? []), c.id]);
+  }
   const twinOf = new Map();
   for (const ids of byPair.values()) {
     if (ids.length === 2) {
@@ -111,7 +117,9 @@ export function cardOrder(cards, code) {
       }
       order = best;
     }
+    const block = order.slice(start, end);
+    if (closeness(block, twinOf)[0]) order.splice(start, end - start, ...separate(block, twinOf));
     start = end;
   }
-  return closeness(order, twinOf)[0] ? separate(order, twinOf) : order;
+  return order;
 }

@@ -61,9 +61,30 @@ test("loadCopy prefers the deployed files and says when it fell back to stand-in
   assert.equal(real.t("welcome.title"), "Real title");
   assert.equal(real.t("welcome.start"), "Start", "missing key falls back to the stand-in");
   assert.equal(real.consentVersion, "v1");
-  assert.equal(real.consentIsStandin, false);
+  assert.equal(real.consentProblem, null);
   assert.equal(real.consentHtml, "<h2>Real</h2>");
   const standin = await loadCopy(fetcher(false));
-  assert.equal(standin.consentIsStandin, true);
+  assert.match(standin.consentProblem, /not deployed/);
   assert.equal(standin.consentVersion, "standin");
+});
+
+test("a deployed CONSENT.md without its version marker (or marked standin) is refused like the stand-in", async () => {
+  const serve = (consent) => async (url) => {
+    const body = { "../CONSENT.md": consent, "standin/copy.json": "{}" }[url];
+    return body === undefined ? { ok: false, status: 404 } : { ok: true, json: async () => JSON.parse(body), text: async () => body };
+  };
+  const unmarked = await loadCopy(serve("# Consent\n\nText."));
+  assert.match(unmarked.consentProblem, /marker/);
+  assert.equal(unmarked.consentVersion, "unmarked", "dev mode can still run; the bundle says so");
+  const standin = await loadCopy(serve("<!-- consent: standin -->\n# Consent"));
+  assert.match(standin.consentProblem, /stand-in/);
+});
+
+test("the copy keys added for R74, R77, R84 and the review are present", () => {
+  for (const key of [
+    "background.script.label", "background.script.simplified", "background.script.traditional",
+    "consent.declined", "card.finish_early", "card.finish_early_confirm", "share.again",
+    "done.delete", "done.delete_confirm", "done.deleted", "error.in_app_browser",
+  ]) assert.ok(COPY_KEYS.includes(key), key);
+  assert.ok(!COPY_KEYS.includes("background.script.prefer_not"));
 });

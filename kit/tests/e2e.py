@@ -1,11 +1,17 @@
 #!/usr/bin/env python3
 """The kit end to end in headless Chromium, with the shared fixture as the microphone.
 
-Assembles the site as Pages does, serves it locally, and walks a volunteer's session in dev mode
-on the stand-in deck: consent, background, microphone check, four cards (three recorded about
-1.5 s each, one skipped), with a reload in the middle that must resume where it left off. Then
-it downloads the bundle (headless Chromium has no share sheet) and checks it: the contract
-(check_bundle.py) and fidelity (every clip is the fixture's speech, at the right pitch and speed).
+Assembles the site as Pages does, serves it locally, and walks volunteers' sessions in dev mode
+on the stand-in deck:
+- the full session in traditional characters: consent, background, microphone check, six cards
+  (a reload, an interruption, a skip and a redo on the way), the download, then the share sheet,
+  "Send again" and "Delete from this phone" (R77);
+- finishing early after one card;
+- a blocked microphone, an in-app browser (R84), declining consent, and volunteer mode.
+Every request must go to the test server, the microphone is never asked for before consent,
+and nothing may break the page's Content-Security-Policy. The bundles are checked against the
+contract (check_bundle.py) and for fidelity (every clip is the fixture's speech, at the right
+pitch and speed).
 
 All generated audio stays in a temporary directory.
 """
@@ -25,6 +31,7 @@ import threading
 import wave
 import zipfile
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import numpy as np
 from playwright.sync_api import expect, sync_playwright
@@ -38,6 +45,15 @@ TAKE_S = 1.5
 MIN_CORRELATION = 0.9
 # P1/P2's content and P3's deck may not be merged yet: the app falls back to its stand-ins.
 OPTIONAL_FILES = ("/copy.json", "/CONSENT.md", "/deck/s05-v1.json")
+STANDIN = "?dev=1&deck=standin"
+# What the stand-in deck's cards show in each script (R74); g02 differs between the two.
+TRADITIONAL = {"一杯水", "一杯睡", "買書", "賣書", "一", "不對"}
+SIMPLIFIED = {"一杯水", "一杯睡", "买书", "卖书", "一", "不对"}
+TWINS = [{"一杯水", "一杯睡"}, {"買書", "賣書"}, {"买书", "卖书"}]
+WECHAT_UA = (
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 "
+    "(KHTML, like Gecko) Mobile/15E148 MicroMessenger/8.0.49(0x18003137) NetType/WIFI Language/zh_CN"
+)
 
 
 def read_fixture() -> tuple[np.ndarray, int]:
@@ -132,7 +148,8 @@ def record(page, seconds: float = TAKE_S) -> None:
 
 
 def watch(page, problems: list[str]) -> None:
-    """Page errors, console errors and failed requests (other than optional content) are problems."""
+    """Page errors, console errors (CSP violations among them) and failed requests (other than
+    optional content) are problems."""
     page.on("pageerror", lambda e: problems.append(f"page error: {e}"))
     page.on(
         "console",
@@ -152,12 +169,91 @@ def watch(page, problems: list[str]) -> None:
     )
 
 
+# Runs before the kit's own scripts in every page: the microphone must never be asked for before
+# the person taps "I agree" (in this tab, across reloads), and CSP violations are recorded.
+GUARD = """
+(() => {
+  const KEY = "__e2e_consented";
+  window.__cspViolations = [];
+  document.addEventListener("securitypolicyviolation", (e) =>
+    window.__cspViolations.push(`${e.violatedDirective} ${e.blockedURI}`));
+  document.addEventListener("click", (e) => {
+    if (e.target.closest && e.target.closest("#consent-agree")) sessionStorage.setItem(KEY, "1");
+  }, true);
+  // Playback of a take (a blob: URL) must work under the CSP's media-src.
+  window.__played = 0;
+  const play = HTMLMediaElement.prototype.play;
+  HTMLMediaElement.prototype.play = function () {
+    const playing = play.call(this);
+    playing.then(() => window.__played++, (e) => console.error(`e2e: playback failed: ${e}`));
+    return playing;
+  };
+  const media = navigator.mediaDevices;
+  if (!media || !media.getUserMedia) return;
+  const real = media.getUserMedia.bind(media);
+  media.getUserMedia = (...args) => {
+    if (sessionStorage.getItem(KEY) !== "1") {
+      window.__micBeforeConsent = true;
+      console.error("e2e: getUserMedia was called before consent");
+    }
+    return real(...args);
+  };
+})();
+"""
+
+
+def origin(url: str) -> str | None:
+    """A request's origin; None for data: URLs, which never leave the page."""
+    if url.startswith("data:"):
+        return None
+    parts = urlsplit(url.removeprefix("blob:"))
+    return f"{parts.scheme}://{parts.netloc}"
+
+
+def new_context(
+    browser, base: str, problems: list[str], before: tuple[str, ...] = (), **options
+):
+    """A browser context whose every request must go to the test server, with GUARD installed
+    (after `before`, so it wraps whatever getUserMedia those scripts set up)."""
+    context = browser.new_context(**options)
+    for script in (*before, GUARD):
+        context.add_init_script(script)
+    server = origin(base)
+    context.on(
+        "request",
+        lambda r: (
+            origin(r.url) not in (None, server)
+            and problems.append(f"request to another origin: {r.url}")
+        ),
+    )
+    return context
+
+
+def page_clean(page, problems: list[str]) -> None:
+    """At the end of a page's flow: no CSP violation, no microphone before consent."""
+    violations = page.evaluate("window.__cspViolations")
+    if violations:
+        problems.append(f"CSP violations: {violations}")
+    if page.evaluate("window.__micBeforeConsent === true"):
+        problems.append("getUserMedia was called before consent")
+
+
 # Stands in for the iOS share sheet: records what it was given, then succeeds.
 FAKE_SHARE = """
 navigator.canShare = (data) => Boolean(data && data.files && data.files.length);
 navigator.share = async (data) => {
   const f = data.files[0];
   window.__shared = {name: f.name, type: f.type, size: f.size};
+  window.__shares = (window.__shares || 0) + 1;
+};
+"""
+
+# iOS Safari's track.getSettings(): no noiseSuppression, no autoGainControl (R83).
+SAFARI_SETTINGS = """
+const getSettings = MediaStreamTrack.prototype.getSettings;
+MediaStreamTrack.prototype.getSettings = function () {
+  const { noiseSuppression, autoGainControl, ...reported } = getSettings.call(this);
+  return reported;
 };
 """
 
@@ -169,86 +265,39 @@ Object.defineProperty(document, "hidden", {value: false, configurable: true});
 """
 
 
-def volunteer_session(
-    browser, base: str, tmp: Path, problems: list[str]
-) -> tuple[Path, list[str]]:
-    """The whole flow on the stand-in deck; returns the downloaded bundle and the cards shown."""
-    shown: list[str] = []
-    context = browser.new_context(accept_downloads=True)
-    page = context.new_page()
-    watch(page, problems)
-
-    page.goto(base + "?dev=1&deck=standin")
+def start_session(page, base: str) -> None:
+    """Welcome and consent, from a fresh page."""
+    page.goto(base + STANDIN)
     expect(page.locator("#dev-banner")).to_be_visible()
     page.click("#welcome-start")
-
     expect(page.locator("#screen-consent")).to_be_visible()
     expect(page.locator("#consent-text h2").first).to_be_visible()
     page.click("#consent-agree")
-
     expect(page.locator("#screen-background")).to_be_visible()
-    for question, value in (
-        ("background", "prefer_not"),
-        ("grew_up_hearing", "prefer_not"),
-        ("reading", "hanzi"),
-    ):
-        expect(page.locator(f'#q-{question} [data-value="{value}"]')).to_have_attribute(
-            "aria-checked", "true"
-        )
-    page.click('#q-background [data-value="heritage"]')
-    page.click('#q-grew_up_hearing [data-value="taiwan"]')
-    page.click('#q-reading [data-value="hanzi+pinyin"]')
-    page.click("#background-next")
 
+
+def check_microphone(page) -> None:
     expect(page.locator("#screen-mic")).to_be_visible()
     page.click("#mic-allow")
     expect(page.locator("#mic-continue")).to_be_visible(timeout=10_000)
-    expect(page.locator("#mic-status")).not_to_be_empty()
+    # The fake microphone is a quiet room (-60 dBFS) with speech: the check says it sounds good.
+    status = page.locator("#mic-status")
+    expect(status).to_have_attribute("data-verdict", "ok")
+    expect(status).to_have_text(copy_text("mic.level_ok"))
     page.click("#mic-continue")
 
-    # Card 1, then close-and-reopen: the session resumes on the same card, take kept.
-    expect(page.locator("#card-progress")).to_have_text("1 of 4")
-    expect(page.locator("#card-pinyin")).to_be_visible()
-    shown.append(page.locator("#card-text").inner_text())
-    record(page)
-    page.reload()
-    expect(page.locator("#screen-pause")).to_be_visible()
-    page.click("#pause-resume")
-    expect(page.locator("#card-progress")).to_have_text("1 of 4")
-    expect(page.locator("#card-play")).to_be_visible()
-    assert page.locator("#card-text").inner_text() == shown[0]
-    page.click("#card-next")
 
-    # Card 2: the page is hidden mid-take (screen locked): the take is dropped, the kit pauses,
-    # and after resuming the card is recorded again.
-    expect(page.locator("#card-progress")).to_have_text("2 of 4")
-    shown.append(page.locator("#card-text").inner_text())
-    page.click("#card-record")
-    page.wait_for_timeout(500)
-    page.evaluate(HIDE_PAGE)
-    expect(page.locator("#screen-pause")).to_be_visible()
-    page.click("#pause-resume")
-    expect(page.locator("#card-progress")).to_have_text("2 of 4")
-    expect(page.locator("#card-next")).to_be_disabled()
-    expect(page.locator("#card-record")).not_to_have_class(re.compile(r"\brecording\b"))
-    record(page)
-    page.click("#card-next")
+def card_face(page, faces: set[str], lang: str) -> str:
+    """The card on screen: its text must be one of `faces`, tagged `lang`."""
+    text = page.locator("#card-text")
+    expect(text).not_to_be_empty()
+    expect(text).to_have_attribute("lang", lang)
+    shown = text.inner_text()
+    assert shown in faces, f"{shown!r} is not one of {sorted(faces)}"
+    return shown
 
-    # Card 3: skipped. Card 4: recorded, then redone.
-    expect(page.locator("#card-progress")).to_have_text("3 of 4")
-    shown.append(page.locator("#card-text").inner_text())
-    page.click("#card-skip")
-    page.click("#card-next")
-    expect(page.locator("#card-progress")).to_have_text("4 of 4")
-    shown.append(page.locator("#card-text").inner_text())
-    record(page)
-    page.click("#card-redo")
-    expect(page.locator("#card-record")).to_have_class(re.compile(r"\brecording\b"))
-    page.wait_for_timeout(TAKE_S * 1000)
-    page.click("#card-record")
-    expect(page.locator("#card-next")).to_be_enabled(timeout=10_000)
-    page.click("#card-next")
 
+def download_bundle(page, tmp: Path) -> tuple[Path, str]:
     expect(page.locator("#screen-done")).to_be_visible()
     code = page.locator("#done-code").inner_text()
     assert re.fullmatch(r"[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{6}", code), code
@@ -259,17 +308,114 @@ def volunteer_session(
     bundle = tmp / download.value.suggested_filename
     download.value.save_as(bundle)
     assert bundle.name == f"tonekit-standin-v1-{code}.zip", bundle.name
+    return bundle, code
 
-    # A download can't be confirmed, so the session stays (done screen, same code)...
+
+def volunteer_session(
+    browser, base: str, tmp: Path, problems: list[str]
+) -> tuple[Path, list[str]]:
+    """The whole flow in traditional characters; returns the bundle and the cards shown."""
+    shown: list[str] = []
+    context = new_context(browser, base, problems, accept_downloads=True)
+    page = context.new_page()
+    watch(page, problems)
+    start_session(page, base)
+
+    for question, value in (
+        ("background", "prefer_not"),
+        ("grew_up_hearing", "prefer_not"),
+        ("script", "simplified"),
+        ("reading", "hanzi"),
+    ):
+        expect(page.locator(f'#q-{question} [data-value="{value}"]')).to_have_attribute(
+            "aria-checked", "true"
+        )
+    page.click('#q-background [data-value="heritage"]')
+    page.click('#q-grew_up_hearing [data-value="taiwan"]')
+    # Until the script is picked, it follows grew_up_hearing (Taiwan: traditional).
+    expect(page.locator('#q-script [data-value="traditional"]')).to_have_attribute(
+        "aria-checked", "true"
+    )
+    page.click('#q-script [data-value="traditional"]')
+    page.click(
+        '#q-grew_up_hearing [data-value="mainland"]'
+    )  # an explicit pick now stays
+    expect(page.locator('#q-script [data-value="traditional"]')).to_have_attribute(
+        "aria-checked", "true"
+    )
+    page.click('#q-grew_up_hearing [data-value="taiwan"]')
+    page.click('#q-reading [data-value="hanzi+pinyin"]')
+    page.click("#background-next")
+    check_microphone(page)
+
+    # Card 1, then close-and-reopen: the session resumes on the same card, take kept.
+    expect(page.locator("#card-progress")).to_have_text("1 of 6")
+    expect(page.locator("#card-pinyin")).to_be_visible()
+    expect(page.locator("#card-finish")).to_be_hidden()  # nothing kept yet
+    shown.append(card_face(page, TRADITIONAL, "zh-Hant"))
+    record(page)
+    expect(page.locator("#card-finish")).to_be_visible()
+    page.click("#card-play")
+    page.wait_for_function("() => window.__played === 1", timeout=10_000)
+    page.reload()
+    expect(page.locator("#screen-pause")).to_be_visible()
+    page.click("#pause-resume")
+    expect(page.locator("#card-progress")).to_have_text("1 of 6")
+    expect(page.locator("#card-play")).to_be_visible()
+    assert card_face(page, TRADITIONAL, "zh-Hant") == shown[0]
+    page.click("#card-next")
+
+    # Card 2: the page is hidden mid-take (screen locked): the take is dropped, the kit pauses,
+    # and after resuming the card is recorded again.
+    expect(page.locator("#card-progress")).to_have_text("2 of 6")
+    shown.append(card_face(page, TRADITIONAL, "zh-Hant"))
+    page.click("#card-record")
+    page.wait_for_timeout(500)
+    page.evaluate(HIDE_PAGE)
+    expect(page.locator("#screen-pause")).to_be_visible()
+    page.click("#pause-resume")
+    expect(page.locator("#card-progress")).to_have_text("2 of 6")
+    expect(page.locator("#card-next")).to_be_disabled()
+    expect(page.locator("#card-record")).not_to_have_class(re.compile(r"\brecording\b"))
+    record(page)
+    page.click("#card-next")
+
+    # Card 3: skipped. Card 4: recorded, then redone. Cards 5 and 6: recorded.
+    expect(page.locator("#card-progress")).to_have_text("3 of 6")
+    shown.append(card_face(page, TRADITIONAL, "zh-Hant"))
+    page.click("#card-skip")
+    page.click("#card-next")
+    expect(page.locator("#card-progress")).to_have_text("4 of 6")
+    shown.append(card_face(page, TRADITIONAL, "zh-Hant"))
+    record(page)
+    page.click("#card-redo")
+    expect(page.locator("#card-record")).to_have_class(re.compile(r"\brecording\b"))
+    page.wait_for_timeout(TAKE_S * 1000)
+    page.click("#card-record")
+    expect(page.locator("#card-next")).to_be_enabled(timeout=10_000)
+    page.click("#card-next")
+    for n in (5, 6):
+        expect(page.locator("#card-progress")).to_have_text(f"{n} of 6")
+        shown.append(card_face(page, TRADITIONAL, "zh-Hant"))
+        record(page)
+        page.click("#card-next")
+
+    bundle, code = download_bundle(page, tmp)
+    # A download can't be confirmed, so the session stays (done screen, same code).
     page.reload()
     expect(page.locator("#screen-done")).to_be_visible()
     expect(page.locator("#done-code")).to_have_text(code)
-    # ... until the share sheet takes it: then the phone keeps nothing.
+    page_clean(page, problems)
+
+    # R77: the share sheet's "success" deletes nothing; the button offers to send again.
     context.add_init_script(FAKE_SHARE)
     page.reload()
-    expect(page.locator("#share-button")).to_be_enabled(timeout=10_000)
-    page.click("#share-button")
-    expect(page.locator("#share-status")).not_to_be_empty()
+    share = page.locator("#share-button")
+    expect(share).to_be_enabled(timeout=10_000)
+    expect(share).to_have_text(copy_text("share.button"))
+    share.click()
+    expect(page.locator("#share-status")).to_have_text(copy_text("share.done"))
+    expect(share).to_have_text(copy_text("share.again"))
     shared = page.evaluate("window.__shared")
     assert shared == {
         "name": bundle.name,
@@ -277,34 +423,132 @@ def volunteer_session(
         "size": bundle.stat().st_size,
     }, shared
     page.reload()
+    expect(page.locator("#screen-done")).to_be_visible()
+    expect(page.locator("#done-code")).to_have_text(code)
+    expect(share).to_have_text(copy_text("share.again"))
+    expect(share).to_be_enabled(timeout=10_000)
+    share.click()
+    page.wait_for_function("() => window.__shares === 1")
+    assert page.evaluate("window.__shared.size") == bundle.stat().st_size
+
+    # "Delete from this phone": cancelling the confirm keeps everything; accepting removes it.
+    dialogs: list[str] = []
+    page.once("dialog", lambda d: (dialogs.append(d.message), d.dismiss()))
+    page.click("#done-delete")
+    expect(share).to_be_visible()
+    page.once("dialog", lambda d: (dialogs.append(d.message), d.accept()))
+    page.click("#done-delete")
+    expect(page.locator("#share-status")).to_have_text(copy_text("done.deleted"))
+    expect(share).to_be_hidden()
+    expect(page.locator("#done-delete")).to_be_hidden()
+    assert dialogs == [copy_text("done.delete_confirm")] * 2, dialogs
+    page_clean(page, problems)
+    page.reload()
     expect(page.locator("#screen-welcome")).to_be_visible()
     context.close()
     return bundle, shown
 
 
-def blocked_microphone(browser, base: str, problems: list[str]) -> None:
-    """A refused microphone shows the how-to-allow message and lets the volunteer try again."""
-    context = browser.new_context()
-    context.add_init_script(
-        "navigator.mediaDevices.getUserMedia = async () => {"
-        " throw new DOMException('denied', 'NotAllowedError'); };"
+def finish_early(browser, base: str, tmp: Path, problems: list[str]) -> Path:
+    """One card in simplified characters, then "finish and send what I have", on a microphone
+    that reports settings the way iOS Safari does."""
+    context = new_context(
+        browser, base, problems, before=(SAFARI_SETTINGS,), accept_downloads=True
     )
     page = context.new_page()
     watch(page, problems)
-    page.goto(base + "?dev=1&deck=standin")
-    page.click("#welcome-start")
-    page.click("#consent-agree")
+    start_session(page, base)
+    page.click("#background-next")  # the defaults: simplified, characters only
+    check_microphone(page)
+    expect(page.locator("#card-progress")).to_have_text("1 of 6")
+    expect(page.locator("#card-pinyin")).to_be_hidden()
+    card_face(page, SIMPLIFIED, "zh-Hans")
+    record(page)
+    finish = page.locator("#card-finish")
+    expect(finish).to_have_text(copy_text("card.finish_early"))
+    dialogs: list[str] = []
+    page.once("dialog", lambda d: (dialogs.append(d.message), d.dismiss()))
+    finish.click()
+    expect(page.locator("#card-progress")).to_have_text("1 of 6")
+    page.once("dialog", lambda d: (dialogs.append(d.message), d.accept()))
+    finish.click()
+    assert dialogs == [copy_text("card.finish_early_confirm")] * 2, dialogs
+    bundle, _ = download_bundle(page, tmp)
+    page_clean(page, problems)
+    context.close()
+    with zipfile.ZipFile(bundle) as z:
+        session = json.loads(z.read("session.json"))
+    if (len(session["clips"]), len(session["skipped"])) != (1, 5):
+        problems.append(
+            f"finish early: {len(session['clips'])} clips, {len(session['skipped'])} skipped"
+        )
+    if session["speaker"]["script"] != "simplified":
+        problems.append(f"finish early: script {session['speaker']['script']}")
+    safari = {
+        "echoCancellation": False,
+        "noiseSuppression": None,
+        "autoGainControl": None,
+    }
+    if session["device"]["constraints"] != safari:
+        problems.append(f"finish early: constraints {session['device']['constraints']}")
+    return bundle
+
+
+def blocked_microphone(browser, base: str, problems: list[str]) -> None:
+    """A refused microphone shows the how-to-allow message and lets the volunteer try again."""
+    refuse = (
+        "navigator.mediaDevices.getUserMedia = async () => {"
+        " throw new DOMException('denied', 'NotAllowedError'); };"
+    )
+    context = new_context(browser, base, problems, before=(refuse,))
+    page = context.new_page()
+    watch(page, problems)
+    start_session(page, base)
     page.click("#background-next")
     page.click("#mic-allow")
     expect(page.locator("#mic-error")).to_be_visible()
     expect(page.locator("#mic-error")).to_have_text(copy_text("error.mic_blocked"))
     expect(page.locator("#mic-allow")).to_be_enabled()
+    page_clean(page, problems)
+    context.close()
+
+
+def in_app_browser(browser, base: str, problems: list[str]) -> None:
+    """R84: WeChat's webview gets "open this in Safari" and nothing else."""
+    context = new_context(browser, base, problems, user_agent=WECHAT_UA)
+    page = context.new_page()
+    watch(page, problems)
+    page.goto(base + STANDIN)
+    expect(page.locator("#screen-error")).to_be_visible()
+    expect(page.locator("#error-text")).to_have_text(copy_text("error.in_app_browser"))
+    expect(page.locator("#error-detail")).to_be_empty()
+    for hidden in ("#screen-welcome", "#dev-banner", "#error-banner"):
+        expect(page.locator(hidden)).to_be_hidden()
+    page_clean(page, problems)
+    context.close()
+
+
+def declined(browser, base: str, problems: list[str]) -> None:
+    """From the site root (its redirect runs under its own CSP): "No thanks" ends politely and
+    keeps nothing."""
+    context = new_context(browser, base, problems)
+    page = context.new_page()
+    watch(page, problems)
+    page.goto(base.removesuffix("app/") + STANDIN)
+    expect(page).to_have_url(base + STANDIN)
+    page.click("#welcome-start")
+    page.click("#consent-decline")
+    expect(page.locator("#screen-declined")).to_be_visible()
+    expect(page.locator("#screen-declined")).to_have_text(copy_text("consent.declined"))
+    page_clean(page, problems)
+    page.reload()
+    expect(page.locator("#screen-welcome")).to_be_visible()
     context.close()
 
 
 def volunteer_mode(browser, base: str, site: Path, problems: list[str]) -> None:
     """Without ?dev=1 the kit runs only on the real consent text and an approved deck."""
-    context = browser.new_context()
+    context = new_context(browser, base, problems)
     page = context.new_page()
     watch(page, problems)
     page.goto(base)
@@ -320,6 +564,7 @@ def volunteer_mode(browser, base: str, site: Path, problems: list[str]) -> None:
         page.locator("#screen-welcome" if ready else "#screen-error")
     ).to_be_visible()
     expect(page.locator("#dev-banner")).to_be_hidden()
+    page_clean(page, problems)
     context.close()
 
 
@@ -331,14 +576,18 @@ def copy_text(key: str) -> str:
             value = data.get(key)
             if value is None:  # nested form
                 value = functools.reduce(
-                    lambda node, part: (node or {}).get(part), key.split("."), data
+                    lambda node, part: (
+                        (node or {}).get(part) if isinstance(node, dict) else None
+                    ),
+                    key.split("."),
+                    data,
                 )
             if isinstance(value, str):
                 return value
     raise KeyError(key)
 
 
-def run(tmp: Path) -> tuple[Path, list[str], list[str]]:
+def run(tmp: Path) -> tuple[list[Path], list[str], list[str]]:
     site = tmp / "site"
     subprocess.run(
         [str(KIT / "assemble-site.sh"), str(site)], check=True, capture_output=True
@@ -358,12 +607,15 @@ def run(tmp: Path) -> tuple[Path, list[str], list[str]]:
                 ]
             )
             bundle, shown = volunteer_session(browser, base, tmp, problems)
+            early = finish_early(browser, base, tmp, problems)
             blocked_microphone(browser, base, problems)
+            in_app_browser(browser, base, problems)
+            declined(browser, base, problems)
             volunteer_mode(browser, base, site, problems)
             browser.close()
     finally:
         server.shutdown()
-    return bundle, shown, problems
+    return [bundle, early], shown, problems
 
 
 def check_fidelity(bundle: Path, shown: list[str]) -> list[str]:
@@ -376,15 +628,16 @@ def check_fidelity(bundle: Path, shown: list[str]) -> list[str]:
         "background": "heritage",
         "grew_up_hearing": "taiwan",
         "reading": "hanzi+pinyin",
+        "script": "traditional",
     }
     if session["speaker"] != expect_speaker:
         problems.append(f"speaker {session['speaker']}")
-    if len(session["clips"]) != 3 or len(session["skipped"]) != 1:
+    if len(session["clips"]) != 5 or len(session["skipped"]) != 1:
         problems.append(
             f"{len(session['clips'])} clips, {len(session['skipped'])} skipped"
         )
     takes = [c["takes"] for c in session["clips"]]
-    if takes != [1, 1, 2]:
+    if takes != [1, 1, 2, 1, 1]:
         problems.append(f"takes {takes}")
     constraints = session["device"]["constraints"]
     if constraints != {
@@ -397,10 +650,11 @@ def check_fidelity(bundle: Path, shown: list[str]) -> list[str]:
         r"v\d+", session["consent"]["version"]
     ):
         problems.append(f"consent version {session['consent']['version']}")
-    # The gate pair's twins (一杯水 / 一杯睡) are never read back to back.
-    twins = [i for i, text in enumerate(shown) if text in {"一杯水", "一杯睡"}]
-    if len(twins) != 2 or twins[1] - twins[0] < 2:
-        problems.append(f"twins adjacent in {shown}")
+    # The gate pairs' twins are never read back to back.
+    for twin in TWINS:
+        at = [i for i, text in enumerate(shown) if text in twin]
+        if at and (len(at) != 2 or at[1] - at[0] < 2):
+            problems.append(f"twins {sorted(twin)} adjacent in {shown}")
     reference = speech_loop()
     for card, data in clips.items():
         with wave.open(io.BytesIO(data)) as w:
@@ -421,18 +675,26 @@ def check_fidelity(bundle: Path, shown: list[str]) -> list[str]:
 
 def main() -> int:
     with tempfile.TemporaryDirectory(prefix="tonekit-kit-e2e-") as tmp:
-        bundle, shown, problems = run(Path(tmp))
+        bundles, shown, problems = run(Path(tmp))
         print(f"cards shown: {' '.join(shown)}")
-        checked = subprocess.run(
-            [sys.executable, str(KIT / "tests" / "check_bundle.py"), str(bundle)],
-            capture_output=True,
-            text=True,
-        )
-        sys.stdout.write(checked.stdout)
-        sys.stderr.write(checked.stderr)
-        if checked.returncode:
-            problems.append("check_bundle.py failed")
-        problems += check_fidelity(bundle, shown)
+        deck = KIT / "app" / "standin" / "deck.json"
+        for bundle in bundles:
+            checked = subprocess.run(
+                [
+                    sys.executable,
+                    str(KIT / "tests" / "check_bundle.py"),
+                    str(bundle),
+                    "--deck",
+                    str(deck),
+                ],
+                capture_output=True,
+                text=True,
+            )
+            sys.stdout.write(checked.stdout)
+            sys.stderr.write(checked.stderr)
+            if checked.returncode:
+                problems.append(f"check_bundle.py failed on {bundle.name}")
+        problems += check_fidelity(bundles[0], shown)
     for p in problems:
         print(f"FAIL {p}", file=sys.stderr)
     print("e2e: OK" if not problems else f"e2e: {len(problems)} problem(s)")

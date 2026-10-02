@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
-import { loadDeck, parseDeck, shownCards, deckFromStored, DeckError, sha256Hex } from "../../app/deck.js";
+import { loadDeck, parseDeck, shownCards, deckFromStored, DeckError, sha256Hex, cardFace } from "../../app/deck.js";
 
 const STANDIN = new URL("../../app/standin/deck.json", import.meta.url);
 const standinBytes = readFileSync(STANDIN);
@@ -22,8 +22,18 @@ const card = (id, status = "approved", extra = {}) => ({ id, set: "register", te
 test("the stand-in deck parses and has a gate pair, an isolated and a phrase card", () => {
   const { meta, cards } = parseDeck(standinBytes.toString("utf8"));
   assert.equal(meta.id, "standin-v1");
-  assert.deepEqual(cards.map((c) => c.id), ["g01-c", "g01-e", "r01", "r02"]);
+  assert.deepEqual(cards.map((c) => c.id), ["g01-c", "g01-e", "g02-c", "g02-e", "r01", "r02"]);
   assert.ok(cards.some((c) => c.context === "isolated") && cards.some((c) => c.prompt_note));
+  assert.ok(cards.some((c) => c.text_traditional && c.text_traditional !== c.text), "one card differs in traditional");
+});
+
+test("R74: a traditional reader sees text_traditional where the card has one, tagged zh-Hant", () => {
+  const both = { id: "r02", text: "不对", text_traditional: "不對" };
+  const plain = { id: "r01", text: "一" };
+  assert.deepEqual(cardFace(both, "traditional"), { text: "不對", lang: "zh-Hant" });
+  assert.deepEqual(cardFace(plain, "traditional"), { text: "一", lang: "zh-Hant" });
+  assert.deepEqual(cardFace(both, "simplified"), { text: "不对", lang: "zh-Hans" });
+  assert.deepEqual(cardFace({ ...both, text_traditional: "" }, "traditional"), { text: "不对", lang: "zh-Hant" });
 });
 
 test("the sha256 is over the exact bytes served (whitespace included)", async () => {
@@ -55,7 +65,7 @@ test("a missing deck is an error, except in dev mode where the stand-in fills in
   const dev = await loadDeck({ fetcher, dev: true });
   assert.equal(dev.standin, true);
   assert.equal(dev.id, "standin-v1");
-  assert.equal(dev.cards.length, 4);
+  assert.equal(dev.cards.length, 6);
 });
 
 test("?deck=standin picks the stand-in directly in dev mode only", async () => {

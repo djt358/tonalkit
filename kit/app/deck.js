@@ -38,6 +38,19 @@ export function parseDeck(text) {
   return { meta: data.deck, cards: data.card };
 }
 
+/**
+ * What a card shows a reader of `script` (R74): its traditional text where it has one, tagged
+ * so the phone picks Traditional or Simplified Chinese glyphs.
+ * @returns {{text: string, lang: "zh-Hant"|"zh-Hans"}}
+ */
+export function cardFace(card, script) {
+  const traditional = script === "traditional";
+  return {
+    text: (traditional && card.text_traditional) || card.text,
+    lang: traditional ? "zh-Hant" : "zh-Hans",
+  };
+}
+
 /** Cards a volunteer sees: approved ones only, unless in dev mode. */
 export const shownCards = (cards, dev) => (dev ? cards : cards.filter((c) => c.status === "approved"));
 

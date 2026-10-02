@@ -2,12 +2,13 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
+  <!-- Nothing leaves this page: only its own files load, and fetches go to its own site. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self'; media-src 'self' blob:; img-src 'self' data:; script-src 'self'; worker-src 'self'; style-src 'self'; form-action 'none'; base-uri 'none'">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="color-scheme" content="light dark">
   <meta name="robots" content="noindex, nofollow">
   <meta name="referrer" content="no-referrer">
   <meta name="format-detection" content="telephone=no">
-  <meta name="apple-mobile-web-app-capable" content="yes">
   <title>Read aloud</title>
   <link rel="icon" href="data:,">
   <link rel="stylesheet" href="style.css">
@@ -39,6 +40,10 @@
       </div>
     </section>
 
+    <section id="screen-declined" class="screen" hidden>
+      <p class="lead" data-copy="consent.declined"></p>
+    </section>
+
     <section id="screen-background" class="screen" hidden>
       <h1 data-copy="background.title"></h1>
       <p class="lead" data-copy="background.intro"></p>
@@ -63,7 +68,7 @@
     <section id="screen-cards" class="screen cards" hidden>
       <p id="card-progress" class="progress"></p>
       <div class="card" aria-live="polite">
-        <p id="card-text" class="card-text" lang="zh"></p>
+        <p id="card-text" class="card-text" lang="zh-Hans"></p>
         <p id="card-pinyin" class="card-pinyin" lang="zh-Latn-pinyin" hidden></p>
         <p id="card-hint" class="card-hint" hidden></p>
         <p id="card-note" class="card-note" lang="zh" hidden></p>
@@ -78,6 +83,7 @@
           <button id="card-skip" class="secondary" data-copy="card.skip"></button>
           <button id="card-next" class="primary next" data-copy="card.next" disabled></button>
         </div>
+        <button id="card-finish" class="quiet small" data-copy="card.finish_early" hidden></button>
       </div>
     </section>
 
@@ -93,6 +99,7 @@
       <div class="actions">
         <button id="share-button" class="primary" data-copy="share.button" disabled></button>
         <a id="share-fallback" class="button primary" data-copy="share.fallback" hidden></a>
+        <button id="done-delete" class="quiet" data-copy="done.delete"></button>
       </div>
     </section>
 

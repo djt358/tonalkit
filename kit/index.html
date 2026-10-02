@@ -2,11 +2,13 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; img-src data:; form-action 'none'; base-uri 'none'">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex, nofollow">
+  <meta name="referrer" content="no-referrer">
   <title>Read aloud</title>
   <link rel="icon" href="data:,">
-  <script>location.replace("app/" + location.search + location.hash);</script>
+  <script src="redirect.js"></script>
   <noscript><meta http-equiv="refresh" content="0; url=app/"></noscript>
 </head>
 <body><a href="app/">Open</a></body>

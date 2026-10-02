@@ -6,16 +6,25 @@ export const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // no 0/O/1/I
 export const CODE_LENGTH = 6;
 const CODE_RE = new RegExp(`^[${CODE_ALPHABET}]{${CODE_LENGTH}}$`);
 
+// The background questions in the order they're asked. `script` (R74) has no prefer_not: the
+// cards have to be shown in one script or the other.
 export const SPEAKER_OPTIONS = {
   background: ["native", "heritage", "learner", "prefer_not"],
   grew_up_hearing: ["mainland", "taiwan", "singapore_malaysia", "hong_kong_macau", "other", "prefer_not"],
+  script: ["simplified", "traditional"],
   reading: ["hanzi", "hanzi+pinyin"],
 };
 export const DEFAULT_SPEAKER = Object.freeze({
   background: "prefer_not",
   grew_up_hearing: "prefer_not",
+  script: "simplified",
   reading: "hanzi",
 });
+
+const TRADITIONAL_REGIONS = new Set(["taiwan", "hong_kong_macau"]);
+
+/** The script preselected for someone who grew up hearing Mandarin in `region`, until they pick one. */
+export const defaultScript = (region) => (TRADITIONAL_REGIONS.has(region) ? "traditional" : "simplified");
 
 const randomBytes = (n) => crypto.getRandomValues(new Uint8Array(n));
 
@@ -29,10 +38,28 @@ export const isCode = (text) => CODE_RE.test(text);
 /** "2026-10-03T18:02:11Z" */
 export const isoUtc = (date = new Date()) => date.toISOString().replace(/\.\d{3}Z$/, "Z");
 
-/** The version in CONSENT.md's first line (`<!-- consent: v1 -->`), else "v1". */
+/** The version in CONSENT.md's first line (`<!-- consent: v1 -->`), else null. */
 export function consentVersion(markdown) {
   const first = markdown.split(/\r?\n/, 1)[0] ?? "";
-  return first.match(/^<!--\s*consent:\s*(\S+?)\s*-->/)?.[1] ?? "v1";
+  return first.match(/^<!--\s*consent:\s*(\S+?)\s*-->/)?.[1] ?? null;
+}
+
+/**
+ * The microphone a session records with is the first one opened: session.json has one device,
+ * so a later change (AirPods connected mid-session) keeps the first values and is only reported.
+ * Every take is still resampled from the rate it was actually captured at.
+ * @returns {{device: object, change: string|null}}
+ */
+export function sessionDevice(stored, current) {
+  if (!stored) return { device: current, change: null };
+  const changes = [];
+  if (stored.input_sample_rate !== current.input_sample_rate) {
+    changes.push(`input_sample_rate ${stored.input_sample_rate} -> ${current.input_sample_rate}`);
+  }
+  for (const [key, value] of Object.entries(current.constraints ?? {})) {
+    if (stored.constraints?.[key] !== value) changes.push(`${key} ${stored.constraints?.[key]} -> ${value}`);
+  }
+  return { device: stored, change: changes.length ? changes.join(", ") : null };
 }
 
 /**
@@ -49,6 +76,7 @@ export function createSession({ deck, cards, dev, now = new Date(), code = newCo
     finished_at: null,
     consent: null,
     speaker: { ...DEFAULT_SPEAKER },
+    script_chosen: false, // until the person taps a script, it follows grew_up_hearing
     device: null,
     order: cardOrder(cards, code),
     index: 0,
@@ -60,4 +88,15 @@ export function createSession({ deck, cards, dev, now = new Date(), code = newCo
 /** Progress for one card (created on first use). */
 export function cardState(session, id) {
   return (session.cards[id] ??= { takes: 0, kept: false, skipped: false, duration_s: 0, peak: 0, quiet: false });
+}
+
+/** Whether any card has a kept take (finishing early is offered from then on). */
+export const hasKeptTake = (session) => Object.values(session.cards).some((c) => c.kept);
+
+/** Finishing early: every card without a kept take is skipped. */
+export function skipRemaining(session) {
+  for (const id of session.order) {
+    const state = cardState(session, id);
+    if (!state.kept) state.skipped = true;
+  }
 }

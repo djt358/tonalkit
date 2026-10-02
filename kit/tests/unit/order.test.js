@@ -28,12 +28,25 @@ const DECKS = {
     ...loose("c", 6, "diag_count"),
     ...pairCards("h", 6),
   ],
-  "a lone pair in its own segment": [...loose("a", 4, "register"), ...pairCards("g", 1), ...loose("b", 4, "quiet")],
+  "a lone pair with a loose card in its block": [
+    ...loose("a", 4, "register"),
+    ...pairCards("g", 1),
+    { id: "gx", set: "gate" },
+    ...loose("b", 4, "quiet"),
+  ],
   "only two pairs": pairCards("g", 2),
+  // R66: pairs are scoped to (set, pair); P3's deck reuses short ids across sets.
+  "pair ids reused across gate and diag_t23": [
+    ...pairCards("p", 3).map((c) => ({ ...c, id: `g-${c.id}` })),
+    ...pairCards("p", 3, "diag_t23").map((c) => ({ ...c, id: `d-${c.id}` })),
+  ],
 };
 
+// Twins are the two cards of one (set, pair).
+const twinKey = (c) => (c.pair ? `${c.set}\0${c.pair}` : undefined);
+
 function adjacentTwins(order, deck) {
-  const pairOf = new Map(deck.map((c) => [c.id, c.pair]));
+  const pairOf = new Map(deck.map((c) => [c.id, twinKey(c)]));
   const bad = [];
   for (let i = 0; i + 1 < order.length; i++) {
     const p = pairOf.get(order[i]);
@@ -100,4 +113,38 @@ test("an impossible deck (a single pair and nothing else) still returns every ca
 test("a pair id used by a single card (the other twin unapproved) is treated as unpaired", () => {
   const deck = [{ id: "g01-c", set: "gate", pair: "g01" }, ...loose("r", 3, "register")];
   assert.deepEqual(cardOrder(deck, "K7Q2MD"), deck.map((c) => c.id));
+});
+
+test("a pair id reused in two sets: each set's correct and error cards are twins, never adjacent", () => {
+  const deck = DECKS["pair ids reused across gate and diag_t23"];
+  for (const code of codes) {
+    const order = cardOrder(deck, code);
+    for (const set of ["g", "d"]) {
+      for (const p of ["p01", "p02", "p03"]) {
+        const gap = Math.abs(order.indexOf(`${set}-${p}-c`) - order.indexOf(`${set}-${p}-e`));
+        assert.ok(gap >= 2, `code ${code}: ${set}-${p} adjacent in ${order.join(" ")}`);
+      }
+    }
+    assert.ok(order.slice(0, 6).every((id) => id.startsWith("g-")), `code ${code}: ${order.join(" ")}`);
+  }
+});
+
+test("separation never moves a card into another set's block", () => {
+  for (const deck of Object.values(DECKS)) {
+    for (const code of codes.slice(0, 100)) {
+      const order = cardOrder(deck, code);
+      deck.forEach((card, i) => {
+        const placed = deck.find((c) => c.id === order[i]);
+        assert.equal(placed.set, card.set, `code ${code}: ${order.join(" ")}`);
+      });
+    }
+  }
+});
+
+test("a lone pair alone in its block stays there, even though its twins must then be adjacent", () => {
+  const deck = [...loose("a", 4, "register"), ...pairCards("g", 1), ...loose("b", 4, "quiet")];
+  const order = cardOrder(deck, "K7Q2MD");
+  assert.deepEqual(order.slice(0, 4), ["a1", "a2", "a3", "a4"]);
+  assert.deepEqual([...order.slice(4, 6)].sort(), ["g01-c", "g01-e"]);
+  assert.deepEqual(order.slice(6), ["b1", "b2", "b3", "b4"]);
 });

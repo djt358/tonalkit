@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Assembles the kit's static site into DIR, the same layout as kit/ itself:
-#   index.html (-> app/), app/ (the kit, stand-ins included for ?dev=1), copy.json, CONSENT.md,
+#   index.html + redirect.js (-> app/), app/ (the kit, stand-ins included for ?dev=1), copy.json, CONSENT.md,
 #   deck/<id>.json.
 # Used by .github/workflows/pages.yml and by the e2e test. Missing content is allowed: the app
 # falls back to app/standin/ for copy, and refuses to run outside ?dev=1 without the real
@@ -12,7 +12,7 @@ kit=$(cd "$(dirname "$0")" && pwd)
 
 rm -rf "$out"
 mkdir -p "$out/deck"
-cp "$kit/index.html" "$out/"
+cp "$kit/index.html" "$kit/redirect.js" "$out/"
 cp -R "$kit/app" "$out/app"
 for f in copy.json CONSENT.md; do
     if [ -f "$kit/$f" ]; then

@@ -29,6 +29,7 @@ export function sessionJson(session) {
       background: session.speaker.background,
       grew_up_hearing: session.speaker.grew_up_hearing,
       reading: session.speaker.reading,
+      script: session.speaker.script,
     },
     device: { user_agent, input_sample_rate, constraints },
     clips,

@@ -44,6 +44,13 @@ export function setMeter(db) {
   for (const fill of document.querySelectorAll(".meter-fill")) fill.style.transform = `scaleX(${pct / 100})`;
 }
 
+const mark = (buttons, value) => {
+  for (const b of buttons) b.setAttribute("aria-checked", String(b.dataset.value === value));
+};
+
+/** Shows `value` as question `name`'s answer when the app picks it (not a tap). */
+export const selectChoice = (name, value) => mark(document.querySelectorAll(`#q-${name} .choice`), value);
+
 /**
  * A question answered by tapping one of its options (radio semantics, big targets).
  * @param {{name: string, label: string, options: {value: string, label: string}[], selected: string,
@@ -64,12 +71,12 @@ export function choiceGroup({ name, label, options, selected, onPick }) {
     b.setAttribute("role", "radio");
     b.textContent = text;
     b.addEventListener("click", () => {
-      for (const other of buttons) other.setAttribute("aria-checked", String(other === b));
+      mark(buttons, value);
       onPick(value);
     });
-    b.setAttribute("aria-checked", String(value === selected));
     return b;
   });
+  mark(buttons, selected);
   const list = document.createElement("div");
   list.setAttribute("role", "radiogroup");
   list.setAttribute("aria-label", label);
