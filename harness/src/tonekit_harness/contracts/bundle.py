@@ -9,6 +9,7 @@ import json
 import re
 import wave
 import zipfile
+import zlib
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
@@ -135,8 +136,15 @@ class Bundle:
             return z.read(f"clips/{card}.wav")
 
 
+# What reading a member of a damaged zip can raise: a bad CRC or header (BadZipFile), a broken or
+# cut-off compressed stream (zlib.error, EOFError), and a compression method or encryption that
+# zipfile cannot undo (NotImplementedError, RuntimeError).
+_DAMAGE = (zipfile.BadZipFile, zlib.error, EOFError, NotImplementedError, RuntimeError)
+
+
 def read_bundle(zip_path: str | Path) -> Bundle:
-    """Read and validate a bundle zip. Raises `BundleError` listing every problem."""
+    """Read and validate a bundle zip. Raises `BundleError` listing every problem, including every
+    member that is damaged (a bad CRC, a broken stream)."""
     path = Path(zip_path)
     if not path.is_file():
         raise BundleError(f"{path}: does not exist")
@@ -148,19 +156,40 @@ def read_bundle(zip_path: str | Path) -> Bundle:
         names = [i.filename for i in z.infolist() if not i.is_dir()]
         if SESSION_FILE not in names:
             raise BundleError(f"{path}: no {SESSION_FILE}")
-        session = _read_session(z, path)
-        problems = _layout_problems(names, session)
-        audio, wav_problems = _read_headers(z, names, session)
-    problems += wav_problems
+        members, damaged = _read_members(z, names)
+    if SESSION_FILE not in members:
+        raise _invalid(path, damaged)
+    session = _parse_session(members[SESSION_FILE], path)
+    audio, wav_problems = _read_headers(members, session)
+    problems = _layout_problems(names, session) + damaged + wav_problems
     if problems:
-        joined = "\n".join(problems)
-        raise BundleError(f"{path}: invalid bundle\n{indent(joined, '  ')}")
+        raise _invalid(path, problems)
     return Bundle(path=path, session=session, audio=audio)
 
 
-def _read_session(z: zipfile.ZipFile, path: Path) -> Session:
+def _invalid(path: Path, problems: list[str]) -> BundleError:
+    joined = "\n".join(problems)
+    return BundleError(f"{path}: invalid bundle\n{indent(joined, '  ')}")
+
+
+def _read_members(z: zipfile.ZipFile, names: list[str]) -> tuple[dict[str, bytes], list[str]]:
+    """The bytes of session.json and of every clip member that appears once, and a problem line for
+    each of them that cannot be read. (A repeated clip name is a layout problem, not read.)"""
+    counts = Counter(names)
+    wanted = [SESSION_FILE] + [n for n in counts if _CLIP_MEMBER.fullmatch(n) and counts[n] == 1]
+    members: dict[str, bytes] = {}
+    problems = []
+    for name in wanted:
+        try:
+            members[name] = z.read(name)
+        except _DAMAGE as e:
+            problems.append(f"{name}: damaged ({e})")
+    return members, problems
+
+
+def _parse_session(raw: bytes, path: Path) -> Session:
     try:
-        data = json.loads(z.read(SESSION_FILE).decode("utf-8"))
+        data = json.loads(raw.decode("utf-8"))
     except UnicodeDecodeError:
         raise BundleError(f"{path}: {SESSION_FILE}: not UTF-8 text") from None
     except json.JSONDecodeError as e:
@@ -189,16 +218,15 @@ def _layout_problems(names: list[str], session: Session) -> list[str]:
     return problems
 
 
-def _read_headers(
-    z: zipfile.ZipFile, names: list[str], session: Session
-) -> tuple[dict[str, WavHeader], list[str]]:
+def _read_headers(members: dict[str, bytes], session: Session) -> tuple[dict[str, WavHeader], list[str]]:
     audio: dict[str, WavHeader] = {}
     problems = []
     for clip in session.clips:
-        if names.count(clip.file) != 1:
-            continue  # missing or repeated: already reported
+        data = members.get(clip.file)
+        if data is None:
+            continue  # missing, repeated or damaged: already reported
         try:
-            audio[clip.card] = _check_wav(z.read(clip.file))
+            audio[clip.card] = _check_wav(data)
         except ValueError as e:
             problems.append(f"{clip.file}: {e}")
     return audio, problems
