@@ -215,6 +215,7 @@
               "diag_t23",
               "diag_count",
               "diag_minimal",
+              "diag_context",
               "quiet",
               "register"
             ],

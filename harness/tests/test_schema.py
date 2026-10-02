@@ -42,7 +42,9 @@ def test_the_deck_schema_carries_the_card_vocabulary(tmp_path):
     written = {p.name: p for p in schema.write_schemas(tmp_path)}
     doc = json.loads(written["deck.schema.json"].read_text(encoding="utf-8"))
     card = doc["$defs"]["Card"]["properties"]
-    assert card["set"]["enum"] == ["gate", "diag_t23", "diag_count", "diag_minimal", "quiet", "register"]
+    assert card["set"]["enum"] == [
+        "gate", "diag_t23", "diag_count", "diag_minimal", "diag_context", "quiet", "register"
+    ]
     assert card["label"]["enum"] == ["correct", "tone_error", "n/a"]
     assert card["context"]["enum"] == ["phrase", "isolated"]
 

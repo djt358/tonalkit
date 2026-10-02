@@ -14,11 +14,8 @@ from pydantic import Field, StringConstraints, ValidationError, ValidationInfo, 
 from ..manifest import Candidate, CardLabel, CardSet, Context
 from .base import StrictModel, format_validation_error
 from .deck_rules import deck_problems, fmt
+from .deck_sets import CORRECT_ONLY_SETS, PAIR_SETS
 from .pack import PackInfo, load_pack_info
-
-# Sets whose cards come in correct/tone_error pairs, so every card names its pair; the other sets
-# may use `pair` too (a quiet re-record of a gate pair), and then it must be complete as well.
-PAIR_SETS = frozenset({"gate", "diag_t23", "diag_minimal"})
 
 _ID = r"^[a-z0-9-]+$"
 _Text = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
@@ -75,6 +72,8 @@ class Card(StrictModel):
         return problems
 
     def _label_problems(self) -> list[str]:
+        if self.set in CORRECT_ONLY_SETS and self.label != "correct":
+            return [f"set {self.set!r} cards must be correct readings, not {self.label}"]
         if len(self.produced_tones) != len(self.intended.tones):
             return []
         differing = sum(p != i for p, i in zip(self.produced_tones, self.intended.tones, strict=True))

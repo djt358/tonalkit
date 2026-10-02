@@ -181,7 +181,7 @@ def test_a_gate_refuses_synthetic_corpora():
 
 def test_every_other_kind_and_split_can_be_selected():
     select = {"corpora": ["a*", "b"], "kinds": ["recorded", "public"], "splits": ["gate", "heldout", "dev", "calib"],
-              "sets": ["gate", "diag_t23", "diag_count", "diag_minimal", "register", "quiet"]}
+              "sets": ["gate", "diag_t23", "diag_count", "diag_minimal", "diag_context", "register", "quiet"]}
     assert parse_gate(gate_dict(select=select), known_metrics=METRICS).select.corpora == ["a*", "b"]
 
 
