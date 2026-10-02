@@ -9,12 +9,14 @@ def test_cmn_rules_parse_and_apply_sandhi():
     rules = lect_rules("cmn")
     syllables = rules.parse_pinyin("shuǐ guǒ")
     assert [s.tone for s in syllables] == ["3", "3"]
-    assert rules.surface_options(["3", "3"], ["shui", "guo"], "phrase") == {("2", "3")}
+    # 水果 shuí guǒ, besides the neutral-final readings of a third-tone pair (哪里, 姐姐)
+    assert rules.surface_options(["3", "3"], ["shui", "guo"], "phrase") == {("2", "3"), ("3", "5"), ("2", "5")}
 
 
 @pytest.mark.parametrize("grew_up_hearing,accent", [
     ("taiwan", "cmn-TW"), ("mainland", "cmn-standard"), ("singapore_malaysia", "cmn-standard"),
     ("hong_kong_macau", "cmn-standard"), ("other", "cmn-standard"), ("prefer_not", "cmn-standard"),
+    (None, "cmn-standard"),
 ])
 def test_cmn_default_accent(grew_up_hearing, accent):
     assert lect_rules("cmn").default_accent(grew_up_hearing) == accent

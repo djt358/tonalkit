@@ -22,7 +22,9 @@ from tonekit_harness.contracts.registry import (
     inbox_dir,
     load_corpus_file,
     load_purge_log,
+    parse_corpus,
     purge_log_path,
+    speaker_accent,
     volunteer_speaker_id,
 )
 
@@ -42,6 +44,12 @@ accent = "cmn-TW"
 split = "gate"
 sessions = ["K7Q2MD"]
 """
+
+
+def problems(data: dict, **kw) -> str:
+    with pytest.raises(ValueError) as e:  # a ValidationError is a ValueError
+        parse_corpus(data, **kw)
+    return str(e.value)
 
 
 def corpus_dict(**speaker) -> dict:
@@ -131,7 +139,7 @@ def test_speaker_fields_are_checked(field, value):
 
 @pytest.mark.parametrize("kind", ["recorded", "public", "synthetic"])
 def test_every_kind_is_accepted(kind):
-    data = corpus_dict()
+    data = corpus_dict(split=default_split(kind, "v-k7q2md"))
     data["corpus"]["kind"] = kind
     assert CorpusFile.model_validate(data).corpus.kind == kind
 
@@ -196,6 +204,65 @@ def test_invalid_toml_names_the_file(tmp_path):
         load_corpus_file(path)
 
 
+# ---- accents: optional, defaulted, checked against the pack (R82) -------------------------
+
+
+def test_a_speaker_may_leave_the_accent_out():
+    data = corpus_dict()["speaker"][0]
+    del data["accent"]
+    assert Speaker.model_validate(data).accent is None
+
+
+@pytest.mark.parametrize("hearing,expected", [
+    ("taiwan", "cmn-TW"), ("mainland", "cmn-standard"), ("singapore_malaysia", "cmn-standard"),
+    ("hong_kong_macau", "cmn-standard"), ("other", "cmn-standard"), ("prefer_not", "cmn-standard"),
+    (None, "cmn-standard"),
+])
+def test_a_speaker_without_an_accent_gets_the_default_for_where_they_grew_up_hearing(hearing, expected):
+    spk = Speaker.model_validate({"id": "dj", "grew_up_hearing": hearing, "split": "gate"})
+    assert spk.accent is None and speaker_accent(spk) == expected
+
+
+def test_a_stated_accent_beats_the_default():
+    spk = Speaker.model_validate(corpus_dict(grew_up_hearing="taiwan", accent="cmn-standard")["speaker"][0])
+    assert speaker_accent(spk) == "cmn-standard"
+
+
+def test_the_default_accent_depends_on_the_lect():
+    spk = Speaker.model_validate({"id": "dj", "split": "gate"})
+    with pytest.raises(LectError, match="'yue'"):
+        speaker_accent(spk, lect="yue")
+
+
+def test_accents_must_be_accents_of_the_pack():
+    out = problems(corpus_dict(accent="cmn-tw"))
+    assert "speaker 'v-k7q2md': accent 'cmn-tw' is not an accent of the pack (known: cmn-TW, cmn-standard)" in out
+
+
+def test_the_defaulted_accent_must_exist_in_the_pack_too(tmp_path):
+    pack = tmp_path / "pack.toml"
+    pack.write_text('[pack]\nlect = "cmn"\n[[tone]]\nid = "1"\n[[accent]]\nid = "cmn-standard"\n', encoding="utf-8")
+    data = corpus_dict(grew_up_hearing="taiwan")
+    del data["speaker"][0]["accent"]
+    out = problems(data, pack=pack)
+    assert "speaker 'v-k7q2md': default accent 'cmn-TW' is not an accent of the pack (known: cmn-standard)" in out
+    del data["speaker"][0]["grew_up_hearing"]
+    assert parse_corpus(data, pack=pack).speaker[0].accent is None
+
+
+def test_the_corpus_lect_must_be_the_packs(tmp_path):
+    pack = tmp_path / "pack.toml"
+    pack.write_text('[pack]\nlect = "yue"\n[[tone]]\nid = "1"\n[[accent]]\nid = "yue-hk"\n', encoding="utf-8")
+    assert "corpus lect 'cmn' but the pack is for 'yue'" in problems(corpus_dict(), pack=pack)
+
+
+def test_load_checks_accents_against_the_default_pack(tmp_path):
+    path = tmp_path / "corpus.toml"
+    path.write_text(EXAMPLE.replace('"cmn-TW"', '"cmn-XX"'), encoding="utf-8")
+    with pytest.raises(RegistryError, match=r"corpus\.toml.*\n.*speaker 'v-k7q2md': accent 'cmn-XX'"):
+        load_corpus_file(path)
+
+
 # ---- accents and splits -------------------------------------------------------------------
 
 
@@ -221,6 +288,11 @@ def test_volunteer_speaker_ids():
 GOLDEN_SPLITS = {
     "SSB0001": "calib", "SSB0002": "dev", "SSB0003": "dev", "SSB0004": "heldout", "SSB0005": "heldout",
     "SSB0010": "dev", "v-k7q2md": "calib", "dj": "heldout", "common-voice-zh-TW-0001": "calib",
+    # the bucket edges: sha256 buckets 59 | 60, 79 | 80 (calib | dev, dev | heldout)
+    "x72": "calib",  # bucket 59, the last calib
+    "x56": "dev",  # bucket 60, the first dev
+    "x531": "dev",  # bucket 79, the last dev
+    "x276": "heldout",  # bucket 80, the first heldout
 }
 
 
@@ -246,6 +318,51 @@ def test_recorded_speakers_default_to_gate_and_the_rest_to_the_hash():
     assert default_split("recorded", "SSB0005") == "gate"
     assert default_split("public", "SSB0005") == hashed_split("SSB0005")
     assert default_split("synthetic", "SSB0005") == hashed_split("SSB0005")
+
+
+# ---- public and synthetic corpora must store the hash split (R82) -------------------------
+
+
+def split_corpus(kind: str, split: str, speaker_id: str = "SSB0005") -> dict:
+    data = corpus_dict(id=speaker_id, sessions=[], split=split)
+    data["corpus"]["kind"] = kind
+    return data
+
+
+@pytest.mark.parametrize("kind", ["public", "synthetic"])
+def test_a_public_or_synthetic_corpus_stores_the_hash_split(kind):
+    assert hashed_split("SSB0005") == "heldout"
+    assert CorpusFile.model_validate(split_corpus(kind, "heldout")).speaker[0].split == "heldout"
+
+
+@pytest.mark.parametrize("kind", ["public", "synthetic"])
+@pytest.mark.parametrize("stored", ["gate", "calib", "dev"])
+def test_another_split_in_a_public_or_synthetic_corpus_is_refused(kind, stored):
+    out = problems(split_corpus(kind, stored))
+    assert f"speaker 'SSB0005': split {stored!r} but a {kind} corpus stores the hash split 'heldout'" in out
+
+
+def test_every_wrong_speaker_is_named():
+    data = split_corpus("public", "calib")
+    data["speaker"].append(data["speaker"][0] | {"id": "SSB0001", "split": "heldout"})  # SSB0001 is calib
+    out = problems(data)
+    assert "speaker 'SSB0005': split 'calib'" in out and "speaker 'SSB0001': split 'heldout'" in out
+
+
+@pytest.mark.parametrize("split", ["gate", "dev", "calib", "heldout"])
+def test_a_recorded_corpus_can_move_speakers_between_splits(split):
+    assert CorpusFile.model_validate(split_corpus("recorded", split)).speaker[0].split == split
+
+
+def test_load_refuses_a_public_speaker_in_the_wrong_split(tmp_path):
+    path = tmp_path / "corpus.toml"
+    path.write_text(
+        '[corpus]\nid = "aishell"\nsource = "aishell"\nkind = "public"\nlect = "cmn"\n'
+        '[[speaker]]\nid = "SSB0005"\nsplit = "calib"\n',
+        encoding="utf-8",
+    )
+    with pytest.raises(RegistryError, match=r"corpus\.toml.*\n.*speaker 'SSB0005': split 'calib'"):
+        load_corpus_file(path)
 
 
 # ---- the purge log ------------------------------------------------------------------------

@@ -1,12 +1,14 @@
 """Mandarin pinyin (cmn): tone-marked (`shuǐ`) or numbered (`shui3`) syllables into base syllable
-and cmn pack tone id ("1" to "4"; no mark or `5` is the neutral tone, "5"). This is a cmn-specific
-module: the tone ids are the cmn pack's (packs/cmn/cmn.toml)."""
+and cmn pack tone id ("1" to "4"; no mark or `5` is the neutral tone, "5"). Erhua is a final `r`,
+written after the mark or the digit (`huār`, `hua1r`). This is a cmn-specific module: the tone ids
+are the cmn pack's (packs/cmn/cmn.toml)."""
 
 from __future__ import annotations
 
 import re
 import unicodedata
 from dataclasses import dataclass
+from functools import lru_cache
 
 NEUTRAL = "5"
 
@@ -25,6 +27,12 @@ _SYLLABLE = re.compile(
 )
 
 
+# Syllables are separated by whitespace or an apostrophe: the straight one, or the U+2019 that
+# phone keyboards type in its place.
+_SEPARATORS = re.compile("[\\s'\u2019]+")
+_RUN_TOGETHER = " (several syllables run together? separate them with spaces or ')"
+
+
 class PinyinError(ValueError):
     """The pinyin could not be read; the message names the bad syllable."""
 
@@ -39,7 +47,7 @@ class Syllable:
 def parse_pinyin(text: str) -> list[Syllable]:
     """The syllables of space-separated pinyin (an apostrophe also separates), tone-marked or
     numbered. Raises `PinyinError` naming the first syllable that is not pinyin."""
-    tokens = [t for t in re.split(r"[\s']+", text) if t]
+    tokens = [t for t in _SEPARATORS.split(text) if t]
     if not tokens:
         raise PinyinError(f"no syllables in {text!r}")
     syllables = []
@@ -47,7 +55,8 @@ def parse_pinyin(text: str) -> list[Syllable]:
         try:
             syllables.append(_parse_syllable(token))
         except PinyinError as e:
-            raise PinyinError(f"bad pinyin syllable {token!r} in {text!r}: {e}") from None
+            hint = _RUN_TOGETHER if _runs_together(token) else ""
+            raise PinyinError(f"bad pinyin syllable {token!r} in {text!r}: {e}{hint}") from None
     return syllables
 
 
@@ -60,8 +69,11 @@ def _parse_syllable(token: str) -> Syllable:
     letters: list[str] = []
     marks: list[str] = []
     digits = ""
-    for ch in unicodedata.normalize("NFD", token).lower():
-        if ch in _MARK_TONES:
+    chars = unicodedata.normalize("NFD", token).lower()
+    for at, ch in enumerate(chars):
+        if ch == "r" and len(digits) == 1 and at == len(chars) - 1:
+            letters.append(ch)  # erhua after the tone digit: hua1r
+        elif ch in _MARK_TONES:
             if not letters or letters[-1] not in _VOWELS:
                 raise PinyinError("a tone mark must sit on a vowel")
             marks.append(_MARK_TONES[ch])
@@ -78,6 +90,27 @@ def _parse_syllable(token: str) -> Syllable:
         else:
             raise PinyinError(f"unexpected character {ch!r}")
     return Syllable(token, _check_base("".join(letters)), _tone(marks, digits))
+
+
+def _runs_together(token: str) -> bool:
+    """Whether the token's letters split into two or more syllables (`yibeishui`, `nihao`), so that
+    the likely mistake is a missing space."""
+    letters = "".join(c for c in unicodedata.normalize("NFD", token).lower() if "a" <= c <= "z")
+    return _splits(letters)
+
+
+@lru_cache(maxsize=None)
+def _splits(letters: str) -> bool:
+    return any(
+        _standalone(letters[:i]) and (_standalone(letters[i:]) or _splits(letters[i:]))
+        for i in range(1, len(letters))
+    )
+
+
+def _standalone(piece: str) -> bool:
+    """A syllable that can stand on its own in a run: with an initial, or starting on a, o or e (a
+    bare i, u or ü final is written yi, wu, yu)."""
+    return bool(_SYLLABLE.fullmatch(piece)) and (piece[0] in "aoe" or bool(re.match(_INITIALS, piece)))
 
 
 def _check_base(base: str) -> str:

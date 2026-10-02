@@ -56,6 +56,7 @@ def test_the_schema_tag_is_checked():
         (("speaker", "background"), "bilingual"),
         (("speaker", "grew_up_hearing"), "china"),
         (("speaker", "reading"), "pinyin"),
+        (("speaker", "script"), "kanji"),
     ],
 )
 def test_speaker_fields_are_enums(path, value):
@@ -69,6 +70,18 @@ def test_speaker_fields_are_enums(path, value):
 def test_every_background_is_accepted(background):
     speaker = dict(session_dict()["speaker"], background=background)
     assert Session.model_validate(session_dict(speaker=speaker)).speaker.background == background
+
+
+@pytest.mark.parametrize("script", ["simplified", "traditional"])
+def test_both_scripts_are_accepted(script):  # R74
+    speaker = dict(session_dict()["speaker"], script=script)
+    assert Session.model_validate(session_dict(speaker=speaker)).speaker.script == script
+
+
+def test_the_speakers_script_is_required():  # R74: the kit asks it with the reading question
+    speaker = session_dict()["speaker"]
+    del speaker["script"]
+    assert "script" in invalid(speaker=speaker)
 
 
 @pytest.mark.parametrize("where", ["top", "speaker", "device", "consent"])
@@ -101,10 +114,20 @@ def test_device_fields(field, value):
     assert field in invalid(device=device)
 
 
-def test_device_constraints_record_all_three_settings():
+@pytest.mark.parametrize("key", ["echoCancellation", "noiseSuppression", "autoGainControl"])
+def test_device_constraints_record_all_three_settings(key):  # R83: null is fine, a missing key is not
     device = session_dict()["device"]
-    device["constraints"] = {"echoCancellation": False, "noiseSuppression": False}
-    assert "autoGainControl" in invalid(device=device)
+    del device["constraints"][key]
+    assert key in invalid(device=device)
+
+
+def test_iphone_safari_constraints_pass():  # R83: Safari reports echoCancellation only
+    device = session_dict()["device"]
+    device["constraints"] = {"echoCancellation": False, "noiseSuppression": None, "autoGainControl": None}
+    constraints = Session.model_validate(session_dict(device=device)).device.constraints
+    assert (constraints.echoCancellation, constraints.noiseSuppression, constraints.autoGainControl) == (
+        False, None, None,
+    )
 
 
 def test_a_constraint_the_browser_did_not_report_may_be_null():
@@ -115,13 +138,20 @@ def test_a_constraint_the_browser_did_not_report_may_be_null():
 
 @pytest.mark.parametrize(
     "change",
-    [{"takes": 0}, {"duration_s": 0}, {"peak": 1.5}, {"peak": -0.1}, {"card": "G01"}, {"file": "clips/other.wav"},
+    [{"takes": 0}, {"duration_s": 0}, {"peak": -0.1}, {"card": "G01"}, {"file": "clips/other.wav"},
      {"file": "g01-c.wav"}],
 )
 def test_clip_entries(change):
     clips = session_dict()["clips"]
     clips[0] = dict(clips[0], **change)
     assert "clips.0" in invalid(clips=clips)
+
+
+@pytest.mark.parametrize("peak", [0, 1.0, 1.5])
+def test_a_peak_has_no_upper_cap(peak):  # intake QC flags clipping; the format only records it
+    clips = session_dict()["clips"]
+    clips[0] = dict(clips[0], peak=peak)
+    assert Session.model_validate(session_dict(clips=clips)).clips[0].peak == peak
 
 
 def test_a_card_is_listed_once():

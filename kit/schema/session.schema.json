@@ -131,7 +131,6 @@
           "type": "string"
         },
         "peak": {
-          "maximum": 1,
           "minimum": 0,
           "title": "Peak",
           "type": "number"
@@ -184,12 +183,21 @@
           ],
           "title": "Reading",
           "type": "string"
+        },
+        "script": {
+          "enum": [
+            "simplified",
+            "traditional"
+          ],
+          "title": "Script",
+          "type": "string"
         }
       },
       "required": [
         "background",
         "grew_up_hearing",
-        "reading"
+        "reading",
+        "script"
       ],
       "title": "SpeakerInfo",
       "type": "object"

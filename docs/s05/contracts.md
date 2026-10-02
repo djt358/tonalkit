@@ -66,12 +66,12 @@ Rules the model enforces:
 - `correct` ⇒ `produced_tones == intended.tones`;
 - `tone_error` ⇒ they differ in exactly one position;
 - pairs are scoped to `(set, pair)`; `pair` is required in `gate` and `diag_t23` and optional
-  elsewhere; a pair in those sets is exactly one `correct` and one `tone_error` card with equal
-  `intended.tones` (R66). `diag_minimal` cards are all `correct` readings of different words; a
-  card lists the other members of its set as `distractors`, and their `pair` (if any) only groups
-  them (R76);
+  elsewhere; a pair in those two sets is exactly one `correct` and one `tone_error` card with equal
+  `intended.tones` (R66, R81). In other sets `pair` only groups cards. `diag_minimal` cards are all `correct` readings of different words; a
+  card lists at least one other member's intended reading as a `distractor` (R76, R81);
 - `diag_context` cards contrast the citation ("solitaire", `isolated`) and sandhi (`phrase`)
-  readings of the same syllables: 一 / 一杯 / 一块, 不 / 不对, 水 / 水果 (R76);
+  readings of the same syllables: 一 / 一杯 / 一块, 不 / 不对, 水 / 水果; they are `correct`
+  readings (R76, R81);
 - `context = "phrase"` ⇒ each card's own `produced_tones` equal the sandhi of its own
   `citation_pinyin` (一, 不, T3 runs with every binary bracketing; R63–R65), and `pinyin` shows
   `produced_tones`. On a correct card that is also `intended.tones`; on an error card it is the
@@ -129,7 +129,9 @@ tonekit-<deck id>-<session code>.zip
   - `script`: `simplified` or `traditional` (R74), asked with the reading question; the kit shows
     `text_traditional` where a card has one.
 - **`device`** records the actual input rate and the constraints the browser reported, not the
-  ones requested.
+  ones requested. `constraints` always has all three keys, each `true`, `false` or `null`; `null`
+  means the browser didn't report it (iOS Safari omits `noiseSuppression` and `autoGainControl`;
+  R83).
 
 ## 3. Data root and corpus registry (`$TONEKIT_DATA`)
 
@@ -142,6 +144,7 @@ $TONEKIT_DATA/
   corpora/<corpus id>/manifest.jsonl
   corpora/<corpus id>/audio/...
   inbox/                      # bundles waiting for intake
+  stale/<corpus id>.json      # outputs made from this corpus are stale (purge, relabel); cleared by the next run
   purge-log.jsonl
 ```
 
@@ -159,7 +162,7 @@ manifest = "manifest.jsonl"
 id = "v-k7q2md"                # v-<session code> for volunteers; corpus-native ids for public sets
 background = "native"
 grew_up_hearing = "taiwan"
-accent = "cmn-TW"              # the accent this speaker is graded against (pack accent id)
+accent = "cmn-TW"              # optional: the pack accent id this speaker is graded against (R82)
 split = "gate"                 # gate | dev | calib | heldout
 sessions = ["K7Q2MD"]
 ```
@@ -167,8 +170,10 @@ sessions = ["K7Q2MD"]
 - **Splits.**
   - Volunteer and DJ speakers default to `gate`.
   - Public corpora are split by speaker, deterministically by hash: calib 60%, dev 20%,
-    heldout 20%.
-- **Default `accent`.** `taiwan` maps to `cmn-TW` and everything else to `cmn-standard`.
+    heldout 20% (R69). For `public` and `synthetic` corpora the model refuses a stored split that
+    differs from the hash; `recorded` corpora can move speakers between splits (R72, R82).
+- **Default `accent`.** When a speaker has none: `taiwan` maps to `cmn-TW` and everything else to
+  `cmn-standard`. Accents are checked against the pack's accent ids at load (R82).
 - **Refusals.**
   - Anything that fits parameters refuses `gate` and `heldout` speakers.
   - Gates refuse `synthetic` corpora, plus any source not cleared in the register for the use.

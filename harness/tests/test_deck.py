@@ -147,6 +147,35 @@ def test_a_deck_needs_cards():
     assert "at least 1 item" in problems(data)
 
 
+# ---- traditional characters (R74) ---------------------------------------------------------
+
+def zhanlanguan(**kw) -> dict:
+    return card(
+        id="z01", set="diag_count", pair=None, text="展览馆", pinyin="zhán lán guǎn",
+        citation_pinyin="zhǎn lǎn guǎn",
+        intended={"id": "z01", "tones": ["2", "2", "3"], "labels": ["zhan", "lan", "guan"]},
+        produced_tones=["2", "2", "3"],
+    ) | kw
+
+
+def test_text_traditional_is_optional():
+    assert parse_deck(deck_dict()).card[0].text_traditional is None
+
+
+def test_text_traditional_has_the_length_of_text():
+    assert parse_deck(deck_dict(zhanlanguan(text_traditional="展覽館"))).card[0].text_traditional == "展覽館"
+
+
+@pytest.mark.parametrize("traditional", ["展覽", "展覽館館"])
+def test_a_text_traditional_of_another_length_is_refused(traditional):
+    out = problems(deck_dict(zhanlanguan(text_traditional=traditional)))
+    assert f"card 'z01': text_traditional has {len(traditional)} characters but text has 3" in out
+
+
+def test_text_traditional_cannot_be_blank():
+    assert "card 'z01'.text_traditional" in problems(deck_dict(zhanlanguan(text_traditional=" ")))
+
+
 # ---- tones and lengths ----------------------------------------------------------------------
 
 def test_intended_labels_match_the_tones():
@@ -231,8 +260,8 @@ def test_a_tone_error_differs_in_exactly_one_position(produced, count):
 
 # ---- pairs ----------------------------------------------------------------------------------
 
-def test_gate_and_diag_cards_need_a_pair():
-    for set_ in ("gate", "diag_t23", "diag_minimal"):
+def test_gate_and_t23_cards_need_a_pair():  # R81: the two sets graded as pairs
+    for set_ in ("gate", "diag_t23"):
         out = problems(deck_dict(card(set=set_, pair=None), error_card(set=set_)))
         assert f"card 'g01-c': set {set_!r} needs a pair" in out
 
@@ -269,8 +298,110 @@ def test_a_pair_shares_its_intended_reading():
 
 
 def test_the_same_pair_id_in_two_sets_is_two_pairs():
-    quiet = [card(id="q-c", set="quiet"), error_card(id="q-e", set="quiet")]
-    assert len(parse_deck(deck_dict(card(), error_card(), *quiet)).card) == 4
+    t23 = [card(id="t-c", set="diag_t23"), error_card(id="t-e", set="diag_t23")]
+    assert len(parse_deck(deck_dict(card(), error_card(), *t23)).card) == 4
+    half = card(id="t-c", set="diag_t23")  # g01 is complete in gate, but not in diag_t23
+    assert "pair 'g01' (set diag_t23) has 1 correct and 0 tone_error" in problems(
+        deck_dict(card(), error_card(), half)
+    )
+
+
+@pytest.mark.parametrize("set_", ["quiet", "diag_count", "register"])
+def test_pairs_only_group_outside_the_pair_sets(set_):  # R81: no completeness check there
+    two_errors = [error_card(id=f"x{i}", set=set_) for i in range(2)]
+    assert len(parse_deck(deck_dict(*two_errors)).card) == 2
+    assert parse_deck(deck_dict(card(id="lone", set=set_))).card[0].pair == "g01"
+
+
+# ---- the diag sets (R76, R81) ---------------------------------------------------------------
+
+def mai(id_, word, tones, text, pinyin, others, **kw) -> dict:
+    """A one-syllable minimal-set card (买 mǎi / 卖 mài); `others` are its distractors' (id, tones)."""
+    return card(
+        id=id_, set="diag_minimal", pair="m01", text=text, pinyin=pinyin, citation_pinyin=pinyin,
+        context="isolated", intended={"id": word, "tones": tones, "labels": ["mai"]},
+        produced_tones=tones,
+        distractors=[{"id": i, "tones": t, "labels": ["mai"]} for i, t in others],
+    ) | kw
+
+
+def mai_pair() -> list[dict]:
+    return [
+        mai("m01-a", "mai3", ["3"], "买", "mǎi", [("mai4", ["4"])]),
+        mai("m01-b", "mai4", ["4"], "卖", "mài", [("mai3", ["3"])]),
+    ]
+
+
+def test_a_minimal_set_of_correct_cards_that_name_each_other_loads():
+    assert len(parse_deck(deck_dict(*mai_pair())).card) == 2
+
+
+def test_minimal_cards_need_no_pair():
+    cards = [c | {"pair": None} for c in mai_pair()]
+    assert len(parse_deck(deck_dict(*cards)).card) == 2
+
+
+def test_a_minimal_card_is_a_correct_reading():
+    bad = mai("m01-b", "mai4", ["4"], "卖", "mǎi", [("mai3", ["3"])], label="tone_error")
+    out = problems(deck_dict(mai_pair()[0], bad))
+    assert "card 'm01-b': set 'diag_minimal' cards must be correct readings, not tone_error" in out
+
+
+def test_a_minimal_card_needs_a_distractor():
+    out = problems(deck_dict(mai_pair()[0], mai("m01-b", "mai4", ["4"], "卖", "mài", [])))
+    assert "card 'm01-b': a diag_minimal card needs a distractor that is another diag_minimal card's intended id" in out
+
+
+def test_a_minimal_distractor_must_be_another_cards_intended_id():
+    lost = mai("m01-b", "mai4", ["4"], "卖", "mài", [("mai1", ["1"])])
+    out = problems(deck_dict(mai_pair()[0], lost))
+    assert "card 'm01-b': a diag_minimal card needs a distractor" in out and "'mai1'" in out
+
+
+def test_a_minimal_distractor_cannot_be_the_cards_own_intended_id():
+    selfish = mai("m01-b", "mai4", ["4"], "卖", "mài", [("mai4", ["4"])])
+    assert "card 'm01-b': a diag_minimal card needs a distractor" in problems(deck_dict(mai_pair()[0], selfish))
+
+
+def test_one_matching_distractor_among_others_is_enough():
+    cards = [
+        mai("m01-a", "mai3", ["3"], "买", "mǎi", [("mai4", ["4"]), ("mai1", ["1"])]),
+        mai("m01-b", "mai4", ["4"], "卖", "mài", [("mai1", ["1"]), ("mai3", ["3"])]),
+    ]
+    assert len(parse_deck(deck_dict(*cards)).card) == 2
+
+
+def test_only_diag_minimal_cards_count_as_other_members():
+    elsewhere = mai("m01-b", "mai4", ["4"], "卖", "mài", [("mai3", ["3"])], set="diag_count")
+    assert "card 'm01-a': a diag_minimal card needs a distractor" in problems(
+        deck_dict(mai_pair()[0], elsewhere)
+    )
+
+
+def context_card(id_, text, pinyin, citation, tones, context, **kw) -> dict:
+    return card(
+        id=id_, set="diag_context", pair=None, text=text, pinyin=pinyin, citation_pinyin=citation,
+        context=context, intended={"id": id_, "tones": tones, "labels": ["yi", "bei"][: len(tones)]},
+        produced_tones=tones,
+    ) | kw
+
+
+def test_a_context_set_contrasts_the_citation_and_the_sandhi_reading():  # 一 / 一杯
+    alone = context_card("c01-iso", "一", "yī", "yī", ["1"], "isolated")
+    phrase = context_card("c01-phr", "一杯", "yì bēi", "yī bēi", ["4", "1"], "phrase")
+    assert [c.context for c in parse_deck(deck_dict(alone, phrase)).card] == ["isolated", "phrase"]
+
+
+def test_a_context_card_is_a_correct_reading():
+    bad = context_card("c01-phr", "一杯", "yì bēi", "yī bēi", ["4", "1"], "phrase", label="tone_error")
+    assert "card 'c01-phr': set 'diag_context' cards must be correct readings, not tone_error" in problems(
+        deck_dict(bad)
+    )
+
+
+def test_context_cards_need_no_distractors_or_pair():
+    lone = context_card("c02", "水果", "shuí guǒ", "shuǐ guǒ", ["2", "3"], "phrase")
+    assert parse_deck(deck_dict(lone)).card[0].distractors == []
 
 
 # ---- sandhi and the displayed reading -------------------------------------------------------
@@ -328,7 +459,29 @@ def test_a_third_tone_run_read_unchanged_is_refused():
         intended={"id": "z01", "tones": ["3", "3", "3"], "labels": ["zhan", "lan", "guan"]},
         produced_tones=["3", "3", "3"],
     )
-    assert "2-2-3 or 3-2-3" in problems(deck_dict(lone))
+    out = problems(deck_dict(lone))
+    assert "phrase reading 3-3-3 is not a sandhi reading of 'zhǎn lǎn guǎn'" in out
+    assert "2-2-3" in out and "3-2-3" in out
+
+
+@pytest.mark.parametrize("tones,pinyin", [(["2", "5"], "ná li"), (["3", "5"], "nǎ li"), (["2", "3"], "ná lǐ")])
+def test_a_final_third_tone_may_be_neutral_in_the_word(tones, pinyin):  # 哪里
+    lone = card(
+        id="n01", set="diag_count", pair=None, text="哪里", pinyin=pinyin, citation_pinyin="nǎ lǐ",
+        intended={"id": "n01", "tones": tones, "labels": ["na", "li"]}, produced_tones=tones,
+    )
+    assert parse_deck(deck_dict(lone)).card[0].produced_tones == tones
+
+
+def test_an_ordinal_yi_after_di_stays_yi1():  # 第一次 dì yī cì
+    lone = card(
+        id="o01", set="diag_count", pair=None, text="第一次", pinyin="dì yī cì", citation_pinyin="dì yī cì",
+        intended={"id": "o01", "tones": ["4", "1", "4"], "labels": ["di", "yi", "ci"]},
+        produced_tones=["4", "1", "4"],
+    )
+    assert parse_deck(deck_dict(lone)).card[0].produced_tones == ["4", "1", "4"]
+    unmarked = lone | {"text": "地一次"}  # 地 is not 第: 一 is the plain 一 and goes to yí
+    assert "phrase reading 4-1-4 is not a sandhi reading" in problems(deck_dict(unmarked))
 
 
 def test_an_error_card_is_checked_against_its_own_citation_pinyin():

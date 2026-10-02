@@ -19,6 +19,7 @@ under the self-release in `RELEASE-dj.md` so that derived calibration can ship.
 | `diag_t23` | 10 pairs focused on T2/T3 confusion, plus 10 pairs with neutral-tone and half-third contexts. | 40 |
 | `diag_count` | Hesitation before the spell (嗯…), restart, extra word, dropped syllable. | 10 |
 | `diag_minimal` | 10 tone-minimal spell sets of 2 members each (买/卖, 水/睡 patterns). Record each member once; list the other member as a `distractor`. | 20 |
+| `diag_context` | Not recorded for this corpus. The volunteer deck's contrasts of the citation (`isolated`) and sandhi (`phrase`) readings of the same syllables (一 / 一杯 / 一块); all `correct`. | n/a |
 | `quiet` | 5 gate pairs re-recorded in a quiet room. | 10 |
 | `register` | 妈麻马骂 ×8 (eight clips). Eight clips make 32 syllables, above tonekit's 30-syllable cold-start threshold, so gate clips are graded with a warm register and no ×1.5 tolerance widening. | 8 |
 | `synthetic` | Not recorded. Derived clips (WORLD resynthesis) for tests and diagnostics only. | n/a |
@@ -62,7 +63,7 @@ is an error instead of silently dropped data. The schema is `manifest.Clip`.
 | `id` | string | Unique clip id, e.g. `gate-01-correct`. |
 | `path` | string | The ingested WAV, relative to `corpus/` (e.g. `dj/gate-01-correct.wav`). |
 | `speaker` | string | Speaker id, e.g. `dj`. |
-| `set` | one of `gate`, `diag_t23`, `diag_count`, `diag_minimal`, `quiet`, `register`, `synthetic` | Which recording set the clip belongs to. |
+| `set` | one of `gate`, `diag_t23`, `diag_count`, `diag_minimal`, `diag_context`, `quiet`, `register`, `synthetic` | Which recording set the clip belongs to. |
 | `pair` | string or null | Ties the correct and error clips of a pair together, e.g. `gate-01`. Null when the clip has no partner. |
 | `label` | one of `correct`, `tone_error`, `graded`, `n/a` | What was recorded relative to `intended`. `n/a` when no correct/error judgement applies. |
 | `intended` | candidate (required) | The reading the speaker was aiming for. |

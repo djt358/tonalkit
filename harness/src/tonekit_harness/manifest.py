@@ -12,7 +12,7 @@ from pydantic import Field, ValidationError, model_validator
 from .contracts.base import StrictModel
 
 # The deck's vocabulary (contracts.md section 1); a clip may also be synthetic, or `graded`.
-CardSet = Literal["gate", "diag_t23", "diag_count", "diag_minimal", "quiet", "register"]
+CardSet = Literal["gate", "diag_t23", "diag_count", "diag_minimal", "diag_context", "quiet", "register"]
 CardLabel = Literal["correct", "tone_error", "n/a"]
 Context = Literal["phrase", "isolated"]  # phrase: sandhi applies; isolated: the citation reading
 ClipSet = Literal[*get_args(CardSet), "synthetic"]

@@ -4,31 +4,29 @@ headers; decoding and quality control of the audio is intake's job."""
 
 from __future__ import annotations
 
-import io
 import json
 import re
-import wave
 import zipfile
+import zlib
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 from textwrap import indent
-from typing import Annotated, Literal
+from typing import Literal
 
 from pydantic import AwareDatetime, Field, ValidationError, model_validator
 
 from .base import StrictModel, format_validation_error
-from .enums import Background, GrewUpHearing
+from .enums import Background, GrewUpHearing, Script
+from .ids import CARD_ID_CHARS, CARD_ID_PATTERN, CardId
+from .wav_check import WavHeader, check_wav
 
 # Six characters from this alphabet: A-Z and 2-9 without 0, O, 1 and I.
 SESSION_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 SESSION_CODE_PATTERN = r"^[A-HJ-NP-Z2-9]{6}$"
 SESSION_FILE = "session.json"
-CLIP_RATE, CLIP_CHANNELS, CLIP_SAMPLE_WIDTH = 16_000, 1, 2  # Hz, mono, 16-bit bytes
 
-_CARD_ID = r"^[a-z0-9-]+$"
-CardId = Annotated[str, Field(pattern=_CARD_ID)]
-_CLIP_MEMBER = re.compile(r"clips/[a-z0-9-]+\.wav")
+_CLIP_MEMBER = re.compile(rf"clips/{CARD_ID_CHARS}\.wav")
 
 
 class BundleError(ValueError):
@@ -36,7 +34,7 @@ class BundleError(ValueError):
 
 
 class DeckRef(StrictModel):
-    id: str = Field(pattern=_CARD_ID)
+    id: str = Field(pattern=CARD_ID_PATTERN)  # the deck id
     sha256: str = Field(pattern=r"^[0-9a-f]{64}$")  # of the deck file the kit loaded
 
 
@@ -49,6 +47,7 @@ class SpeakerInfo(StrictModel):
     background: Background
     grew_up_hearing: GrewUpHearing
     reading: Literal["hanzi", "hanzi+pinyin"]
+    script: Script  # the kit shows `text_traditional` where a card has one (R74)
 
 
 class DeviceConstraints(StrictModel):
@@ -70,7 +69,7 @@ class SessionClip(StrictModel):
     file: str
     takes: int = Field(ge=1)
     duration_s: float = Field(gt=0)
-    peak: float = Field(ge=0, le=1)
+    peak: float = Field(ge=0)  # no cap: intake QC flags clipping, the format only records it
 
     @model_validator(mode="after")
     def _file_is_named_after_the_card(self) -> SessionClip:
@@ -109,18 +108,6 @@ class Session(StrictModel):
 
 
 @dataclass(frozen=True)
-class WavHeader:
-    sample_rate: int
-    channels: int
-    sample_width: int  # bytes per sample
-    frames: int
-
-    @property
-    def duration_s(self) -> float:
-        return self.frames / self.sample_rate
-
-
-@dataclass(frozen=True)
 class Bundle:
     path: Path
     session: Session
@@ -134,8 +121,15 @@ class Bundle:
             return z.read(f"clips/{card}.wav")
 
 
+# What reading a member of a damaged zip can raise: a bad CRC or header (BadZipFile), a broken or
+# cut-off compressed stream (zlib.error, EOFError), and a compression method or encryption that
+# zipfile cannot undo (NotImplementedError, RuntimeError).
+_DAMAGE = (zipfile.BadZipFile, zlib.error, EOFError, NotImplementedError, RuntimeError)
+
+
 def read_bundle(zip_path: str | Path) -> Bundle:
-    """Read and validate a bundle zip. Raises `BundleError` listing every problem."""
+    """Read and validate a bundle zip. Raises `BundleError` listing every problem, including every
+    member that is damaged (a bad CRC, a broken stream)."""
     path = Path(zip_path)
     if not path.is_file():
         raise BundleError(f"{path}: does not exist")
@@ -147,19 +141,40 @@ def read_bundle(zip_path: str | Path) -> Bundle:
         names = [i.filename for i in z.infolist() if not i.is_dir()]
         if SESSION_FILE not in names:
             raise BundleError(f"{path}: no {SESSION_FILE}")
-        session = _read_session(z, path)
-        problems = _layout_problems(names, session)
-        audio, wav_problems = _read_headers(z, names, session)
-    problems += wav_problems
+        members, damaged = _read_members(z, names)
+    if SESSION_FILE not in members:
+        raise _invalid(path, damaged)
+    session = _parse_session(members[SESSION_FILE], path)
+    audio, wav_problems = _read_headers(members, session)
+    problems = _layout_problems(names, session) + damaged + wav_problems
     if problems:
-        joined = "\n".join(problems)
-        raise BundleError(f"{path}: invalid bundle\n{indent(joined, '  ')}")
+        raise _invalid(path, problems)
     return Bundle(path=path, session=session, audio=audio)
 
 
-def _read_session(z: zipfile.ZipFile, path: Path) -> Session:
+def _invalid(path: Path, problems: list[str]) -> BundleError:
+    joined = "\n".join(problems)
+    return BundleError(f"{path}: invalid bundle\n{indent(joined, '  ')}")
+
+
+def _read_members(z: zipfile.ZipFile, names: list[str]) -> tuple[dict[str, bytes], list[str]]:
+    """The bytes of session.json and of every clip member that appears once, and a problem line for
+    each of them that cannot be read. (A repeated clip name is a layout problem, not read.)"""
+    counts = Counter(names)
+    wanted = [SESSION_FILE] + [n for n in counts if _CLIP_MEMBER.fullmatch(n) and counts[n] == 1]
+    members: dict[str, bytes] = {}
+    problems = []
+    for name in wanted:
+        try:
+            members[name] = z.read(name)
+        except _DAMAGE as e:
+            problems.append(f"{name}: damaged ({e})")
+    return members, problems
+
+
+def _parse_session(raw: bytes, path: Path) -> Session:
     try:
-        data = json.loads(z.read(SESSION_FILE).decode("utf-8"))
+        data = json.loads(raw.decode("utf-8"))
     except UnicodeDecodeError:
         raise BundleError(f"{path}: {SESSION_FILE}: not UTF-8 text") from None
     except json.JSONDecodeError as e:
@@ -188,37 +203,15 @@ def _layout_problems(names: list[str], session: Session) -> list[str]:
     return problems
 
 
-def _read_headers(
-    z: zipfile.ZipFile, names: list[str], session: Session
-) -> tuple[dict[str, WavHeader], list[str]]:
+def _read_headers(members: dict[str, bytes], session: Session) -> tuple[dict[str, WavHeader], list[str]]:
     audio: dict[str, WavHeader] = {}
     problems = []
     for clip in session.clips:
-        if names.count(clip.file) != 1:
-            continue  # missing or repeated: already reported
+        data = members.get(clip.file)
+        if data is None:
+            continue  # missing, repeated or damaged: already reported
         try:
-            audio[clip.card] = _check_wav(z.read(clip.file))
+            audio[clip.card] = check_wav(data)
         except ValueError as e:
             problems.append(f"{clip.file}: {e}")
     return audio, problems
-
-
-def _check_wav(data: bytes) -> WavHeader:
-    """The header of a 16 kHz mono 16-bit PCM WAV with all its audio, else ValueError."""
-    try:
-        with wave.open(io.BytesIO(data), "rb") as w:
-            header = WavHeader(w.getframerate(), w.getnchannels(), w.getsampwidth(), w.getnframes())
-            whole = len(w.readframes(header.frames)) == header.frames * header.channels * header.sample_width
-    except (wave.Error, EOFError) as e:
-        raise ValueError(f"not a PCM WAV ({e})") from None
-    if (header.sample_rate, header.channels, header.sample_width) != (CLIP_RATE, CLIP_CHANNELS, CLIP_SAMPLE_WIDTH):
-        s = "s" if header.channels != 1 else ""
-        raise ValueError(
-            f"is {header.sample_rate} Hz, {header.channels} channel{s}, {8 * header.sample_width}-bit; "
-            "need 16000 Hz, 1 channel, 16-bit"
-        )
-    if header.frames == 0:
-        raise ValueError("has no audio")
-    if not whole:
-        raise ValueError("truncated: the file ends before the audio the header promises")
-    return header

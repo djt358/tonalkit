@@ -20,11 +20,11 @@ class LectRules:
     parse_pinyin: Callable[[str], Sequence[Syllable]]
     # (citation tones, base syllables, context, text) -> acceptable surface tone sequences
     surface_options: Callable[..., set[tuple[str, ...]]]
-    # `grew_up_hearing` -> the pack accent id a speaker is graded against
-    default_accent: Callable[[str], str]
+    # `grew_up_hearing` (None if unknown) -> the pack accent id a speaker is graded against
+    default_accent: Callable[[str | None], str]
 
 
-def _cmn_default_accent(grew_up_hearing: str) -> str:
+def _cmn_default_accent(grew_up_hearing: str | None) -> str:
     return "cmn-TW" if grew_up_hearing == "taiwan" else "cmn-standard"
 
 

@@ -36,15 +36,21 @@ def test_the_session_schema_carries_the_contract(tmp_path):
     assert set(doc["required"]) >= {"schema", "deck", "session", "consent", "speaker", "device", "clips"}
     speaker = doc["$defs"]["SpeakerInfo"]["properties"]
     assert speaker["background"]["enum"] == ["native", "heritage", "learner", "prefer_not"]
+    assert speaker["script"]["enum"] == ["simplified", "traditional"]
+    assert "script" in doc["$defs"]["SpeakerInfo"]["required"]
 
 
 def test_the_deck_schema_carries_the_card_vocabulary(tmp_path):
     written = {p.name: p for p in schema.write_schemas(tmp_path)}
     doc = json.loads(written["deck.schema.json"].read_text(encoding="utf-8"))
     card = doc["$defs"]["Card"]["properties"]
-    assert card["set"]["enum"] == ["gate", "diag_t23", "diag_count", "diag_minimal", "quiet", "register"]
+    assert card["set"]["enum"] == [
+        "gate", "diag_t23", "diag_count", "diag_minimal", "diag_context", "quiet", "register"
+    ]
     assert card["label"]["enum"] == ["correct", "tone_error", "n/a"]
     assert card["context"]["enum"] == ["phrase", "isolated"]
+    assert {"type": "null"} in card["text_traditional"]["anyOf"]  # optional (R74)
+    assert "text_traditional" not in doc["$defs"]["Card"]["required"]
 
 
 def test_the_committed_schemas_are_current(tmp_path):
