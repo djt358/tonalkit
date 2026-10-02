@@ -106,13 +106,19 @@ made on the volunteers' own phones, with the consent text in [`kit/CONSENT.md`](
   consent and the guide to the mechanism that keeps it and the test that would fail if it broke.
 - **Where the data lives.** Under `$TONEKIT_DATA`, never in the repository: audio is blocked from
   git (`scripts/check-no-audio.sh`), and speakers are known only by pseudonymous session codes and
-  enum-only background answers.
-- **What it may be used for.** The row's `shipped_weights_training` is `verify`: S1 gate and
-  evaluation only. Moving volunteer speakers into calibration waits for DJ to confirm the consent
-  wording, and a `PROVENANCE.toml` listing `volunteer-corpus` as a source then needs a
-  `[[signoff]]` like any other `verify` source.
-- **Deletion.** A volunteer's session code is the only key. `tkh purge --session CODE` removes
-  that session and logs it (`docs/s05/contracts.md` §6).
+  enum-only background answers. DJ analyzes it on DJ's own computers and in a private cloud
+  workspace used with an AI assistant, which only DJ's account can open (R78).
+- **What it may be used for.** Testing and tuning tonekit and Bendy, nothing else (R72). The row's
+  `shipped_weights_training` is `allow` (R79), so the S1 gate can issue a verdict on volunteer
+  clips, and a calibration fitted on them passes `tkh provenance` without a `[[signoff]]`. Such a
+  pack lists `volunteer-corpus` as a `[[source]]`; nothing yet requires a fitted pack to list its
+  sources at all. Volunteer speakers stay in the `gate` split, which fitting refuses, until DJ moves
+  consenting speakers into `calib` (`docs/s05/contracts.md` §3). Their audio is never resynthesised:
+  `tkh synth` and `tkh adversary` refuse any clip whose source is `volunteer-corpus` (R80).
+- **Deletion.** A volunteer's session code is the only key. `tkh purge --session CODE` (P5; it
+  doesn't exist yet) will remove that session's audio, answers and everything intake kept for it,
+  log the purge, and mark outputs fitted on the corpus stale (`docs/s05/contracts.md` §6). DJ then
+  deletes the original zip and any copy placed in the private workspace.
 
 ## Synthetic audio never fits shipped calibration
 

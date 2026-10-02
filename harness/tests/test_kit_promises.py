@@ -1,30 +1,25 @@
 """kit/PROMISES.md keeps the promises honest: every quotation is word for word in the file it names, every
-"never" in the consent has a row, every mechanism has a status, and the checks that are already
-buildable (the register row, the sign-off rule, no network client in the harness) are tests here."""
+"never" in the consent has a row, every mechanism has a status, and the files it points at exist. The
+checks that are buildable now live beside it: the volunteer register row and sign-offs in
+test_kit_register.py, the no-network-client scan in test_kit_network.py."""
 
-import ast
-import csv
 import re
-from pathlib import Path
 
-import pytest
 from kit_support import CONSENT, GUIDE, KIT, PROMISES, REPO, copy, text
 
-from tonekit_harness import provenance
-
-DATA_REGISTER = REPO / "data-register.csv"
-HARNESS_SRC = REPO / "harness" / "src"
 HEADER = ["Promise", "Where we say it", "Mechanism that keeps it", "Test"]
 QUOTED = re.compile(r'(CONSENT|GUIDE|copy [\w.]+) "([^"]+)"')
-STATUS = re.compile(r"\(built(?:, as policy)?\)|\b(?:P4|P5|C0|E1) \(pending\)|DJ \(operational\)")
+STATUS = re.compile(r"\(built(?:, as policy)?\)|\b(?:P4|C0|E1) \(built\)|\b(?:P4|P5) \(pending\)|DJ \(operational\)")
 
-# Imports that would let the harness send audio somewhere. A tripwire, not a proof: it reads import
-# statements only. Whoever needs one for a good reason changes this list on purpose (and the promise).
-NETWORK_MODULES = (
-    "requests", "httpx", "aiohttp", "urllib3", "urllib.request", "socket", "http.client", "http.server", "ftplib",
-    "smtplib", "poplib", "imaplib", "telnetlib", "xmlrpc", "websockets", "paramiko", "grpc", "boto3", "botocore",
-    "google.cloud", "azure", "tencentcloud", "huggingface_hub",
-)  # fmt: skip
+# Files a task built on its own branch arrive with its merge. Until then they are not here to check:
+# a path (or test name) is exempt only while the marker that its branch is merged is missing.
+ARRIVES_WITH = {
+    "kit/app/": "kit/app",
+    "kit/tests/": "kit/app",
+    "test_bundle.py": "harness/src/tonekit_harness/contracts",
+    "test_registry_refusals.py": "harness/src/tonekit_harness/registry",
+    "test_registry_stale.py": "harness/src/tonekit_harness/registry",
+}
 
 
 def table() -> list[list[str]]:
@@ -48,27 +43,13 @@ def quotations() -> list[tuple[str, str]]:
 
 
 def never_bullets() -> list[str]:
-    section = text(CONSENT).split("## What we will never do\n", 1)[1].split("\n## ", 1)[0]
+    section = text(CONSENT).split("## What DJ will never do\n", 1)[1].split("\n## ", 1)[0]
     return [line.removeprefix("- ") for line in section.splitlines() if line.startswith("- ")]
 
 
-def network_imports(root: Path) -> dict[str, list[str]]:
-    found: dict[str, list[str]] = {}
-    for path in sorted(root.rglob("*.py")):
-        names = set()
-        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
-            if isinstance(node, ast.Import):
-                names.update(alias.name for alias in node.names)
-            elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
-                names.add(node.module)
-                names.update(f"{node.module}.{alias.name}" for alias in node.names)
-        bad = sorted(n for n in names if any(n == m or n.startswith(m + ".") for m in NETWORK_MODULES))
-        if bad:
-            found[path.relative_to(root).as_posix()] = bad
-    return found
-
-
-# --- the register is complete and its words are the real words --------------------------------------
+def not_here_yet(name: str) -> bool:
+    """True for a file that arrives with a branch that isn't merged here yet."""
+    return any(name.startswith(key) and not (REPO / marker).exists() for key, marker in ARRIVES_WITH.items())
 
 
 def test_every_row_has_all_four_cells_filled_in():
@@ -104,58 +85,13 @@ def test_every_mechanism_and_every_test_says_whether_it_is_built():
 def test_the_files_the_register_points_at_exist():
     body = text(PROMISES)
     for path in re.findall(r"`((?:scripts|harness|docs|kit|packs)/[\w./-]+)`", body):
-        assert (REPO / path).exists(), path
+        assert not_here_yet(path) or (REPO / path).exists(), path
     for name in re.findall(r"`(test_\w+\.py)`", body):
-        assert (REPO / "harness" / "tests" / name).exists(), name
+        assert not_here_yet(name) or (REPO / "harness" / "tests" / name).exists(), name
     for target in re.findall(r"\]\(([\w./-]+)\)", body):
         assert (KIT / target).exists(), target
 
 
-# --- the volunteer recordings are in the data register, and cannot fit anything unsigned ---------------
-
-
-def test_volunteer_recordings_are_registered_for_evaluation_only_until_dj_signs_off():
-    with DATA_REGISTER.open(newline="", encoding="utf-8") as f:
-        row = {r["id"]: r for r in csv.DictReader(f)}["volunteer-corpus"]
-    assert row["kind"] == "dataset"
-    assert row["shipped_weights_training"] == "verify"
-    assert "calibration only after DJ confirms consent wording" in row["role"]
-    assert "kit/CONSENT.md" in row["license"] and "kit/PROMISES.md" in row["notes"]
-
-
-def test_a_pack_cannot_list_volunteer_recordings_as_a_source_without_a_signoff(tmp_path):
-    manifest = tmp_path / "PROVENANCE.toml"
-    manifest.write_text('artifact = "x"\nnote = "t"\n[[source]]\nid = "volunteer-corpus"\n', encoding="utf-8")
-    (violation,) = provenance.check(DATA_REGISTER, [manifest])
-    assert "source 'volunteer-corpus' is verify and has no matching [[signoff]]" in violation
-
-
-def test_a_signoff_by_dj_is_what_lets_it_through(tmp_path):
-    manifest = tmp_path / "PROVENANCE.toml"
-    manifest.write_text(
-        'artifact = "x"\nnote = "t"\n[[source]]\nid = "volunteer-corpus"\n'
-        '[[signoff]]\nid = "volunteer-corpus"\nby = "DJ"\n',
-        encoding="utf-8",
-    )
-    assert provenance.check(DATA_REGISTER, [manifest]) == []
-
-
-# --- "we never send them anywhere": the harness has no way to ---------------------------------------
-
-
-def test_the_harness_imports_no_network_client():
-    assert network_imports(HARNESS_SRC) == {}
-
-
-@pytest.mark.parametrize(
-    "line",
-    ["import requests", "from urllib import request", "from urllib.request import urlopen", "import socket"],
-)
-def test_the_scan_sees_a_network_import(tmp_path, line):
-    (tmp_path / "upload.py").write_text(line + "\n", encoding="utf-8")
-    assert list(network_imports(tmp_path)) == ["upload.py"]
-
-
-def test_the_scan_leaves_ordinary_imports_alone(tmp_path):
-    (tmp_path / "fine.py").write_text("import urllib.parse\nfrom pathlib import Path\nimport json\n", encoding="utf-8")
-    assert network_imports(tmp_path) == {}
+def test_the_files_that_arrive_with_a_branch_are_checked_as_soon_as_it_is_merged():
+    assert not_here_yet("kit/app/export.js") == (not (REPO / "kit" / "app").exists())
+    assert not not_here_yet("harness/src/tonekit_harness/source.py")  # ours: always checked

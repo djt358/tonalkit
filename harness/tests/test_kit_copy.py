@@ -9,16 +9,17 @@ from kit_support import copy, volunteer_text
 
 SCREENS = {
     "welcome": ["title", "body", "start"],
-    "consent": ["title", "agree", "decline"],
+    "consent": ["title", "agree", "decline", "declined"],
     "background": ["title", "intro", "next"],
     "mic": ["title", "body", "allow", "checking", "level_ok", "level_low", "noisy", "continue"],
     "card": [
         "progress", "record", "stop", "play", "redo", "skip", "next", "note", "isolated_hint", "phrase_hint", "saved",
+        "finish_early", "finish_early_confirm",
     ],
     "pause": ["title", "body", "resume"],
-    "done": ["title", "body", "code_label", "code_note"],
-    "share": ["button", "fallback", "done"],
-    "error": ["mic_blocked", "unsupported", "storage", "generic"],
+    "done": ["title", "body", "code_label", "code_note", "delete", "delete_confirm", "deleted"],
+    "share": ["button", "again", "fallback", "done"],
+    "error": ["mic_blocked", "unsupported", "in_app_browser", "storage", "generic"],
 }  # fmt: skip
 
 # The session enums (contracts section 2). `reading` values use "+" in the bundle and "_" in keys.
@@ -26,7 +27,10 @@ ENUMS = {
     "background": ["native", "heritage", "learner", "prefer_not"],
     "grew_up_hearing": ["mainland", "taiwan", "singapore_malaysia", "hong_kong_macau", "other", "prefer_not"],
     "reading": ["hanzi", "hanzi_pinyin"],
+    "script": ["simplified", "traditional"],  # R74
 }
+BLANK_ALLOWED = {"card.phrase_hint"}  # a card with nothing to add shows no hint (the kit hides an empty one)
+NO_DECLINE = ["reading", "script"]  # how the cards look, so the bundle enums have no prefer_not
 
 
 def expected_keys() -> set[str]:
@@ -49,7 +53,8 @@ def test_the_keys_are_exactly_the_contract():
 
 def test_every_value_is_a_plain_one_line_string():
     for key, value in copy().items():
-        assert isinstance(value, str) and value.strip() == value and value, key
+        assert isinstance(value, str) and value.strip() == value, key
+        assert value or key in BLANK_ALLOWED, f"{key} is empty"
         assert "\n" not in value, key
 
 
@@ -75,9 +80,49 @@ def test_prefer_not_to_say_reads_the_same_on_both_questions():
     assert values["background.background.prefer_not"] == "Prefer not to say"
 
 
-def test_the_reading_question_has_no_way_to_decline():
-    # `reading` is how the cards are shown, so the bundle enum has no prefer_not (contracts section 2).
-    assert not any(key.startswith("background.reading.prefer") for key in copy())
+@pytest.mark.parametrize("field", NO_DECLINE)
+def test_the_questions_about_how_the_cards_look_have_no_way_to_decline(field):
+    # They are display settings, so their bundle enums have no prefer_not (contracts section 2).
+    assert not any(key.startswith(f"background.{field}.prefer") for key in copy())
+
+
+def test_the_script_question_shows_each_script_in_its_own_characters():
+    values = copy()
+    assert values["background.script.label"] == "Which characters do you read more easily?"
+    assert values["background.script.simplified"] == "Simplified (简体)"
+    assert values["background.script.traditional"] == "Traditional (繁體)"
+
+
+def test_the_intro_says_which_questions_can_be_declined_and_gives_no_count():
+    intro = copy()["background.intro"]
+    assert "Prefer not to say on the first two" in intro
+    assert not re.search(r"\b(two|three|four|2|3|4) (quick )?questions", intro, re.I)
+
+
+def test_the_heritage_option_describes_a_childhood_not_an_ability():
+    heritage = copy()["background.background.heritage"]
+    assert heritage.startswith("Heritage speaker: I grew up with Mandarin at home")
+    assert not re.search(r"strongest|fluent|not very|broken|bad", heritage, re.I)
+
+
+def test_deleting_from_the_phone_says_it_cannot_be_undone_and_what_dj_keeps():
+    confirm = copy()["done.delete_confirm"]
+    assert "can't be undone" in confirm
+    assert "DJ keeps what you already sent" in confirm and "send DJ your code" in confirm
+    assert "\n" not in confirm  # it is the text of a native confirm() box
+
+
+def test_every_way_to_stop_before_consent_says_how_to_open_safari():
+    values = copy()
+    for key in ("error.in_app_browser", "error.unsupported"):
+        assert "Open in Safari" in values[key], key
+    assert "WeChat" not in values["error.in_app_browser"]  # the screen names no app; it works for any of them
+
+
+def test_the_microphone_help_names_the_settings_path_and_no_glyph():
+    blocked = copy()["error.mic_blocked"]
+    assert "Open Settings, tap Apps, then Safari, then Microphone, and choose Allow." in blocked
+    assert "aA" not in blocked
 
 
 @pytest.mark.parametrize("word", JARGON)

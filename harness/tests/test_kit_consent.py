@@ -6,8 +6,8 @@ import re
 from kit_support import CONSENT, GUIDE, copy, text
 
 VERSION_LINE = "<!-- consent: v1 -->"
-SECTIONS = ["What we record", "Why", "Who gets it", "What we will never do", "How long we keep it", "Your choice"]
-MAX_CONSENT_WORDS = 300
+SECTIONS = ["What DJ records", "Why", "Who gets it", "What DJ will never do", "How long DJ keeps it", "Your choice"]
+MAX_CONSENT_WORDS = 330  # R72 and R78 need the words; every word still has to earn its place
 MAX_GUIDE_WORDS = 250
 
 HEADING = re.compile(r"## \S.*")
@@ -28,7 +28,7 @@ def test_the_first_line_is_the_version_the_kit_reads():
     assert text(CONSENT).split("\n", 1)[0] == VERSION_LINE
 
 
-def test_the_consent_fits_in_300_words():
+def test_the_consent_fits_in_330_words():
     assert spoken_words(body()) <= MAX_CONSENT_WORDS
 
 
@@ -65,3 +65,20 @@ def test_the_guide_has_a_place_for_the_link_and_a_sign_off():
     lines = text(GUIDE).strip().splitlines()
     assert "[paste the link here]" in lines
     assert lines[-1] == "DJ"
+
+
+def test_the_consent_says_what_dj_decided_about_use_place_and_deletion():
+    consent = body()
+    assert "test the checker on real voices and tune its settings" in consent  # R72: testing and tuning
+    assert "DJ may publish overall results and the tuned settings, never your recordings." in consent
+    assert "Anthropic's Claude" in consent and "which only DJ's account can open" in consent  # R78
+    assert "The private workspace above is the one exception." in consent
+    assert "(characters or pinyin, simplified or traditional)" in consent  # R74
+    assert "redoes anything not yet released without you" in consent  # R72
+    assert "Results and settings already released can't be pulled back, but they contain no audio." in consent
+
+
+def test_the_consent_says_dj_every_time_and_never_we_us_or_i():
+    consent = body().replace(f"**{copy()['consent.agree']}**", "")  # the button's own words are the reader's
+    assert not re.search(r"\b(we|us|our|i|me|my)\b", consent, re.I), "DJ is named every time, never 'we' or 'I'"
+    assert "Nobody" not in consent
