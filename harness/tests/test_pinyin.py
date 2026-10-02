@@ -72,6 +72,45 @@ def test_real_syllables_parse(written, base):
     assert [s.base for s in parse_pinyin(written)] == [base]
 
 
+@pytest.mark.parametrize("written,base,tone", [
+    ("hua1r", "huar", "1"), ("dian3r", "dianr", "3"), ("HUA1R", "huar", "1"), ("nar3", "nar", "3"),
+    ("huār", "huar", "1"), ("diǎnr", "dianr", "3"), ("huar", "huar", "5"), ("er2", "er", "2"),
+])
+def test_erhua_is_accepted_marked_or_numbered(written, base, tone):
+    assert pairs(written) == [(base, tone)]
+
+
+def test_a_numbered_erhua_phrase():  # 一点儿 yì diǎnr, written with digits
+    assert pairs("yi4 dian3r") == [("yi", "4"), ("dianr", "3")]
+
+
+@pytest.mark.parametrize("bad", ["hua1rr", "hua1rx", "hua1r2", "r1"])
+def test_only_a_final_r_may_follow_the_tone_digit(bad):
+    with pytest.raises(PinyinError, match=f"'{bad}'"):
+        parse_pinyin(bad)
+
+
+@pytest.mark.parametrize("apostrophe", ["'", "\u2019"])
+def test_straight_and_curly_apostrophes_separate_syllables(apostrophe):  # phones turn ' into U+2019
+    assert pairs(f"xī{apostrophe}ān") == [("xi", "1"), ("an", "1")]
+    assert pairs(f"xi1{apostrophe}an1") == [("xi", "1"), ("an", "1")]
+
+
+@pytest.mark.parametrize("run_together", ["yìbēishuǐ", "yi4bei1shui3", "yibeishui", "nihao", "wǒmen"])
+def test_run_together_syllables_suggest_spaces_or_an_apostrophe(run_together):
+    with pytest.raises(PinyinError) as e:
+        parse_pinyin(run_together)
+    assert repr(run_together) in str(e.value)
+    assert "several syllables run together" in str(e.value) and "spaces or '" in str(e.value)
+
+
+@pytest.mark.parametrize("typo", ["shuuǐ", "xyz", "bcd", "shui33", "sh3ui", "shuǐ,"])
+def test_other_errors_do_not_suggest_spaces(typo):
+    with pytest.raises(PinyinError) as e:
+        parse_pinyin(typo)
+    assert "run together" not in str(e.value)
+
+
 @pytest.mark.parametrize("bad", ["shuuǐ", "xyz", "bcd", "yìbēishuǐ", "shui33"])
 def test_not_a_syllable_names_the_syllable(bad):
     with pytest.raises(PinyinError) as e:
