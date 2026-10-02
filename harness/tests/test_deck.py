@@ -147,6 +147,35 @@ def test_a_deck_needs_cards():
     assert "at least 1 item" in problems(data)
 
 
+# ---- traditional characters (R74) ---------------------------------------------------------
+
+def zhanlanguan(**kw) -> dict:
+    return card(
+        id="z01", set="diag_count", pair=None, text="展览馆", pinyin="zhán lán guǎn",
+        citation_pinyin="zhǎn lǎn guǎn",
+        intended={"id": "z01", "tones": ["2", "2", "3"], "labels": ["zhan", "lan", "guan"]},
+        produced_tones=["2", "2", "3"],
+    ) | kw
+
+
+def test_text_traditional_is_optional():
+    assert parse_deck(deck_dict()).card[0].text_traditional is None
+
+
+def test_text_traditional_has_the_length_of_text():
+    assert parse_deck(deck_dict(zhanlanguan(text_traditional="展覽館"))).card[0].text_traditional == "展覽館"
+
+
+@pytest.mark.parametrize("traditional", ["展覽", "展覽館館"])
+def test_a_text_traditional_of_another_length_is_refused(traditional):
+    out = problems(deck_dict(zhanlanguan(text_traditional=traditional)))
+    assert f"card 'z01': text_traditional has {len(traditional)} characters but text has 3" in out
+
+
+def test_text_traditional_cannot_be_blank():
+    assert "card 'z01'.text_traditional" in problems(deck_dict(zhanlanguan(text_traditional=" ")))
+
+
 # ---- tones and lengths ----------------------------------------------------------------------
 
 def test_intended_labels_match_the_tones():

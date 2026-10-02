@@ -37,7 +37,8 @@ class Card(StrictModel):
     set: CardSet
     pair: str | None = Field(default=None, pattern=_ID)
     label: CardLabel
-    text: _Text  # what the card shows
+    text: _Text  # what the card shows (simplified)
+    text_traditional: _Text | None = None  # shown instead when the speaker reads traditional (R74)
     pinyin: _Text  # the surface (spoken) form, sandhi applied
     citation_pinyin: _Text  # the dictionary form, for the sandhi check
     context: Context
@@ -64,6 +65,11 @@ class Card(StrictModel):
             if len(c.tones) != len(c.labels):
                 name = "intended" if c is self.intended else f"distractor {c.id!r}"
                 problems.append(f"{name} has {len(c.tones)} tones but {len(c.labels)} labels")
+        if self.text_traditional is not None and len(self.text_traditional) != len(self.text):
+            problems.append(
+                f"text_traditional has {len(self.text_traditional)} characters "
+                f"but text has {len(self.text)}"
+            )
         if len(self.produced_tones) != len(self.intended.tones):
             problems.append(
                 f"produced_tones has {len(self.produced_tones)} tones "

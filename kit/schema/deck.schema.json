@@ -127,6 +127,19 @@
           "minLength": 1,
           "title": "Text",
           "type": "string"
+        },
+        "text_traditional": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Text Traditional"
         }
       },
       "required": [

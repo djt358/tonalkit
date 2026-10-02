@@ -18,7 +18,7 @@ from typing import Annotated, Literal
 from pydantic import AwareDatetime, Field, ValidationError, model_validator
 
 from .base import StrictModel, format_validation_error
-from .enums import Background, GrewUpHearing
+from .enums import Background, GrewUpHearing, Script
 
 # Six characters from this alphabet: A-Z and 2-9 without 0, O, 1 and I.
 SESSION_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
@@ -49,6 +49,7 @@ class SpeakerInfo(StrictModel):
     background: Background
     grew_up_hearing: GrewUpHearing
     reading: Literal["hanzi", "hanzi+pinyin"]
+    script: Script  # the kit shows `text_traditional` where a card has one (R74)
 
 
 class DeviceConstraints(StrictModel):
@@ -70,7 +71,7 @@ class SessionClip(StrictModel):
     file: str
     takes: int = Field(ge=1)
     duration_s: float = Field(gt=0)
-    peak: float = Field(ge=0, le=1)
+    peak: float = Field(ge=0)  # no cap: intake QC flags clipping, the format only records it
 
     @model_validator(mode="after")
     def _file_is_named_after_the_card(self) -> SessionClip:

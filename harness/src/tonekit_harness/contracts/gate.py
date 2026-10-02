@@ -52,8 +52,9 @@ class Thresholds(StrictModel):
 
 class Criterion(StrictModel):
     metric: str = Field(min_length=1)
-    min: float | None = None
-    max: float | None = None
+    # Finite only: a nan bound compares false, so a gate with one would pass or fail by accident.
+    min: float | None = Field(default=None, allow_inf_nan=False)
+    max: float | None = Field(default=None, allow_inf_nan=False)
 
     @model_validator(mode="after")
     def _one_bound(self) -> Criterion:
@@ -67,8 +68,8 @@ class Criterion(StrictModel):
 
 
 class Requires(StrictModel):
+    # First-language requirements wait for P1's contract (R73): there is no Speaker.l1 yet.
     speakers_min: int = Field(default=1, ge=1)
-    l1_min: int = Field(default=1, ge=1)
 
 
 class Report(StrictModel):

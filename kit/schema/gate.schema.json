@@ -167,12 +167,6 @@
     "Requires": {
       "additionalProperties": false,
       "properties": {
-        "l1_min": {
-          "default": 1,
-          "minimum": 1,
-          "title": "L1 Min",
-          "type": "integer"
-        },
         "speakers_min": {
           "default": 1,
           "minimum": 1,

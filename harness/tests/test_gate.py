@@ -32,7 +32,6 @@ max = 0.10
 
 [requires]
 speakers_min = 1
-l1_min = 1
 
 [report]
 by = ["speaker", "background", "grew_up_hearing", "context"]
@@ -77,7 +76,7 @@ def test_the_contracts_example_loads(tmp_path):
 
 def test_only_gate_select_thresholds_and_criteria_are_required():
     gate = parse_gate(gate_dict(), known_metrics=METRICS)
-    assert (gate.requires.speakers_min, gate.requires.l1_min) == (1, 1)
+    assert gate.requires.speakers_min == 1
     assert gate.report.by == [] and gate.report.diagnostics == [] and gate.input == [] and gate.check == []
 
 
@@ -124,6 +123,21 @@ def test_a_gate_needs_a_criterion():
 
 def test_a_threshold_that_is_not_a_number_names_the_criterion():
     assert "criterion 'correct_accept'.min" in problems(gate_dict(criterion=[{"metric": "correct_accept", "min": "high"}]))
+
+
+@pytest.mark.parametrize("bound", ["min", "max"])
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+def test_a_bound_must_be_a_finite_number(bound, value):  # a nan bound compares false: the gate would pass
+    assert f"criterion 'correct_accept'.{bound}" in problems(
+        gate_dict(criterion=[{"metric": "correct_accept", bound: value}])
+    )
+
+
+def test_a_toml_nan_bound_is_refused(tmp_path):  # TOML spells them nan and inf
+    path = tmp_path / "bad.toml"
+    path.write_text(EXAMPLE.replace("min = 0.90", "min = nan"), encoding="utf-8")
+    with pytest.raises(GateError, match=r"criterion 'correct_accept'\.min"):
+        load_gate(path, known_metrics=METRICS)
 
 
 # ---- metric names -------------------------------------------------------------------------
@@ -185,10 +199,13 @@ def test_every_other_kind_and_split_can_be_selected():
     assert parse_gate(gate_dict(select=select), known_metrics=METRICS).select.corpora == ["a*", "b"]
 
 
-@pytest.mark.parametrize("field", ["speakers_min", "l1_min"])
 @pytest.mark.parametrize("value", [0, -1])
-def test_requires_are_at_least_one(field, value):
-    assert f"requires.{field}" in problems(gate_dict(requires={field: value}))
+def test_speakers_min_is_at_least_one(value):
+    assert "requires.speakers_min" in problems(gate_dict(requires={"speakers_min": value}))
+
+
+def test_first_languages_are_not_a_requirement_yet():  # R73: P1's contract adds Speaker.l1 and its fields
+    assert "requires.l1_min" in problems(gate_dict(requires={"l1_min": 1}))
 
 
 def test_report_by_is_an_enum():

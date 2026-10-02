@@ -19,7 +19,12 @@ def session_dict(**overrides) -> dict:
         "started_at": "2026-10-03T18:02:11Z",
         "finished_at": "2026-10-03T18:24:40Z",
         "consent": {"version": "v1", "agreed_at": "2026-10-03T18:02:30Z"},
-        "speaker": {"background": "native", "grew_up_hearing": "taiwan", "reading": "hanzi+pinyin"},
+        "speaker": {
+            "background": "native",
+            "grew_up_hearing": "taiwan",
+            "reading": "hanzi+pinyin",
+            "script": "traditional",
+        },
         "device": {
             "user_agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)",
             "input_sample_rate": 48000,
