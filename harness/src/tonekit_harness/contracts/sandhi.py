@@ -3,8 +3,16 @@
 The rules, on cmn pack tone ids:
 - 一 (yī, tone 1): yí (2) before a tone 4, yì (4) before a 1, 2 or 3, yī (1) alone or last.
 - 不 (bù, tone 4): bú (2) before a tone 4, otherwise bù.
+- 一 after 第 is an ordinal and stays yī (1): 第一次 is 4-1-4, not 4-2-4. The hanzi must show 第
+  right before 一, so this needs `text`.
 - Third tones: a 3 before a 3 becomes 2. A run of three or more 3s is grouped by the reader, so
   every grouping is accepted: 展览馆 is 2-2-3 or 3-2-3.
+- A final 3 of such a run may be neutral (5) in the word: 哪里 nǎ li, 姐姐 jiě jie, 奶奶 nǎi nai. The
+  card writes the underlying tone (nǎ lǐ, citation 3-3) and shows the neutral one (nǎ li). The 3
+  before that neutral syllable is then 3 (the half-third stays) or 2 (as if the next were still a
+  3): 哪里 is 3-5 or 2-5, besides the regular 2-3. There is no lexicon here, so the neutral reading
+  is accepted for the last 3 of any run of two or more third tones (it also admits 你好 as ní hao).
+  A syllable that is neutral by citation (你们 nǐ men, citation 3-5) has no second reading.
 Both 一 and 不 follow the *citation* tone of the next syllable. Neither changes before a neutral
 tone (5), which has no underlying tone to follow; write the underlying tone in the pinyin.
 """
@@ -39,7 +47,10 @@ def surface_options(
         return {citation}
     hanzi = _hanzi_per_syllable(text, len(citation))
     fixed = _yi_and_bu(citation, syllables, hanzi)
-    return {_assemble(fixed, runs) for runs in product(*(_run_options(n) for _, n in _runs(fixed)))}
+    return {
+        _assemble(fixed, runs)
+        for runs in product(*(_run_options(n) | _neutral_final_options(n) for _, n in _runs(fixed)))
+    }
 
 
 def _check_input(citation_tones: Sequence[str], syllables: Sequence[str], context: str) -> None:
@@ -69,7 +80,8 @@ def _yi_and_bu(
         nxt = citation[i + 1] if i + 1 < len(citation) else None
         word = hanzi[i] if hanzi else None
         if syllables[i] == "yi" and tone == "1" and word in (None, "一"):
-            out[i] = {"4": "2", "1": "4", "2": "4", "3": "4"}.get(nxt or "", tone)
+            ordinal = i > 0 and hanzi is not None and hanzi[i - 1] == "第"
+            out[i] = tone if ordinal else {"4": "2", "1": "4", "2": "4", "3": "4"}.get(nxt or "", tone)
         elif syllables[i] == "bu" and tone == "4" and word in (None, "不"):
             out[i] = "2" if nxt == "4" else tone
         elif tone == "3":
@@ -107,6 +119,19 @@ def _run_options(n: int) -> frozenset[tuple[str, ...]]:
         for k in range(1, n)
         for left in _run_options(k)
         for right in _run_options(n - k)
+    )
+
+
+@lru_cache(maxsize=None)
+def _neutral_final_options(n: int) -> frozenset[tuple[str, ...]]:
+    """The readings of a run of n >= 2 third tones whose last syllable is neutral (5): the rest of
+    the run reads as a run of n - 1, and the third tone before the neutral stays 3 or becomes 2."""
+    if n < 2:
+        return frozenset()
+    return frozenset(
+        variant
+        for left in _run_options(n - 1)
+        for variant in (left + ("5",), left[:-1] + ("2", "5"))
     )
 
 

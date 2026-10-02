@@ -459,7 +459,29 @@ def test_a_third_tone_run_read_unchanged_is_refused():
         intended={"id": "z01", "tones": ["3", "3", "3"], "labels": ["zhan", "lan", "guan"]},
         produced_tones=["3", "3", "3"],
     )
-    assert "2-2-3 or 3-2-3" in problems(deck_dict(lone))
+    out = problems(deck_dict(lone))
+    assert "phrase reading 3-3-3 is not a sandhi reading of 'zhǎn lǎn guǎn'" in out
+    assert "2-2-3" in out and "3-2-3" in out
+
+
+@pytest.mark.parametrize("tones,pinyin", [(["2", "5"], "ná li"), (["3", "5"], "nǎ li"), (["2", "3"], "ná lǐ")])
+def test_a_final_third_tone_may_be_neutral_in_the_word(tones, pinyin):  # 哪里
+    lone = card(
+        id="n01", set="diag_count", pair=None, text="哪里", pinyin=pinyin, citation_pinyin="nǎ lǐ",
+        intended={"id": "n01", "tones": tones, "labels": ["na", "li"]}, produced_tones=tones,
+    )
+    assert parse_deck(deck_dict(lone)).card[0].produced_tones == tones
+
+
+def test_an_ordinal_yi_after_di_stays_yi1():  # 第一次 dì yī cì
+    lone = card(
+        id="o01", set="diag_count", pair=None, text="第一次", pinyin="dì yī cì", citation_pinyin="dì yī cì",
+        intended={"id": "o01", "tones": ["4", "1", "4"], "labels": ["di", "yi", "ci"]},
+        produced_tones=["4", "1", "4"],
+    )
+    assert parse_deck(deck_dict(lone)).card[0].produced_tones == ["4", "1", "4"]
+    unmarked = lone | {"text": "地一次"}  # 地 is not 第: 一 is the plain 一 and goes to yí
+    assert "phrase reading 4-1-4 is not a sandhi reading" in problems(deck_dict(unmarked))
 
 
 def test_an_error_card_is_checked_against_its_own_citation_pinyin():

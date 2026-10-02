@@ -288,6 +288,11 @@ def test_volunteer_speaker_ids():
 GOLDEN_SPLITS = {
     "SSB0001": "calib", "SSB0002": "dev", "SSB0003": "dev", "SSB0004": "heldout", "SSB0005": "heldout",
     "SSB0010": "dev", "v-k7q2md": "calib", "dj": "heldout", "common-voice-zh-TW-0001": "calib",
+    # the bucket edges: sha256 buckets 59 | 60, 79 | 80 (calib | dev, dev | heldout)
+    "x72": "calib",  # bucket 59, the last calib
+    "x56": "dev",  # bucket 60, the first dev
+    "x531": "dev",  # bucket 79, the last dev
+    "x276": "heldout",  # bucket 80, the first heldout
 }
 
 
