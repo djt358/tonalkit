@@ -1,0 +1,45 @@
+name: pages
+
+# Publishes the volunteer recording kit (kit/) to GitHub Pages: HTTPS, which iOS Safari needs for
+# the microphone. The site is static: app/, copy.json, CONSENT.md, deck/*.json (kit/assemble-site.sh).
+#
+# Deploys are manual (R84): DJ runs this workflow (Actions > pages > Run workflow) before the
+# recording weekend, and nothing deploys mid-weekend, so a resumed session never meets new code.
+# To deploy on every push to main again later, restore this trigger above workflow_dispatch:
+#   push:
+#     branches: [main]
+#     paths:
+#       - "kit/**"
+#       - ".github/workflows/pages.yml"
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deployment at a time; a newer push waits rather than cancelling one half-way.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # The resampler, WAV and zip writers are what volunteers' recordings go through: re-check them.
+      - run: node --test 'kit/tests/unit/*.test.js'
+      - run: kit/assemble-site.sh _site
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+      - id: deployment
+        uses: actions/deploy-pages@v4
