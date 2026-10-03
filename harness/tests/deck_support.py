@@ -82,9 +82,12 @@ def run_deck(capsys, *argv) -> tuple[int, str, str]:
 
 
 def copy_sources(tmp_path):
-    """A copy of kit/deck/sources to build from and approve in without touching the repository."""
+    """A copy of kit/deck/sources, with no approvals yet, to build from and approve in without
+    touching the repository (the repository's approvals.csv holds DJ's audit)."""
     out = tmp_path / "sources"
     shutil.copytree(SOURCES, out)
+    approvals = out / "approvals.csv"
+    approvals.write_text(approvals.read_text(encoding="utf-8").splitlines(keepends=True)[0], encoding="utf-8")
     return out
 
 

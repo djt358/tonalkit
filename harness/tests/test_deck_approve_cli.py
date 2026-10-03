@@ -28,10 +28,12 @@ def deck_cards(out):
     return {c["id"]: c for c in json.loads((out / "s05-v1.json").read_text(encoding="utf-8"))["card"]}
 
 
-def test_the_shipped_approvals_file_is_the_header_and_nothing_else():
+def test_the_shipped_approvals_file_approves_every_card_of_djs_audit():
     from deck_support import SOURCES
 
-    assert (SOURCES / "approvals.csv").read_text(encoding="utf-8") == HEADER
+    rows = read_approvals(SOURCES / "approvals.csv")
+    assert len(rows) == 76 and {r.decision for r in rows} == {"approved"}
+    assert {r.note for r in rows} == {"DJ audit 2026-10-02 23:27: approve all"}
 
 
 def test_approving_some_cards_writes_their_current_fingerprints(sources, tmp_path, capsys):
@@ -45,7 +47,9 @@ def test_approving_some_cards_writes_their_current_fingerprints(sources, tmp_pat
     cards = deck_cards(tmp_path / "out")
     assert code == 0
     assert [i for i, c in cards.items() if c["status"] == "approved"] == ["r01", "g01-c", "g01-e"]
-    assert {r.card_id: r.fingerprint for r in rows} == {i: card_fingerprint(cards[i]) for i in ("r01", "g01-c", "g01-e")}
+    assert {r.card_id: r.fingerprint for r in rows} == {
+        i: card_fingerprint(cards[i]) for i in ("r01", "g01-c", "g01-e")
+    }
 
 
 def test_approve_all_covers_every_card_and_the_build_marks_them_in_both_files(sources, tmp_path, capsys):
@@ -98,7 +102,9 @@ def test_a_rejected_card_can_be_approved_again_because_approve_works_from_the_wh
     assert deck_cards(tmp_path / "out")["r08"]["status"] == "approved"
 
 
-def test_approve_all_leaves_a_standing_rejection_alone_and_a_fixed_card_comes_back_into_the_deck(sources, tmp_path, capsys):
+def test_approve_all_leaves_a_standing_rejection_alone_and_a_fixed_card_comes_back_into_the_deck(
+    sources, tmp_path, capsys
+):
     run_deck(capsys, "approve", "--sources", str(sources), "r08", "--reject", "--note", "too long")
     code, text, _ = run_deck(capsys, "approve", "--sources", str(sources), "--all")
     assert code == 0 and "approved 75 cards" in text
@@ -112,7 +118,9 @@ def test_approve_all_leaves_a_standing_rejection_alone_and_a_fixed_card_comes_ba
     _, text, _ = build(capsys, sources, tmp_path / "out")
     assert deck_cards(tmp_path / "out")["r08"]["status"] == "unverified" and "stale rejection r08" in text
     _, text, _ = run_deck(capsys, "approve", "--sources", str(sources), "--all")
-    assert "approved 76 cards" in text and {r.decision for r in read_approvals(sources / "approvals.csv")} == {"approved"}
+    assert "approved 76 cards" in text and {r.decision for r in read_approvals(sources / "approvals.csv")} == {
+        "approved"
+    }
 
 
 def test_rejecting_one_card_of_a_pair_is_refused_by_the_contract_and_the_message_says_why(sources, tmp_path, capsys):

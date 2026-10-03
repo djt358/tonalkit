@@ -38,7 +38,7 @@
       ],
       "distractors": [],
       "prompt_note": "Four separate sounds with a short pause between each. You'll read this card 8 times in a row.",
-      "status": "unverified"
+      "status": "approved"
     },
     {
       "id": "r02",
@@ -72,7 +72,7 @@
       ],
       "distractors": [],
       "prompt_note": "Again, 2 of 8. Four separate sounds with a short pause between each.",
-      "status": "unverified"
+      "status": "approved"
     },
     {
       "id": "r03",
@@ -106,7 +106,7 @@
       ],
       "distractors": [],
       "prompt_note": "Again, 3 of 8. Four separate sounds with a short pause between each.",
-      "status": "unverified"
+      "status": "approved"
     },
     {
       "id": "r04",
@@ -140,7 +140,7 @@
       ],
       "distractors": [],
       "prompt_note": "Again, 4 of 8. Four separate sounds with a short pause between each.",
-      "status": "unverified"
+      "status": "approved"
     },
     {
       "id": "r05",
@@ -174,7 +174,7 @@
       ],
       "distractors": [],
       "prompt_note": "Again, 5 of 8. Four separate sounds with a short pause between each.",
-      "status": "unverified"
+      "status": "approved"
     },
     {
       "id": "r06",
@@ -208,7 +208,7 @@
       ],
       "distractors": [],
       "prompt_note": "Again, 6 of 8. Four separate sounds with a short pause between each.",
-      "status": "unverified"
+      "status": "approved"
     },
     {
       "id": "r07",
@@ -242,7 +242,7 @@
       ],
       "distractors": [],
       "prompt_note": "Again, 7 of 8. Four separate sounds with a short pause between each.",
-      "status": "unverified"
+      "status": "approved"
     },
     {
       "id": "r08",
@@ -276,7 +276,7 @@
       ],
       "distractors": [],
       "prompt_note": "Again, 8 of 8. Four separate sounds with a short pause between each.",
-      "status": "unverified"
+      "status": "approved"
     },
     {
       "id": "g01-c",
@@ -308,7 +308,7 @@
       ],
       "distractors": [],
       "prompt_note": "",
-      "status": "unverified"
+      "status": "approved"
     },
     {
       "id": "g01-e",
@@ -341,7 +341,7 @@
       "distractors": [],
       "prompt_note": "Read it as written: 睡 as in 睡觉 (to sleep).",
       "prompt_note_traditional": "Read it as written: 睡 as in 睡覺 (to sleep).",
-      "status": "unverified"
+      "status": "approved"
     },
     {
       "id": "g02-c",
@@ -373,7 +373,7 @@
       ],
       "distractors": [],
       "prompt_note": "",
-      "status": "unverified"
+      "status": "approved"
     },
     {
       "id": "g02-e",
@@ -406,7 +406,7 @@
       "distractors": [],
       "prompt_note": "Read it as written: 树 as in 大树 (tree).",
       "prompt_note_traditional": "Read it as written: 樹 as in 大樹 (tree).",
-      "status": "unverified"
+      "status": "approved"
     },
     {
       "id": "g03-c",
@@ -438,7 +438,7 @@
       ],
       "distractors": [],
       "prompt_note": "",
-      "status": "unverified"
+      "status": "approved"
     },
     {
       "id": "g03-e",
@@ -471,7 +471,7 @@
       "distractors": [],
       "prompt_note": "Read it as written: 直 as in 直接 (directly).",
       "prompt_note_traditional": "Read it as written: 直 as in 直接 (directly).",
-      "status": "unverified"
+      "status": "approved"
     },
     {
       "id": "g04-c",
@@ -503,7 +503,7 @@
       ],
       "distractors": [],
       "prompt_note": "",
-      "status": "unverified"
+      "status": "approved"
     },
     {
       "id": "g04-e",
@@ -536,7 +536,7 @@
       "distractors": [],
       "prompt_note": "Read it as written: 烦 as in 麻烦 (troublesome).",
       "prompt_note_traditional": "Read it as written: 煩 as in 麻煩 (troublesome).",
-      "status": "unverified"
+      "status": "approved"
     },
     {
       "id": "g05-c",
@@ -568,7 +568,7 @@
       ],
       "distractors": [],
       "prompt_note": "",
-      "status": "unverified"
+      "status": "approved"
     },
     {
       "id": "g05-e",
@@ -601,7 +601,7 @@
       "distractors": [],
       "prompt_note": "Read it as written: 雨 as in 下雨 (rain).",
       "prompt_note_traditional": "Read it as written: 雨 as in 下雨 (rain).",
-      "status": "unverified"
+      "status": "approved"
     },
     {
       "id": "g06-c",
@@ -633,7 +633,7 @@
       ],
       "distractors": [],
       "prompt_note": "",
-      "status": "unverified"
+      "status": "approved"
     },
     {
       "id": "g06-e",
@@ -666,7 +666,7 @@
       "distractors": [],
       "prompt_note": "Read it as written: 毛 as in 毛衣 (sweater).",
       "prompt_note_traditional": "Read it as written: 毛 as in 毛衣 (sweater).",
-      "status": "unverified"
+      "status": "approved"
     },
     {
       "id": "g07-c",
@@ -698,7 +698,7 @@
       ],
       "distractors": [],
       "prompt_note": "",
-      "status": "unverified"
+      "status": "approved"
     },
     {
       "id": "g07-e",
@@ -731,7 +731,7 @@
       "distractors": [],
       "prompt_note": "Read it as written: 救 as in 救命 (to save a life).",
       "prompt_note_traditional": "Read it as written: 救 as in 救命 (to save a life).",
-      "status": "unverified"
+      "status": "approved"
     },
     {
       "id": "g08-c",
@@ -763,7 +763,7 @@
       ],
       "distractors": [],
       "prompt_note": "",
-      "status": "unverified"
+      "status": "approved"
     },
     {
       "id": "g08-e",
@@ -796,7 +796,7 @@
       "distractors": [],
       "prompt_note": "Read it as written: 病 as in 生病 (to fall ill).",
       "prompt_note_traditional": "Read it as written: 病 as in 生病 (to fall ill).",
-      "status": "unverified"
+      "status": "approved"
     },
     {
       "id": "g09-c",
@@ -828,7 +828,7 @@
       ],
       "distractors": [],
       "prompt_note": "",
-      "status": "unverified"
+      "status": "approved"
     },
     {
       "id": "g09-e",
@@ -861,7 +861,7 @@
       "distractors": [],
       "prompt_note": "Read it as written: 扯 as in 拉扯 (to pull).",
       "prompt_note_traditional": "Read it as written: 扯 as in 拉扯 (to pull).",
-      "status": "unverified"
+      "status": "approved"
     },
     {
       "id": "g10-c",
@@ -893,7 +893,7 @@
       ],
       "distractors": [],
       "prompt_note": "",
-      "status": "unverified"
+      "status": "approved"
     },
     {
       "id": "g10-e",
@@ -926,7 +926,7 @@
       "distractors": [],
       "prompt_note": "Read it as written: 写 as in 写字 (to write).",
       "prompt_note_traditional": "Read it as written: 寫 as in 寫字 (to write).",
-      "status": "unverified"
+      "status": "approved"
     },
     {
       "id": "g11-c",
@@ -958,7 +958,7 @@
       ],
       "distractors": [],
       "prompt_note": "",
-      "status": "unverified"
+      "status": "approved"
     },
     {
       "id": "g11-e",
@@ -991,7 +991,7 @@
       "distractors": [],
       "prompt_note": "Read it as written: 财 as in 发财 (to get rich).",
       "prompt_note_traditional": "Read it as written: 財 as in 發財 (to get rich).",
-      "status": "unverified"
+      "status": "approved"
     },
     {
       "id": "g12-c",
@@ -1023,7 +1023,7 @@
       ],
       "distractors": [],
       "prompt_note": "",
-      "status": "unverified"
+      "status": "approved"
     },
     {
       "id": "g12-e",
@@ -1056,7 +1056,7 @@
       "distractors": [],
       "prompt_note": "Read it as written: 到 as in 到家 (to arrive home).",
       "prompt_note_traditional": "Read it as written: 到 as in 到家 (to arrive home).",
-      "status": "unverified"
+      "status": "approved"
     },
     {
       "id": "g13-c",
@@ -1088,7 +1088,7 @@
       ],
       "distractors": [],
       "prompt_note": "",
-      "status": "unverified"
+      "status": "approved"
     },
     {
       "id": "g13-e",
@@ -1121,7 +1121,7 @@
       "distractors": [],
       "prompt_note": "Read it as written: 湾 as in 海湾 (bay).",
       "prompt_note_traditional": "Read it as written: 灣 as in 海灣 (bay).",
-      "status": "unverified"
+      "status": "approved"
     },
     {
       "id": "g14-c",
@@ -1153,7 +1153,7 @@
       ],
       "distractors": [],
       "prompt_note": "",
-      "status": "unverified"
+      "status": "approved"
     },
     {
       "id": "g14-e",
@@ -1186,7 +1186,7 @@
       "distractors": [],
       "prompt_note": "Read it as written: 巴 as in 巴士 (bus).",
       "prompt_note_traditional": "Read it as written: 巴 as in 巴士 (bus).",
-      "status": "unverified"
+      "status": "approved"
     },
     {
       "id": "g15-c",
@@ -1218,7 +1218,7 @@
       ],
       "distractors": [],
       "prompt_note": "",
-      "status": "unverified"
+      "status": "approved"
     },
     {
       "id": "g15-e",
@@ -1251,7 +1251,7 @@
       "distractors": [],
       "prompt_note": "Read it as written: 躺 as in 躺下 (to lie down).",
       "prompt_note_traditional": "Read it as written: 躺 as in 躺下 (to lie down).",
-      "status": "unverified"
+      "status": "approved"
     },
     {
       "id": "g16-c",
@@ -1283,7 +1283,7 @@
       ],
       "distractors": [],
       "prompt_note": "",
-      "status": "unverified"
+      "status": "approved"
     },
     {
       "id": "g16-e",
@@ -1316,7 +1316,7 @@
       "distractors": [],
       "prompt_note": "Read it as written: 运 as in 运动 (exercise).",
       "prompt_note_traditional": "Read it as written: 運 as in 運動 (exercise).",
-      "status": "unverified"
+      "status": "approved"
     },
     {
       "id": "g17-c",
@@ -1348,7 +1348,7 @@
       ],
       "distractors": [],
       "prompt_note": "",
-      "status": "unverified"
+      "status": "approved"
     },
     {
       "id": "g17-e",
@@ -1381,7 +1381,7 @@
       "distractors": [],
       "prompt_note": "Read it as written: 扭 as in 扭伤 (to sprain).",
       "prompt_note_traditional": "Read it as written: 扭 as in 扭傷 (to sprain).",
-      "status": "unverified"
+      "status": "approved"
     },
     {
       "id": "g18-c",
@@ -1413,7 +1413,7 @@
       ],
       "distractors": [],
       "prompt_note": "",
-      "status": "unverified"
+      "status": "approved"
     },
     {
       "id": "g18-e",
@@ -1446,7 +1446,7 @@
       "distractors": [],
       "prompt_note": "Read it as written: 蜜 as in 蜂蜜 (honey).",
       "prompt_note_traditional": "Read it as written: 蜜 as in 蜂蜜 (honey).",
-      "status": "unverified"
+      "status": "approved"
     },
     {
       "id": "g19-c",
@@ -1478,7 +1478,7 @@
       ],
       "distractors": [],
       "prompt_note": "",
-      "status": "unverified"
+      "status": "approved"
     },
     {
       "id": "g19-e",
@@ -1511,7 +1511,7 @@
       "distractors": [],
       "prompt_note": "Read it as written: 滑 as in 滑冰 (to skate).",
       "prompt_note_traditional": "Read it as written: 滑 as in 滑冰 (to skate).",
-      "status": "unverified"
+      "status": "approved"
     },
     {
       "id": "g20-c",
@@ -1543,7 +1543,7 @@
       ],
       "distractors": [],
       "prompt_note": "",
-      "status": "unverified"
+      "status": "approved"
     },
     {
       "id": "g20-e",
@@ -1576,7 +1576,7 @@
       "distractors": [],
       "prompt_note": "Read it as written: 巧 as in 技巧 (skill).",
       "prompt_note_traditional": "Read it as written: 巧 as in 技巧 (skill).",
-      "status": "unverified"
+      "status": "approved"
     },
     {
       "id": "x01",
@@ -1601,7 +1601,7 @@
       ],
       "distractors": [],
       "prompt_note": "The number one, said on its own, as when counting.",
-      "status": "unverified"
+      "status": "approved"
     },
     {
       "id": "x02",
@@ -1629,7 +1629,7 @@
       ],
       "distractors": [],
       "prompt_note": "",
-      "status": "unverified"
+      "status": "approved"
     },
     {
       "id": "x03",
@@ -1657,7 +1657,7 @@
       ],
       "distractors": [],
       "prompt_note": "",
-      "status": "unverified"
+      "status": "approved"
     },
     {
       "id": "x04",
@@ -1682,7 +1682,7 @@
       ],
       "distractors": [],
       "prompt_note": "The word that means not. Say it on its own.",
-      "status": "unverified"
+      "status": "approved"
     },
     {
       "id": "x05",
@@ -1710,7 +1710,7 @@
       ],
       "distractors": [],
       "prompt_note": "",
-      "status": "unverified"
+      "status": "approved"
     },
     {
       "id": "x06",
@@ -1735,7 +1735,7 @@
       ],
       "distractors": [],
       "prompt_note": "",
-      "status": "unverified"
+      "status": "approved"
     },
     {
       "id": "x07",
@@ -1763,7 +1763,7 @@
       ],
       "distractors": [],
       "prompt_note": "",
-      "status": "unverified"
+      "status": "approved"
     },
     {
       "id": "t01-c",
@@ -1792,7 +1792,7 @@
       ],
       "distractors": [],
       "prompt_note": "",
-      "status": "unverified"
+      "status": "approved"
     },
     {
       "id": "t01-e",
@@ -1822,7 +1822,7 @@
       "distractors": [],
       "prompt_note": "Read it as written: 鱼 as in 金鱼 (goldfish).",
       "prompt_note_traditional": "Read it as written: 魚 as in 金魚 (goldfish).",
-      "status": "unverified"
+      "status": "approved"
     },
     {
       "id": "t02-c",
@@ -1851,7 +1851,7 @@
       ],
       "distractors": [],
       "prompt_note": "",
-      "status": "unverified"
+      "status": "approved"
     },
     {
       "id": "t02-e",
@@ -1881,7 +1881,7 @@
       "distractors": [],
       "prompt_note": "Read it as written: 浅 as in 浅色 (light-coloured).",
       "prompt_note_traditional": "Read it as written: 淺 as in 淺色 (light-coloured).",
-      "status": "unverified"
+      "status": "approved"
     },
     {
       "id": "t03-c",
@@ -1910,7 +1910,7 @@
       ],
       "distractors": [],
       "prompt_note": "",
-      "status": "unverified"
+      "status": "approved"
     },
     {
       "id": "t03-e",
@@ -1940,7 +1940,7 @@
       "distractors": [],
       "prompt_note": "Read it as written: 骑 as in 骑车 (to ride a bike).",
       "prompt_note_traditional": "Read it as written: 騎 as in 騎車 (to ride a bike).",
-      "status": "unverified"
+      "status": "approved"
     },
     {
       "id": "t04-c",
@@ -1969,7 +1969,7 @@
       ],
       "distractors": [],
       "prompt_note": "",
-      "status": "unverified"
+      "status": "approved"
     },
     {
       "id": "t04-e",
@@ -1999,7 +1999,7 @@
       "distractors": [],
       "prompt_note": "Read it as written: 悔 as in 后悔 (to regret).",
       "prompt_note_traditional": "Read it as written: 悔 as in 後悔 (to regret).",
-      "status": "unverified"
+      "status": "approved"
     },
     {
       "id": "m01-a",
@@ -2035,7 +2035,7 @@
         }
       ],
       "prompt_note": "",
-      "status": "unverified"
+      "status": "approved"
     },
     {
       "id": "m01-b",
@@ -2071,7 +2071,7 @@
         }
       ],
       "prompt_note": "",
-      "status": "unverified"
+      "status": "approved"
     },
     {
       "id": "m02-a",
@@ -2107,7 +2107,7 @@
         }
       ],
       "prompt_note": "",
-      "status": "unverified"
+      "status": "approved"
     },
     {
       "id": "m02-b",
@@ -2143,7 +2143,7 @@
         }
       ],
       "prompt_note": "",
-      "status": "unverified"
+      "status": "approved"
     },
     {
       "id": "m03-a",
@@ -2179,7 +2179,7 @@
         }
       ],
       "prompt_note": "",
-      "status": "unverified"
+      "status": "approved"
     },
     {
       "id": "m03-b",
@@ -2215,7 +2215,7 @@
         }
       ],
       "prompt_note": "",
-      "status": "unverified"
+      "status": "approved"
     },
     {
       "id": "m04-a",
@@ -2251,7 +2251,7 @@
         }
       ],
       "prompt_note": "",
-      "status": "unverified"
+      "status": "approved"
     },
     {
       "id": "m04-b",
@@ -2287,7 +2287,7 @@
         }
       ],
       "prompt_note": "",
-      "status": "unverified"
+      "status": "approved"
     },
     {
       "id": "m05-a",
@@ -2323,7 +2323,7 @@
         }
       ],
       "prompt_note": "",
-      "status": "unverified"
+      "status": "approved"
     },
     {
       "id": "m05-b",
@@ -2359,7 +2359,7 @@
         }
       ],
       "prompt_note": "",
-      "status": "unverified"
+      "status": "approved"
     },
     {
       "id": "n01",
@@ -2391,7 +2391,7 @@
       "distractors": [],
       "prompt_note": "Say 嗯 (a thinking sound, like um), pause as if you are thinking, then say 一杯水 (yì bēi shuǐ).",
       "prompt_note_traditional": "Say 嗯 (a thinking sound, like um), pause as if you are thinking, then say 一杯水 (yì bēi shuǐ).",
-      "status": "unverified"
+      "status": "approved"
     },
     {
       "id": "n02",
@@ -2423,7 +2423,7 @@
       "distractors": [],
       "prompt_note": "Start the phrase, stop after 一本 (yì běn) as if you lost your place, then say the whole phrase: 一本书 (yì běn shū).",
       "prompt_note_traditional": "Start the phrase, stop after 一本 (yì běn) as if you lost your place, then say the whole phrase: 一本書 (yì běn shū).",
-      "status": "unverified"
+      "status": "approved"
     },
     {
       "id": "n03",
@@ -2455,7 +2455,7 @@
       "distractors": [],
       "prompt_note": "Say 就是 (jiù shì, a filler like the English I mean), pause as if you are searching for the words, then say 一碗饭 (yì wǎn fàn).",
       "prompt_note_traditional": "Say 就是 (jiù shì, a filler like the English I mean), pause as if you are searching for the words, then say 一碗飯 (yì wǎn fàn).",
-      "status": "unverified"
+      "status": "approved"
     }
   ]
 }
