@@ -25,7 +25,7 @@ test("kit/copy.json (P1), when present, has exactly the shared keys", { skip: !e
 });
 
 test("kit/CONSENT.md (P2), when present, starts with the version marker", { skip: !existsSync(new URL("../../CONSENT.md", import.meta.url)) && "kit/CONSENT.md not merged yet" }, () => {
-  assert.match(read("../../CONSENT.md").split("\n")[0], /^<!-- consent: v\d+ -->$/);
+  assert.match(read("../../CONSENT.md").split("\n")[0], /^<!-- consent: v\d+(?:\.\d+)* -->$/);
 });
 
 test("every background answer has a copy key", () => {
