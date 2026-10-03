@@ -8,7 +8,6 @@ from __future__ import annotations
 import re
 import unicodedata
 from dataclasses import dataclass
-from functools import lru_cache
 
 NEUTRAL = "5"
 
@@ -29,12 +28,17 @@ _SYLLABLE = re.compile(
 
 # Syllables are separated by whitespace or an apostrophe: the straight one, or the U+2019 that
 # phone keyboards type in its place.
+_LONGEST = 7  # letters in the longest syllable: zhuang(r), chuang(r)
 _SEPARATORS = re.compile("[\\s'\u2019]+")
 _RUN_TOGETHER = " (several syllables run together? separate them with spaces or ')"
 
 
 class PinyinError(ValueError):
     """The pinyin could not be read; the message names the bad syllable."""
+
+
+class _NotASyllable(PinyinError):
+    """The letters are not a Mandarin syllable (the one fault a missing space can cause)."""
 
 
 @dataclass(frozen=True)
@@ -55,7 +59,7 @@ def parse_pinyin(text: str) -> list[Syllable]:
         try:
             syllables.append(_parse_syllable(token))
         except PinyinError as e:
-            hint = _RUN_TOGETHER if _runs_together(token) else ""
+            hint = _RUN_TOGETHER if _runs_together(token, e) else ""
             raise PinyinError(f"bad pinyin syllable {token!r} in {text!r}: {e}{hint}") from None
     return syllables
 
@@ -92,19 +96,37 @@ def _parse_syllable(token: str) -> Syllable:
     return Syllable(token, _check_base("".join(letters)), _tone(marks, digits))
 
 
-def _runs_together(token: str) -> bool:
-    """Whether the token's letters split into two or more syllables (`yibeishui`, `nihao`), so that
-    the likely mistake is a missing space."""
-    letters = "".join(c for c in unicodedata.normalize("NFD", token).lower() if "a" <= c <= "z")
-    return _splits(letters)
+def _runs_together(token: str, error: PinyinError) -> bool:
+    """Whether the likely mistake is a missing space: the letters are not a syllable but split into
+    several (`yibeishui`, `nihao`), or the digits end several syllables (`yi4bei1shui3`). Any other
+    fault (`huā1r`, `hua1r1`: a tone or erhua error) is not blamed on a space."""
+    if isinstance(error, _NotASyllable):
+        letters = "".join(c for c in unicodedata.normalize("NFD", token).lower() if "a" <= c <= "z")
+        return _splits(letters)
+    pieces = re.findall(r"[^\d]+\d", token)
+    return len(pieces) > 1 and "".join(pieces) == token and all(_parses(p) for p in pieces)
 
 
-@lru_cache(maxsize=None)
+def _parses(piece: str) -> bool:
+    try:
+        _parse_syllable(piece)
+    except PinyinError:
+        return False
+    return True
+
+
 def _splits(letters: str) -> bool:
-    return any(
-        _standalone(letters[:i]) and (_standalone(letters[i:]) or _splits(letters[i:]))
-        for i in range(1, len(letters))
-    )
+    """Whether `letters` is two or more standalone syllables in a row. `one[j]` is whether
+    letters[:j] splits into one or more of them, `many[j]` into two or more; no recursion, so a
+    token of any length is fine (a syllable is at most `_LONGEST` letters, which bounds the work)."""
+    n = len(letters)
+    one, many = [False] * (n + 1), [False] * (n + 1)
+    for j in range(1, n + 1):
+        one[j] = _standalone(letters[:j]) if j <= _LONGEST else False
+        for i in range(max(1, j - _LONGEST), j):
+            if one[i] and _standalone(letters[i:j]):
+                one[j] = many[j] = True
+    return many[n]
 
 
 def _standalone(piece: str) -> bool:
@@ -115,7 +137,7 @@ def _standalone(piece: str) -> bool:
 
 def _check_base(base: str) -> str:
     if not _SYLLABLE.fullmatch(base):
-        raise PinyinError(f"{base!r} is not a Mandarin syllable")
+        raise _NotASyllable(f"{base!r} is not a Mandarin syllable")
     return base
 
 

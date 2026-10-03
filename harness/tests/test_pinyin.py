@@ -111,6 +111,24 @@ def test_other_errors_do_not_suggest_spaces(typo):
     assert "run together" not in str(e.value)
 
 
+@pytest.mark.parametrize("bad", ["huā1r", "hua1r1", "hua11r", "shuǐ3", "sh3ui", "shui33"])
+def test_a_tone_or_erhua_error_is_not_blamed_on_a_missing_space(bad):
+    # the letters of these would split into syllables (hu + ar), but the fault is the tone, not a space
+    with pytest.raises(PinyinError) as e:
+        parse_pinyin(bad)
+    assert repr(bad) in str(e.value) and "run together" not in str(e.value)
+
+
+@pytest.mark.parametrize("letters", [400, 5000])
+def test_a_very_long_token_is_a_pinyin_error_not_a_recursion_error(letters):
+    with pytest.raises(PinyinError, match="is not a Mandarin syllable") as e:
+        parse_pinyin("a" * letters)  # splits into a hundred syllables, and is still not pinyin
+    assert "several syllables run together" in str(e.value)
+    with pytest.raises(PinyinError, match="is not a Mandarin syllable") as e:
+        parse_pinyin("x" * letters)  # never splits
+    assert "run together" not in str(e.value)
+
+
 @pytest.mark.parametrize("bad", ["shuuǐ", "xyz", "bcd", "yìbēishuǐ", "shui33"])
 def test_not_a_syllable_names_the_syllable(bad):
     with pytest.raises(PinyinError) as e:
