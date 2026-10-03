@@ -1,6 +1,6 @@
-<!-- consent: v1 -->
+<!-- consent: v1.0.1 -->
 
-## What DJ records
+## What we record
 
 - Your voice reading about 70 short cards. Only your last take of each card is kept.
 - Four quick answers: your Mandarin background, which Mandarin you grew up hearing, and how you like to read the cards (characters or pinyin, simplified or traditional). You can choose **Prefer not to say** on the first two.
@@ -9,25 +9,25 @@
 
 ## Why
 
-DJ is building Bendy, a Mandarin-learning app DJ plans to sell, and tonekit, the open-source library that checks its tones. Your recordings are used only to test the checker on real voices and tune its settings, which are just numbers that can't recreate your voice. DJ will also listen to some.
+We are building Bendy, a Mandarin-learning app, and tonalkit, an open-source library that checks tones and suggests corrections. Your recordings are used only to test the checker on real voices and tune its settings, which are just numbers that can't recreate your voice. 
 
 ## Who gets it
 
 - Your recordings and answers stay on your phone until you tap Share.
-- Then DJ analyzes them on DJ's own computers and in a private cloud workspace that only DJ's account can open, where DJ uses an AI assistant (Anthropic's Claude).
-- No one else.
-- DJ may publish overall results and the tuned settings, never your recordings.
+- One of us will analyze them in a private cloud workspace that only the team can open. We may use an LLM to assist with some analyses, but your data is not retained by the LLM provider.
+- No one else will see or hear them.
+- We may publish overall results and the tuned settings, but we will never release your recordings.
 
-## What DJ will never do
+## What will never happen
 
-- Publish your recordings.
-- Share them with anyone else, or send them to any other service. The private workspace above is the one exception.
-- Use your voice to identify you or match you to anyone.
-- Clone or imitate your voice.
+- We will never publish your recordings.
+- We will never share them with anyone else, or send them to any other service not named above.
+- We will never use your voice to identify you or match you to anyone.
+- We will never clone or imitate your voice.
 
-## How long DJ keeps it
+## How long we keep it
 
-Until the project no longer needs it, or until you ask. To ask, send DJ your code (you get it at the end, and it's in the file's name). DJ then deletes your recordings, your answers and everything kept from them, and redoes anything not yet released without you. Results and settings already released can't be pulled back, but they contain no audio.
+Until the project no longer needs it, or until you ask. To ask, send us your code (you get it at the end, and it's in the file's name). We'll immediately delete your recordings, your answers and everything kept from them. Improvements to tonalkit based on your recordings can't be pulled back if they're already released, but they contain no audio or identifying data.
 
 ## Your choice
 
