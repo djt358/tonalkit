@@ -27,6 +27,7 @@ intended = { id = "g01", tones = ["4", "1", "3"], labels = ["yi", "bei", "shui"]
 produced_tones = ["4", "1", "3"]
 distractors = []
 prompt_note = ""
+prompt_note_traditional = ""
 status = "unverified"
 
 [[card]]
@@ -41,6 +42,7 @@ context = "phrase"
 intended = { id = "g01", tones = ["4", "1", "3"], labels = ["yi", "bei", "shui"] }
 produced_tones = ["4", "1", "4"]
 prompt_note = "Read it as written: 睡 as in 睡觉."
+prompt_note_traditional = "Read it as written: 睡 as in 睡覺."
 status = "unverified"
 """
 
@@ -85,6 +87,7 @@ def test_the_contracts_example_loads(tmp_path):
     assert isinstance(deck, Deck)
     assert deck.deck.id == "s05-v1" and [c.id for c in deck.card] == ["g01-c", "g01-e"]
     assert deck.card[1].prompt_note.startswith("Read it as written")
+    assert deck.card[1].prompt_note_traditional == "Read it as written: 睡 as in 睡覺."
 
 
 def test_deck_sha256_is_the_hash_of_the_file_bytes(tmp_path):
@@ -149,12 +152,12 @@ def test_a_deck_needs_cards():
 
 # ---- traditional characters (R74) ---------------------------------------------------------
 
-def zhanlanguan(**kw) -> dict:
+def tushuguan(**kw) -> dict:  # 图书馆 tú shū guǎn: one native reading
     return card(
-        id="z01", set="diag_count", pair=None, text="展览馆", pinyin="zhán lán guǎn",
-        citation_pinyin="zhǎn lǎn guǎn",
-        intended={"id": "z01", "tones": ["2", "2", "3"], "labels": ["zhan", "lan", "guan"]},
-        produced_tones=["2", "2", "3"],
+        id="z01", set="diag_count", pair=None, text="图书馆", pinyin="tú shū guǎn",
+        citation_pinyin="tú shū guǎn",
+        intended={"id": "z01", "tones": ["2", "1", "3"], "labels": ["tu", "shu", "guan"]},
+        produced_tones=["2", "1", "3"],
     ) | kw
 
 
@@ -163,17 +166,40 @@ def test_text_traditional_is_optional():
 
 
 def test_text_traditional_has_the_length_of_text():
-    assert parse_deck(deck_dict(zhanlanguan(text_traditional="展覽館"))).card[0].text_traditional == "展覽館"
+    assert parse_deck(deck_dict(tushuguan(text_traditional="圖書館"))).card[0].text_traditional == "圖書館"
 
 
-@pytest.mark.parametrize("traditional", ["展覽", "展覽館館"])
+@pytest.mark.parametrize("traditional", ["圖書", "圖書館館"])
 def test_a_text_traditional_of_another_length_is_refused(traditional):
-    out = problems(deck_dict(zhanlanguan(text_traditional=traditional)))
+    out = problems(deck_dict(tushuguan(text_traditional=traditional)))
     assert f"card 'z01': text_traditional has {len(traditional)} characters but text has 3" in out
 
 
 def test_text_traditional_cannot_be_blank():
-    assert "card 'z01'.text_traditional" in problems(deck_dict(zhanlanguan(text_traditional=" ")))
+    assert "card 'z01'.text_traditional" in problems(deck_dict(tushuguan(text_traditional=" ")))
+
+
+def test_prompt_note_traditional_is_optional():
+    assert parse_deck(deck_dict()).card[0].prompt_note_traditional is None
+
+
+def test_prompt_note_traditional_goes_with_a_prompt_note():  # R88
+    note = "Read it as written: 睡 as in 睡觉."
+    deck = parse_deck(deck_dict(card(), error_card(prompt_note_traditional=note.replace("觉", "覺"))))
+    assert deck.card[1].prompt_note_traditional == "Read it as written: 睡 as in 睡覺."
+    assert parse_deck(deck_dict(card(prompt_note_traditional=""), error_card())).card[0].prompt_note == ""
+
+
+@pytest.mark.parametrize("note", ["", "  "])
+def test_prompt_note_traditional_without_a_prompt_note_is_refused(note):
+    out = problems(deck_dict(card(prompt_note=note, prompt_note_traditional="睡覺"), error_card()))
+    assert "card 'g01-c': prompt_note_traditional is set but prompt_note is empty" in out
+
+
+def test_prompt_note_traditional_on_a_card_with_no_prompt_note_field_is_refused():
+    lone = card(prompt_note_traditional="睡覺")
+    del lone["prompt_note"]
+    assert "card 'g01-c': prompt_note_traditional is set but prompt_note is empty" in problems(deck_dict(lone, error_card()))
 
 
 # ---- tones and lengths ----------------------------------------------------------------------
@@ -439,38 +465,65 @@ def test_isolated_citation_and_alone_cards_pass():
     assert parse_deck(deck_dict(alone)).card[0].context == "isolated"
 
 
-@pytest.mark.parametrize("tones,pinyin", [
-    (["2", "2", "3"], "zhán lán guǎn"), (["3", "2", "3"], "zhǎn lán guǎn"),
-])
-def test_third_tone_runs_accept_either_grouping(tones, pinyin):  # 展览馆
-    lone = card(
-        id="z01", set="diag_count", pair=None, text="展览馆", pinyin=pinyin,
+def zhanlanguan(**kw) -> dict:  # 展览馆 zhǎn lǎn guǎn: 2-2-3 or 3-2-3
+    return card(
+        id="z01", set="diag_count", pair=None, text="展览馆", pinyin="zhán lán guǎn",
         citation_pinyin="zhǎn lǎn guǎn",
-        intended={"id": "z01", "tones": tones, "labels": ["zhan", "lan", "guan"]},
-        produced_tones=tones,
-    )
-    assert parse_deck(deck_dict(lone)).card[0].produced_tones == tones
+        intended={"id": "z01", "tones": ["2", "2", "3"], "labels": ["zhan", "lan", "guan"]},
+        produced_tones=["2", "2", "3"],
+    ) | kw
 
 
 def test_a_third_tone_run_read_unchanged_is_refused():
-    lone = card(
-        id="z01", set="diag_count", pair=None, text="展览馆", pinyin="zhǎn lǎn guǎn",
-        citation_pinyin="zhǎn lǎn guǎn",
-        intended={"id": "z01", "tones": ["3", "3", "3"], "labels": ["zhan", "lan", "guan"]},
-        produced_tones=["3", "3", "3"],
-    )
+    lone = zhanlanguan(pinyin="zhǎn lǎn guǎn", produced_tones=["3", "3", "3"])
+    lone["intended"] = {"id": "z01", "tones": ["3", "3", "3"], "labels": ["zhan", "lan", "guan"]}
     out = problems(deck_dict(lone))
     assert "phrase reading 3-3-3 is not a sandhi reading of 'zhǎn lǎn guǎn'" in out
-    assert "2-2-3" in out and "3-2-3" in out
+    assert "2-2-3 or 3-2-3" in out
 
 
-@pytest.mark.parametrize("tones,pinyin", [(["2", "5"], "ná li"), (["3", "5"], "nǎ li"), (["2", "3"], "ná lǐ")])
-def test_a_final_third_tone_may_be_neutral_in_the_word(tones, pinyin):  # 哪里
+def test_a_correct_card_needs_one_native_reading():  # 展览馆 is 2-2-3 or 3-2-3 (R89)
+    out = problems(deck_dict(zhanlanguan()))
+    assert "card 'z01': has 2 native readings (2-2-3, 3-2-3); a correct card needs one (R89)" in out
+
+
+def test_a_correct_card_with_two_groupings_inside_a_phrase_is_refused():  # 一把雨伞 yì bá yú sǎn
+    umbrella = card(
+        id="u01", set="diag_count", pair=None, text="一把雨伞", pinyin="yì bá yú sǎn",
+        citation_pinyin="yī bǎ yǔ sǎn",
+        intended={"id": "u01", "tones": ["4", "2", "2", "3"], "labels": ["yi", "ba", "yu", "san"]},
+        produced_tones=["4", "2", "2", "3"],
+    )
+    out = problems(deck_dict(umbrella))
+    assert "card 'u01': has 2 native readings (4-2-2-3, 4-3-2-3); a correct card needs one (R89)" in out
+
+
+def test_a_correct_card_with_one_reading_is_accepted():  # 一杯水 yì bēi shuǐ
+    assert parse_deck(deck_dict()).card[0].label == "correct"
+    assert parse_deck(deck_dict(tushuguan())).card[0].produced_tones == ["2", "1", "3"]
+
+
+def test_an_error_card_may_have_several_native_readings():
+    # 土鼠管 tǔ shǔ guǎn is 2-2-3 or 3-2-3; its twin 图书馆 (2-1-3) carries the one-reading guarantee
+    error = tushuguan(
+        id="z01-e", label="tone_error", text="土鼠管", pinyin="tú shú guǎn",
+        citation_pinyin="tǔ shǔ guǎn", produced_tones=["2", "2", "3"],
+    )
+    assert parse_deck(deck_dict(tushuguan(id="z01-c"), error)).card[1].label == "tone_error"
+
+
+@pytest.mark.parametrize("pinyin,tones,refused", [
+    ("nǎ li", ["3", "5"], False), ("ná li", ["2", "5"], True), ("ná lǐ", ["2", "3"], True),
+])
+def test_a_written_neutral_syllable_keeps_the_third_tone_before_it(pinyin, tones, refused):  # 哪里 nǎ li
     lone = card(
-        id="n01", set="diag_count", pair=None, text="哪里", pinyin=pinyin, citation_pinyin="nǎ lǐ",
+        id="n01", set="diag_count", pair=None, text="哪里", pinyin=pinyin, citation_pinyin="nǎ li",
         intended={"id": "n01", "tones": tones, "labels": ["na", "li"]}, produced_tones=tones,
     )
-    assert parse_deck(deck_dict(lone)).card[0].produced_tones == tones
+    if refused:
+        assert f"phrase reading {'-'.join(tones)} is not a sandhi reading of 'nǎ li' (3-5)" in problems(deck_dict(lone))
+    else:
+        assert parse_deck(deck_dict(lone)).card[0].produced_tones == tones
 
 
 def test_an_ordinal_yi_after_di_stays_yi1():  # 第一次 dì yī cì

@@ -5,6 +5,7 @@ headers; decoding and quality control of the audio is intake's job."""
 from __future__ import annotations
 
 import json
+import lzma
 import re
 import zipfile
 import zlib
@@ -122,9 +123,10 @@ class Bundle:
 
 
 # What reading a member of a damaged zip can raise: a bad CRC or header (BadZipFile), a broken or
-# cut-off compressed stream (zlib.error, EOFError), and a compression method or encryption that
-# zipfile cannot undo (NotImplementedError, RuntimeError).
-_DAMAGE = (zipfile.BadZipFile, zlib.error, EOFError, NotImplementedError, RuntimeError)
+# cut-off compressed stream (zlib.error for deflate, OSError for bz2, lzma.LZMAError for lzma,
+# EOFError), and a compression method or encryption that zipfile cannot undo (NotImplementedError,
+# RuntimeError).
+_DAMAGE = (zipfile.BadZipFile, zlib.error, OSError, lzma.LZMAError, EOFError, NotImplementedError, RuntimeError)
 
 
 def read_bundle(zip_path: str | Path) -> Bundle:

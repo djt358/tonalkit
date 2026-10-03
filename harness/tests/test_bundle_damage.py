@@ -1,6 +1,7 @@
 """contracts.bundle: a damaged zip (a phone share that was cut, a flipped byte) is a BundleError that
 lists every damaged member, never a raw zipfile or zlib exception."""
 
+import lzma
 import zipfile
 import zlib
 from pathlib import Path
@@ -103,6 +104,43 @@ def test_every_way_a_member_read_can_fail_is_a_damaged_member(tmp_path, monkeypa
     monkeypatch.setattr(zipfile.ZipFile, "read", read)
     out = bundle_error(path)
     assert f"{member}: damaged ({raised})" in out
+
+
+def compressed_bundle(path: Path, compression: int) -> Path:
+    """The bundle's members written with `compression` (bz2 or lzma), which stored_bundle is not."""
+    members = {
+        "session.json": zipfile.ZipFile(stored_bundle(path.parent)).read("session.json"),
+        "clips/g01-c.wav": CLIP_C,
+        "clips/g01-e.wav": CLIP_E,
+    }
+    with zipfile.ZipFile(path, "w", compression=compression) as z:
+        for name, data in members.items():
+            z.writestr(name, data)
+    return path
+
+
+def break_stream(path: Path, member: str, at: int, value: int) -> None:
+    """Set one byte of a compressed member's data (`at` bytes in) so its stream cannot be decoded."""
+    info = zipfile.ZipFile(path).getinfo(member)
+    raw = bytearray(path.read_bytes())
+    start = info.header_offset + 30 + len(info.filename.encode()) + len(info.extra)
+    raw[start + at] = value
+    path.write_bytes(bytes(raw))
+
+
+@pytest.mark.parametrize("compression,at,value,error", [
+    (zipfile.ZIP_BZIP2, 0, 0x00, OSError),  # the BZh magic
+    (zipfile.ZIP_LZMA, 4, 0xFF, lzma.LZMAError),  # the LZMA properties byte
+], ids=["bz2", "lzma"])
+def test_a_broken_bz2_or_lzma_member_is_a_damaged_member(tmp_path, compression, at, value, error):
+    path = compressed_bundle(tmp_path / "c.zip", compression)
+    assert set(read_bundle(path).audio) == {"g01-c", "g01-e"}
+    break_stream(path, "clips/g01-e.wav", at, value)
+    with pytest.raises(error):  # what zipfile raises: the reason _DAMAGE must name it
+        zipfile.ZipFile(path).read("clips/g01-e.wav")
+    out = bundle_error(path)
+    assert "clips/g01-e.wav: damaged (" in out
+    assert "clips/g01-c.wav" not in out
 
 
 def test_a_truncated_zip_is_not_a_zip(tmp_path):

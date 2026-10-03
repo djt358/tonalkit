@@ -80,52 +80,52 @@ def test_yi_before_bu_follows_the_underlying_tone_of_bu():  # 一不对: yí bú
 
 # ---- third tones ---------------------------------------------------------------------------
 
-def test_two_third_tones():  # 水果 shuí guǒ, 你好 ní hǎo (the neutral readings are tested below)
-    assert opts("shuǐ guǒ") >= seq("23")
-    assert opts("nǐ hǎo") >= seq("23")
-    assert {o for o in opts("shuǐ guǒ") if "5" not in o} == seq("23")
+def test_two_third_tones():  # 水果 shuí guǒ, 你好 ní hǎo
+    assert opts("shuǐ guǒ") == seq("23")
+    assert opts("nǐ hǎo") == seq("23")
 
 
 def test_three_third_tones_accept_both_groupings():  # 展览馆
-    assert {o for o in opts("zhǎn lǎn guǎn") if "5" not in o} == {("2", "2", "3"), ("3", "2", "3")}
+    assert opts("zhǎn lǎn guǎn") == {("2", "2", "3"), ("3", "2", "3")}
 
 
 def test_four_third_tones_accept_every_bracketing():
-    assert {o for o in opts("wǒ yě hěn hǎo") if "5" not in o} == {tuple("2223"), tuple("3223"), tuple("2323")}
+    assert opts("wǒ yě hěn hǎo") == {tuple("2223"), tuple("3223"), tuple("2323")}
 
 
 def test_a_third_tone_before_another_tone_is_unchanged():
-    assert opts("lǎo hǔ chī ròu") >= seq("2314")
-    assert opts("nǐ men") == seq("35")  # men is neutral by citation: no second reading
+    assert opts("lǎo hǔ chī ròu") == seq("2314")
 
 
 def test_runs_are_independent_and_mix_with_bu():  # 好久不见 hǎo jiǔ bú jiàn
-    assert opts("hǎo jiǔ bù jiàn") >= seq("2324")
-    assert {o for o in opts("hǎo jiǔ bù jiàn") if "5" not in o} == seq("2324")
+    assert opts("hǎo jiǔ bù jiàn") == seq("2324")
 
 
 def test_one_third_tone_alone_is_unchanged():
     assert opts("hǎo") == seq("3")
 
 
-# ---- a final third tone that is neutral in the word (哪里, 姐姐, 奶奶) ---------------------------------
+# ---- a neutral syllable written as neutral keeps the third tone before it (R89) ----------------
 
-@pytest.mark.parametrize("pinyin,text", [("nǎ lǐ", "哪里"), ("jiě jiě", "姐姐"), ("nǎi nǎi", "奶奶")])
-def test_a_third_tone_before_a_neutral_syllable_of_citation_third_tone_is_3_or_2(pinyin, text):
-    # citation 3-3 (the neutral syllable is written with its underlying tone); spoken ná li / nǎ li
-    assert opts(pinyin, text=text) == {tuple("23"), tuple("35"), tuple("25")}
-
-
-def test_the_neutral_final_applies_to_the_last_syllable_of_a_longer_run():  # 展览馆 as 3-3-neutral
-    assert opts("zhǎn lǎn guǎn") == {tuple("223"), tuple("323"), tuple("235"), tuple("225")}
+@pytest.mark.parametrize("pinyin,text", [
+    ("nǎ li", "哪里"), ("jiě jie", "姐姐"), ("nǎi nai", "奶奶"), ("nǐ men", "你们"),
+])
+def test_a_third_tone_before_a_written_neutral_syllable_stays_3(pinyin, text):
+    assert opts(pinyin, text=text) == seq("35")  # exactly one reading: never 2-5
 
 
-def test_only_a_final_third_tone_can_be_the_neutral_one():
-    assert tuple("53") not in opts("nǎ lǐ") and tuple("55") not in opts("nǎ lǐ")
+def test_the_underlying_third_tone_of_a_neutral_word_gives_the_regular_sandhi():
+    assert opts("nǎ lǐ", text="哪里") == seq("23")  # written 3-3: 2-3, not ná li or nǎ li
 
 
 def test_a_neutral_reading_is_not_a_citation_reading():
+    assert opts("nǎ li", "isolated") == seq("35")
     assert opts("nǎ lǐ", "isolated") == seq("33")
+
+
+def test_a_neutral_syllable_ends_a_third_tone_run():  # 我们 wǒ men; 你好吗 ní hǎo ma
+    assert opts("wǒ men") == seq("35")
+    assert opts("nǐ hǎo ma") == seq("235")
 
 
 def test_other_tones_do_not_neutralise():  # only T3 runs: 大家 dà jiā stays 4-1
