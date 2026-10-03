@@ -22,7 +22,7 @@ def test_a_repeated_row_becomes_that_many_numbered_cards(tmp_path):
     assert [c["id"] for c in cards] == ["r01", "r02", "r03"] and flags == {}
     assert cards[0]["context"] == "isolated" and cards[0]["produced_tones"] == ["1", "2", "3", "4"]
     assert cards[0]["intended"] == {"id": "r01", "tones": ["1", "2", "3", "4"], "labels": ["ma"] * 4}
-    assert cards[2]["prompt_note"] == "Pause." and cards[2]["label"] == "correct"
+    assert cards[2]["prompt_note"] == "Again, 3 of 3. Pause." and cards[2]["label"] == "correct"
     assert trial.problems(cards) == []
 
 
