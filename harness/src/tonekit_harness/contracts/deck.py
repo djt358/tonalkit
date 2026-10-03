@@ -46,6 +46,8 @@ class Card(StrictModel):
     produced_tones: list[str]  # what the card asks to be said
     distractors: list[Candidate] = []
     prompt_note: str = ""
+    # shown instead of `prompt_note` when the speaker reads traditional (R88); "" counts as unset
+    prompt_note_traditional: str | None = None
     status: Literal["unverified", "approved"] = "unverified"  # `approved` is DJ's audit only
 
     @model_validator(mode="after")
@@ -70,6 +72,8 @@ class Card(StrictModel):
                 f"text_traditional has {len(self.text_traditional)} characters "
                 f"but text has {len(self.text)}"
             )
+        if (self.prompt_note_traditional or "").strip() and not self.prompt_note.strip():
+            problems.append("prompt_note_traditional is set but prompt_note is empty")
         if len(self.produced_tones) != len(self.intended.tones):
             problems.append(
                 f"produced_tones has {len(self.produced_tones)} tones "

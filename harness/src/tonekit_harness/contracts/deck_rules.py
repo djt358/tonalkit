@@ -83,7 +83,20 @@ def _reading_problems(card: Card, rules: LectRules) -> list[str]:
     options = rules.surface_options(citation_tones, [s.base for s in citation], card.context, card.text)
     if tuple(card.produced_tones) not in options:
         problems.append(_sandhi_problem(card, citation_tones, options))
+    problems += _native_reading_problems(card, options)
     return problems
+
+
+def _native_reading_problems(card: Card, options: set[tuple[str, ...]]) -> list[str]:
+    """A correct phrase card has one native reading (R89): one `produced_tones` list would grade
+    the other native readings wrong. An error card is unaffected: its twin carries the guarantee."""
+    if card.label != "correct" or card.context != "phrase" or len(options) < 2:
+        return []
+    readings = ", ".join(fmt(o) for o in sorted(options))
+    return [
+        f"card {card.id!r}: has {len(options)} native readings ({readings}); "
+        "a correct card needs one (R89)"
+    ]
 
 
 def _sandhi_problem(card: Card, citation_tones: list[str], options: set[tuple[str, ...]]) -> str:

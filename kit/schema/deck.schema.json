@@ -101,6 +101,18 @@
           "title": "Prompt Note",
           "type": "string"
         },
+        "prompt_note_traditional": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Prompt Note Traditional"
+        },
         "set": {
           "enum": [
             "gate",

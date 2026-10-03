@@ -7,12 +7,9 @@ The rules, on cmn pack tone ids:
   right before 一, so this needs `text`.
 - Third tones: a 3 before a 3 becomes 2. A run of three or more 3s is grouped by the reader, so
   every grouping is accepted: 展览馆 is 2-2-3 or 3-2-3.
-- A final 3 of such a run may be neutral (5) in the word: 哪里 nǎ li, 姐姐 jiě jie, 奶奶 nǎi nai. The
-  card writes the underlying tone (nǎ lǐ, citation 3-3) and shows the neutral one (nǎ li). The 3
-  before that neutral syllable is then 3 (the half-third stays) or 2 (as if the next were still a
-  3): 哪里 is 3-5 or 2-5, besides the regular 2-3. There is no lexicon here, so the neutral reading
-  is accepted for the last 3 of any run of two or more third tones (it also admits 你好 as ní hao).
-  A syllable that is neutral by citation (你们 nǐ men, citation 3-5) has no second reading.
+- A neutral syllable written as neutral (5) keeps the 3 before it: 你们 nǐ men and 姐姐 jiě jie are
+  3-5, 哪里 nǎ li is 3-5, never 2-5. Words whose neutral syllable is underlyingly a 3 (哪里 ná li,
+  小姐, 想想) have two native readings and stay out of decks (R89).
 Both 一 and 不 follow the *citation* tone of the next syllable. Neither changes before a neutral
 tone (5), which has no underlying tone to follow; write the underlying tone in the pinyin.
 """
@@ -49,7 +46,7 @@ def surface_options(
     fixed = _yi_and_bu(citation, syllables, hanzi)
     return {
         _assemble(fixed, runs)
-        for runs in product(*(_run_options(n) | _neutral_final_options(n) for _, n in _runs(fixed)))
+        for runs in product(*(_run_options(n) for _, n in _runs(fixed)))
     }
 
 
@@ -119,19 +116,6 @@ def _run_options(n: int) -> frozenset[tuple[str, ...]]:
         for k in range(1, n)
         for left in _run_options(k)
         for right in _run_options(n - k)
-    )
-
-
-@lru_cache(maxsize=None)
-def _neutral_final_options(n: int) -> frozenset[tuple[str, ...]]:
-    """The readings of a run of n >= 2 third tones whose last syllable is neutral (5): the rest of
-    the run reads as a run of n - 1, and the third tone before the neutral stays 3 or becomes 2."""
-    if n < 2:
-        return frozenset()
-    return frozenset(
-        variant
-        for left in _run_options(n - 1)
-        for variant in (left + ("5",), left[:-1] + ("2", "5"))
     )
 
 
