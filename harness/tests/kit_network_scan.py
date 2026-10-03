@@ -35,12 +35,16 @@ def _imported_names(tree: ast.AST) -> set[str]:
 
 
 def _loader_aliases(tree: ast.AST) -> tuple[set[str], set[str]]:
-    """The names this file gives importlib (`import importlib as il`) and its loaders
-    (`from importlib import import_module as load`)."""
+    """The names this file gives importlib (`import importlib as il`; `import importlib.util` binds
+    `importlib` too) and its loaders (`from importlib import import_module as load`)."""
     modules, functions = set(), {"__import__"}
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
-            modules.update(a.asname or a.name for a in node.names if a.name == "importlib")
+            for alias in node.names:
+                if alias.name == "importlib":
+                    modules.add(alias.asname or alias.name)
+                elif alias.name.startswith("importlib.") and alias.asname is None:
+                    modules.add("importlib")
         elif isinstance(node, ast.ImportFrom) and node.module == "importlib" and node.level == 0:
             functions.update(a.asname or a.name for a in node.names if a.name in LOADERS)
     return modules, functions

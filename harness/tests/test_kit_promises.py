@@ -16,7 +16,7 @@ STATUS = re.compile(r"\(built(?:, as policy)?\)|\b(?:P4|C0|E1) \(built\)|\b(?:P4
 ARRIVES_WITH = {
     "kit/app/": "kit/app",
     "kit/tests/": "kit/app",
-    "test_bundle.py": "harness/src/tonekit_harness/contracts",
+    "test_bundle.py": "harness/src/tonekit_harness/contracts/wav_check.py",  # C0 only
     "test_registry_refusals.py": "harness/src/tonekit_harness/registry",
     "test_registry_stale.py": "harness/src/tonekit_harness/registry",
 }

@@ -17,7 +17,7 @@ SCREENS = {
         "finish_early", "finish_early_confirm",
     ],
     "pause": ["title", "body", "resume"],
-    "done": ["title", "body", "code_label", "code_note", "delete", "delete_confirm", "deleted"],
+    "done": ["title", "body", "code_label", "code_note", "delete", "delete_confirm", "delete_confirm_unsent", "deleted"],
     "share": ["button", "again", "fallback", "done"],
     "error": ["mic_blocked", "unsupported", "in_app_browser", "storage", "generic"],
 }  # fmt: skip
@@ -29,7 +29,6 @@ ENUMS = {
     "reading": ["hanzi", "hanzi_pinyin"],
     "script": ["simplified", "traditional"],  # R74
 }
-BLANK_ALLOWED = {"card.phrase_hint"}  # a card with nothing to add shows no hint (the kit hides an empty one)
 NO_DECLINE = ["reading", "script"]  # how the cards look, so the bundle enums have no prefer_not
 
 
@@ -54,7 +53,7 @@ def test_the_keys_are_exactly_the_contract():
 def test_every_value_is_a_plain_one_line_string():
     for key, value in copy().items():
         assert isinstance(value, str) and value.strip() == value, key
-        assert value or key in BLANK_ALLOWED, f"{key} is empty"
+        assert value, f"{key} is empty"
         assert "\n" not in value, key
 
 
@@ -112,11 +111,34 @@ def test_deleting_from_the_phone_says_it_cannot_be_undone_and_what_dj_keeps():
     assert "\n" not in confirm  # it is the text of a native confirm() box
 
 
-def test_every_way_to_stop_before_consent_says_how_to_open_safari():
+def test_deleting_before_sending_says_nothing_has_been_sent():
+    # R90: the confirm before any share. Nobody should read "DJ keeps what you sent" when nothing was.
+    unsent = copy()["done.delete_confirm_unsent"]
+    assert unsent == "Nothing has been sent to DJ yet. Deleting removes your recordings from this phone for good."
+    assert "\n" not in unsent  # it is the text of a native confirm() box
+    assert "keeps" not in unsent and "send DJ your code" not in unsent
+
+
+def test_the_done_screen_does_not_claim_every_card_was_read():
+    # "Finish and send what I have" reaches this screen with cards left, so it can't say "every card".
+    body = copy()["done.body"]
+    assert body.startswith("You're done with the cards. Tap Share with DJ to send your recordings.")
+    assert "every card" not in body.lower()
+
+
+def test_the_phrase_hint_asks_for_one_phrase_not_one_character_at_a_time():
+    # A reader going one character at a time says the base tone of 一 and 不 and misses the sandhi.
+    assert copy()["card.phrase_hint"] == "Say it as one phrase, at your normal pace."
+
+
+APPS = ["WeChat", "RedNote", "Douyin", "TikTok", "LinkedIn", "Snapchat", "Weibo", "QQ", "Instagram", "Facebook", "Line"]
+
+
+def test_every_way_to_stop_before_consent_says_how_to_open_safari_in_both_languages():
     values = copy()
     for key in ("error.in_app_browser", "error.unsupported"):
-        assert "Open in Safari" in values[key], key
-    assert "WeChat" not in values["error.in_app_browser"]  # the screen names no app; it works for any of them
+        assert "Open in Safari (在Safari中打开)." in values[key], key  # the label Chinese-language WeChat shows
+        assert not [app for app in APPS if app in values[key]], key  # R92: the stop screen works for any app
 
 
 def test_the_microphone_help_names_the_settings_path_and_no_glyph():

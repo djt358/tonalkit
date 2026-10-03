@@ -1,6 +1,6 @@
 {
   "welcome.title": "Thanks for helping out",
-  "welcome.body": "You'll read about 70 short cards aloud, about 20 minutes in all. Find a quiet spot, ideally on your own, and speak the way you normally do; every accent helps. A few cards look a little off on purpose, so read every card exactly as written, even if it looks wrong. You're not being tested. The app is. You can pause and pick it up later.",
+  "welcome.body": "You'll read about 70 short cards aloud, about 20 minutes in all. Find a quiet spot, ideally on your own, and speak the way you normally do; every accent helps. A few cards look a little off on purpose, so read every card exactly as written, even if it looks wrong. You're not being tested. The app is. You can pause and pick it up within a few days.",
   "welcome.start": "Get started",
 
   "consent.title": "Before you start",
@@ -52,7 +52,7 @@
   "card.next": "Next",
   "card.note": "{note}",
   "card.isolated_hint": "Say it by itself, like you're telling someone how it's pronounced.",
-  "card.phrase_hint": "Say it naturally, like part of a conversation.",
+  "card.phrase_hint": "Say it as one phrase, at your normal pace.",
   "card.saved": "Saved on your phone.",
   "card.finish_early": "Finish and send what I have",
   "card.finish_early_confirm": "Finish now? The cards you haven't recorded will count as skipped.",
@@ -62,11 +62,12 @@
   "pause.resume": "Continue where I left off",
 
   "done.title": "All done. Thank you!",
-  "done.body": "That's every card. Tap Share with DJ to send your recordings. If it doesn't go through, you can send again. Once DJ has them, you can delete your copy.",
+  "done.body": "You're done with the cards. Tap Share with DJ to send your recordings. If it doesn't go through, you can send again. Once DJ has them, you can delete your copy.",
   "done.code_label": "Your code",
   "done.code_note": "Keep this code if you ever want your recordings deleted: just send it to DJ. It's also in the name of the file you share.",
   "done.delete": "Delete from this phone",
   "done.delete_confirm": "Delete your recordings and answers from this phone? This can't be undone. DJ keeps what you already sent; to have DJ delete it too, send DJ your code.",
+  "done.delete_confirm_unsent": "Nothing has been sent to DJ yet. Deleting removes your recordings from this phone for good.",
   "done.deleted": "Deleted from this phone. Thank you again for helping. To have DJ delete what you sent, send DJ your code.",
 
   "share.button": "Share with DJ",
@@ -75,8 +76,8 @@
   "share.done": "Thank you. You're all done.",
 
   "error.mic_blocked": "The microphone is blocked. Open Settings, tap Apps, then Safari, then Microphone, and choose Allow. Then reload this page.",
-  "error.unsupported": "This page needs Safari on an iPhone. If you opened it inside another app, tap the ⋯ or share button and choose Open in Safari.",
-  "error.in_app_browser": "Please open this page in Safari. It opened inside another app, where recording or sharing may not work. Tap the ⋯ or share button, then choose Open in Safari.",
+  "error.unsupported": "This page needs Safari on an iPhone. If you opened it inside another app, tap the ⋯ or share button and choose Open in Safari (在Safari中打开).",
+  "error.in_app_browser": "Please open this page in Safari. It opened inside another app, where recording or sharing may not work. Tap the ⋯ or share button, then choose Open in Safari (在Safari中打开).",
   "error.storage": "This page can't save your recordings on your phone. That can happen in a Private tab or when storage is full. Try a normal Safari tab, then reload.",
   "error.generic": "Something went wrong. Reload the page; your recordings so far should still be there. If it keeps happening, tell DJ."
 }

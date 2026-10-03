@@ -71,7 +71,10 @@ def test_the_consent_says_what_dj_decided_about_use_place_and_deletion():
     consent = body()
     assert "test the checker on real voices and tune its settings" in consent  # R72: testing and tuning
     assert "DJ may publish overall results and the tuned settings, never your recordings." in consent
-    assert "Anthropic's Claude" in consent and "which only DJ's account can open" in consent  # R78
+    assert (  # R78: who can open the workspace comes before what DJ does in it
+        "in a private cloud workspace that only DJ's account can open, where DJ uses an AI assistant "
+        "(Anthropic's Claude)."
+    ) in consent
     assert "The private workspace above is the one exception." in consent
     assert "(characters or pinyin, simplified or traditional)" in consent  # R74
     assert "redoes anything not yet released without you" in consent  # R72

@@ -4,7 +4,7 @@ Open it in Safari, not inside WeChat or another app:
 [paste the link here]
 
 What you'll do
-Answer a few quick questions, then read about 70 short cards aloud, one word or phrase at a time. Speak the way you normally do; every accent helps. You can pause and come back later.
+Answer a few quick questions, then read about 70 short cards aloud, one word or phrase at a time. Speak the way you normally do; every accent helps. You can pause and finish later this week.
 
 What you need
 - An iPhone

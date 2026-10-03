@@ -14,7 +14,7 @@ DJ is building Bendy, a Mandarin-learning app DJ plans to sell, and tonekit, the
 ## Who gets it
 
 - Your recordings and answers stay on your phone until you tap Share.
-- Then DJ analyzes them on DJ's own computers and in a private cloud workspace DJ uses with an AI assistant (Anthropic's Claude), which only DJ's account can open.
+- Then DJ analyzes them on DJ's own computers and in a private cloud workspace that only DJ's account can open, where DJ uses an AI assistant (Anthropic's Claude).
 - No one else.
 - DJ may publish overall results and the tuned settings, never your recordings.
 

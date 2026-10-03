@@ -47,6 +47,8 @@ def test_the_scan_sees_a_network_import(tmp_path, line):
     [
         "__import__('socket')",
         "import importlib\nimportlib.import_module('socket')",
+        "import importlib.util\nimportlib.import_module('socket')",
+        "import importlib.metadata\nimportlib.import_module(name)",
         "import importlib\nimportlib.import_module(name)",
         "import importlib as il\nil.import_module('requests')",
         "from importlib import import_module\nimport_module(name)",
