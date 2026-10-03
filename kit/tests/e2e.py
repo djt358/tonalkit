@@ -499,7 +499,9 @@ def volunteer_session(
     bundle, code = download_bundle(page, tmp)
     # A download can't be confirmed, so the session stays (done screen, same code). The store
     # remembers that it was downloaded, so the delete confirm no longer says nothing was sent.
-    page.wait_for_function(f"async () => (await ({STORED_SESSION.strip()})()).downloaded === true")
+    page.wait_for_function(
+        f"async () => (await ({STORED_SESSION.strip()})()).downloaded === true"
+    )
     page.reload()
     expect(page.locator("#screen-done")).to_be_visible()
     expect(page.locator("#done-code")).to_have_text(code)
@@ -519,16 +521,21 @@ def volunteer_session(
     # The page never claims a state the store doesn't hold: "Send again" is already saved.
     assert stored_session(page)["shared"] is True
     again = [
-        c for c in page.evaluate("window.__shareTextChanges") if c["text"] == copy_text("share.again")
+        c
+        for c in page.evaluate("window.__shareTextChanges")
+        if c["text"] == copy_text("share.again")
     ]
-    assert again and all(c["writes"] == 0 for c in again), again  # no save still in flight
+    # No save may still be in flight when the page says "Send again".
+    assert again and all(c["writes"] == 0 for c in again), again
     shared = page.evaluate("window.__shared")
     assert shared == {
         "name": bundle.name,
         "type": "application/zip",
         "size": bundle.stat().st_size,
     }, shared
-    page.wait_for_function("() => !document.getElementById('share-button').dataset.busy")
+    page.wait_for_function(
+        "() => !document.getElementById('share-button').dataset.busy"
+    )
     page.reload()
     expect(page.locator("#screen-done")).to_be_visible()
     expect(page.locator("#done-code")).to_have_text(code)
@@ -549,7 +556,8 @@ def volunteer_session(
     expect(page.locator("#share-status")).to_have_text(copy_text("done.deleted"))
     expect(share).to_be_hidden()
     expect(page.locator("#done-delete")).to_be_hidden()
-    expect(page.locator('[data-copy="done.body"]')).to_be_hidden()  # "now send them" is moot
+    # "Now send the recordings" is moot once they are gone.
+    expect(page.locator('[data-copy="done.body"]')).to_be_hidden()
     assert dialogs == [copy_text("done.delete_confirm")] * 2, dialogs
     page_clean(page, problems)
     page.reload()
@@ -810,6 +818,7 @@ def main() -> int:
                 ],
                 capture_output=True,
                 text=True,
+                check=False,
             )
             sys.stdout.write(checked.stdout)
             sys.stderr.write(checked.stderr)
