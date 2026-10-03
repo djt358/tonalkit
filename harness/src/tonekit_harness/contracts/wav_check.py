@@ -13,6 +13,7 @@ from dataclasses import dataclass
 CLIP_RATE, CLIP_CHANNELS, CLIP_SAMPLE_WIDTH = 16_000, 1, 2  # Hz, mono, 16-bit bytes
 
 # fmt chunk format tags a recorder may write instead of plain PCM
+_PCM = 1
 _FORMAT_NAMES = {3: "IEEE float", 6: "A-law", 7: "mu-law", 0xFFFE: "WAVE_FORMAT_EXTENSIBLE"}
 _UNKNOWN_FORMAT = re.compile(r"unknown format: (\d+)")
 
@@ -32,6 +33,9 @@ class WavHeader:
 def check_wav(data: bytes) -> WavHeader:
     """The header of a 16 kHz mono 16-bit PCM WAV with all its audio, else a ValueError saying what
     is wrong (the clip's name is the caller's to add)."""
+    tag = _format_tag(data)
+    if tag is not None and tag != _PCM:
+        raise ValueError(_format_problem(tag))
     try:
         with wave.open(io.BytesIO(data), "rb") as w:
             header = WavHeader(w.getframerate(), w.getnchannels(), w.getsampwidth(), w.getnframes())
@@ -53,11 +57,29 @@ def check_wav(data: bytes) -> WavHeader:
     return header
 
 
+def _format_tag(data: bytes) -> int | None:
+    """The fmt chunk's format tag, read here so the answer doesn't depend on the Python version
+    (`wave` reads WAVE_FORMAT_EXTENSIBLE from 3.12 on); None when the file has no readable fmt chunk
+    (`wave` then says what is wrong)."""
+    if len(data) < 12 or data[:4] != b"RIFF" or data[8:12] != b"WAVE":
+        return None
+    at = 12
+    while at + 8 <= len(data):
+        chunk, size = data[at : at + 4], struct.unpack_from("<I", data, at + 4)[0]
+        if chunk == b"fmt ":
+            return struct.unpack_from("<H", data, at + 8)[0] if at + 10 <= len(data) else None
+        at += 8 + size + (size & 1)
+    return None
+
+
+def _format_problem(tag: int) -> str:
+    name = _FORMAT_NAMES.get(tag, f"format {tag}")
+    return f"is {name}, not plain PCM; need 16-bit PCM at 16000 Hz, 1 channel"
+
+
 def _wave_error(e: wave.Error) -> str:
     """The module only reads plain PCM: a file in another encoding is `unknown format: <tag>`."""
     m = _UNKNOWN_FORMAT.fullmatch(str(e))
     if m is None:
         return f"not a PCM WAV ({e})"
-    tag = int(m.group(1))
-    name = _FORMAT_NAMES.get(tag, f"format {tag}")
-    return f"is {name}, not plain PCM; need 16-bit PCM at 16000 Hz, 1 channel"
+    return _format_problem(int(m.group(1)))
