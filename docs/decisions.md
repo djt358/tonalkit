@@ -1,6 +1,6 @@
 # Decisions
 
-The choices that shaped tonekit's behaviour, data and build, numbered `R1` to `R84`. Code comments
+The choices that shaped tonekit's behaviour, data and build, numbered `R1` to `R92`. Code comments
 and tests cite them as "ruling R27" or just `R27`; this is where they are written down. Each entry
 says what was decided, why, and what it costs if it turns out wrong. The spec
 ([`docs/superpowers/specs/`](superpowers/specs/2026-09-28-tone-assessment-design.md)) says what
@@ -442,7 +442,8 @@ the list is refused until added.
 ### R65: 一 and 不 follow the next syllable's citation tone
 
 **Decision.** 一 and 不 change by the following syllable's citation tone, not before a neutral tone
-or when final; ordinal readings (一月, 第一) must be `isolated` cards or reworded. **Why.** It keeps
+or when final; 一 right after 第 keeps yī (第一次); other ordinal readings (一月) must be
+`isolated` cards or reworded. **Why.** It keeps
 the checker deterministic. **Cost if wrong.** A rare card is refused falsely.
 
 ### R66: Pairs are scoped to their set
@@ -570,6 +571,62 @@ Safari omits two of them, and a missing key failed every iPhone bundle. **Cost i
 Saturday 08:00 PT until DJ says otherwise. **Why.** WeChat is the likeliest way native speakers
 open a link and its webview may not share files; a mid-weekend deploy would mix code with resumed
 sessions. **Cost if wrong.** A volunteer in an unlisted in-app browser hits the old failure.
+
+### R85: A manifest with any volunteer clip is refused whole
+
+**Decision.** `load_sources` refuses a whole manifest that holds any `volunteer-corpus` clip,
+rather than skipping those clips. **Why.** A mixed manifest is a mistake to surface, not to work
+around. **Cost if wrong.** The manifest has to be split.
+
+### R86: The script question defaults by background
+
+**Decision.** The kit preselects traditional for Taiwan and Hong Kong/Macau backgrounds until the
+person picks. **Why.** It saves a tap on the likely answer. **Cost if wrong.** One tap.
+
+### R87: Superseded by R89
+
+**Decision.** A first narrowing of T3 sandhi before a neutral syllable, replaced by R89. **Why.**
+It still let a 3-5 citation pass as 2-5. **Cost if wrong.** None; R89 stands.
+
+### R88: Card notes can be written in traditional characters
+
+**Decision.** Cards may carry `prompt_note_traditional`, shown instead of `prompt_note` when the
+speaker reads traditional. **Why.** Notes name characters ("睡 as in 睡觉"), which differ by script.
+**Cost if wrong.** One more column.
+
+### R89: Every scored card has one native reading
+
+**Decision.** A citation 3-3 (水果) has exactly the surface 2-3. A citation 3-5, with the neutral
+syllable written as neutral (你们, 姐姐), keeps 3-5. A `correct` card whose citation allows more
+than one native surface is refused, including a phrase whose T3 run of three or more has two
+groupings (一把雨伞). **Why.** One `produced_tones` list grades the other native reading wrong.
+Words whose neutral syllable is underlyingly T3 (哪里 ná li, 小姐, 想想) have two native readings,
+so they stay out of decks. **Cost if wrong.** A few natural words and phrases are unavailable to
+decks until cards can carry alternative produced lists.
+
+### R90: Deleting before sending says nothing has been sent
+
+**Decision.** "Delete from this phone" stays on the done screen. Before anything has been shared,
+its confirm says nothing has reached DJ and deleting removes the recordings for good
+(`done.delete_confirm_unsent`); after a share it is `done.delete_confirm`. **Why.** Someone who
+decides not to send can still delete, and nobody reads "DJ keeps what you sent" when nothing was
+sent. **Cost if wrong.** One copy key.
+
+### R91: Deck approvals are pinned to what the card shows
+
+**Decision.** DJ's audit is recorded in `kit/deck/sources/approvals.csv` by `tkh deck approve`.
+Each row pins a card id to a fingerprint (the first 12 hex digits of the sha256 of the card's
+canonical JSON without `status`). The builder approves a card only while that fingerprint matches,
+drops rejected cards and reports stale approvals. `tkh deck check --ship` fails unless every card
+is approved and every pair and minimal set is whole. **Why.** Error cards are derived from lexicon
+rows, so approving a source row can't stand for approving what the volunteer sees. **Cost if
+wrong.** An edited card needs approving again.
+
+### R92: More in-app browsers are stopped
+
+**Decision.** R84's stop screen also matches RedNote, Douyin and TikTok, LinkedIn and Snapchat.
+**Why.** RedNote in particular is a likely way Bay Area Mandarin speakers pass a link on. **Cost
+if wrong.** None.
 
 ## Process
 
