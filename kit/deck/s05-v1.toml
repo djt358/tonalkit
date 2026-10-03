@@ -16,7 +16,7 @@ context = "isolated"
 intended = { id = "r01", tones = ["1", "2", "3", "4"], labels = ["ma", "ma", "ma", "ma"] }
 produced_tones = ["1", "2", "3", "4"]
 distractors = []
-prompt_note = "Four separate sounds with a short pause between each."
+prompt_note = "Four separate sounds with a short pause between each. You'll read this card 8 times in a row."
 status = "unverified"
 
 [[card]]
@@ -31,7 +31,7 @@ context = "isolated"
 intended = { id = "r02", tones = ["1", "2", "3", "4"], labels = ["ma", "ma", "ma", "ma"] }
 produced_tones = ["1", "2", "3", "4"]
 distractors = []
-prompt_note = "Four separate sounds with a short pause between each."
+prompt_note = "Again, 2 of 8. Four separate sounds with a short pause between each."
 status = "unverified"
 
 [[card]]
@@ -46,7 +46,7 @@ context = "isolated"
 intended = { id = "r03", tones = ["1", "2", "3", "4"], labels = ["ma", "ma", "ma", "ma"] }
 produced_tones = ["1", "2", "3", "4"]
 distractors = []
-prompt_note = "Four separate sounds with a short pause between each."
+prompt_note = "Again, 3 of 8. Four separate sounds with a short pause between each."
 status = "unverified"
 
 [[card]]
@@ -61,7 +61,7 @@ context = "isolated"
 intended = { id = "r04", tones = ["1", "2", "3", "4"], labels = ["ma", "ma", "ma", "ma"] }
 produced_tones = ["1", "2", "3", "4"]
 distractors = []
-prompt_note = "Four separate sounds with a short pause between each."
+prompt_note = "Again, 4 of 8. Four separate sounds with a short pause between each."
 status = "unverified"
 
 [[card]]
@@ -76,7 +76,7 @@ context = "isolated"
 intended = { id = "r05", tones = ["1", "2", "3", "4"], labels = ["ma", "ma", "ma", "ma"] }
 produced_tones = ["1", "2", "3", "4"]
 distractors = []
-prompt_note = "Four separate sounds with a short pause between each."
+prompt_note = "Again, 5 of 8. Four separate sounds with a short pause between each."
 status = "unverified"
 
 [[card]]
@@ -91,7 +91,7 @@ context = "isolated"
 intended = { id = "r06", tones = ["1", "2", "3", "4"], labels = ["ma", "ma", "ma", "ma"] }
 produced_tones = ["1", "2", "3", "4"]
 distractors = []
-prompt_note = "Four separate sounds with a short pause between each."
+prompt_note = "Again, 6 of 8. Four separate sounds with a short pause between each."
 status = "unverified"
 
 [[card]]
@@ -106,7 +106,7 @@ context = "isolated"
 intended = { id = "r07", tones = ["1", "2", "3", "4"], labels = ["ma", "ma", "ma", "ma"] }
 produced_tones = ["1", "2", "3", "4"]
 distractors = []
-prompt_note = "Four separate sounds with a short pause between each."
+prompt_note = "Again, 7 of 8. Four separate sounds with a short pause between each."
 status = "unverified"
 
 [[card]]
@@ -121,7 +121,7 @@ context = "isolated"
 intended = { id = "r08", tones = ["1", "2", "3", "4"], labels = ["ma", "ma", "ma", "ma"] }
 produced_tones = ["1", "2", "3", "4"]
 distractors = []
-prompt_note = "Four separate sounds with a short pause between each."
+prompt_note = "Again, 8 of 8. Four separate sounds with a short pause between each."
 status = "unverified"
 
 [[card]]
