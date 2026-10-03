@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { micVerdict, percentile, MIC_CHECK_S, NOISY_FLOOR_DB, LOW_SPEECH_DB } from "../../app/miccheck.js";
+import { micVerdict, percentile, MIC_CHECK_S, NOISY_FLOOR_DB, LOW_SPEECH_DB, WARMUP_FRAMES } from "../../app/miccheck.js";
 
 // 3 s of 50 ms level frames (dBFS RMS): `speech` of them at the speech level, the rest at the
 // room's level, in a deterministic interleaving (talking in bursts, with pauses between words).
@@ -59,4 +59,27 @@ test("a short burst of speech (a fifth of the time) still counts as speech", () 
 
 test("no level frames at all (audio never flowed): low", () => {
   assert.equal(micVerdict([]).verdict, "low");
+});
+
+// iOS can hand over digital silence for the first frames while the microphone warms up.
+const warmUp = (frames) => [...Array(WARMUP_FRAMES).fill(-120), ...frames];
+
+test("M1: leading digital silence does not hide a noisy room (a short check, where it would set the floor)", () => {
+  assert.equal(WARMUP_FRAMES, 4);
+  const noisy = trace(-38, -22).slice(0, 36); // 36 real frames + 4 zeros: the zeros are 10% of them
+  assert.equal(micVerdict(noisy).verdict, "noisy");
+  const read = micVerdict(warmUp(noisy));
+  assert.equal(read.verdict, "noisy");
+  assert.ok(read.floor > NOISY_FLOOR_DB, JSON.stringify(read));
+  assert.equal(micVerdict(warmUp(trace(-38, -22))).verdict, "noisy", "and in a full three-second check");
+});
+
+test("M1: leading digital silence does not change a good or a quiet reading either", () => {
+  assert.equal(micVerdict(warmUp(trace(-62, -24))).verdict, "ok");
+  assert.equal(micVerdict(warmUp(trace(-62, -48))).verdict, "low");
+});
+
+test("M1: with too few frames to spare, every frame counts (a mic that only ever sent silence is low)", () => {
+  assert.equal(micVerdict(Array(WARMUP_FRAMES + 5).fill(-120)).verdict, "low");
+  assert.equal(micVerdict(Array(10).fill(-30)).verdict, "noisy");
 });

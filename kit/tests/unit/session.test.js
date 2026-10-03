@@ -14,6 +14,7 @@ import {
   cardState,
   skipRemaining,
   hasKeptTake,
+  deleteConfirmKey,
 } from "../../app/session.js";
 import { cardOrder } from "../../app/order.js";
 
@@ -128,4 +129,16 @@ test("finishing early: every card without a kept take counts as skipped; kept ta
     Object.fromEntries(s.order.map((id) => [id, [s.cards[id].kept, s.cards[id].skipped]])),
     { a: [true, false], b: [false, true], c: [false, true], d: [false, true] },
   );
+});
+
+test("R90: a delete confirm says nothing was sent until the bundle was shared or downloaded", () => {
+  const s = createSession({ deck: { id: "d", sha256: "0".repeat(64), text: "{}" }, cards: [{ id: "a", set: "register" }], dev: false });
+  assert.equal(s.shared, false);
+  assert.equal(s.downloaded, false);
+  assert.equal(deleteConfirmKey(s), "done.delete_confirm_unsent");
+  assert.equal(deleteConfirmKey({ ...s, shared: true }), "done.delete_confirm");
+  assert.equal(deleteConfirmKey({ ...s, downloaded: true }), "done.delete_confirm");
+  assert.equal(deleteConfirmKey({ ...s, shared: true, downloaded: true }), "done.delete_confirm");
+  const { shared, downloaded, ...stored } = s; // a session stored before the flags existed
+  assert.equal(deleteConfirmKey(stored), "done.delete_confirm_unsent");
 });

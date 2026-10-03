@@ -27,6 +27,40 @@ test("R84: WeChat, Weibo, QQ, Instagram, Facebook/Messenger and Line webviews ar
   for (const [name, ua] of Object.entries(IN_APP)) assert.equal(isInAppBrowser(ua), true, name);
 });
 
+// R92: each token on its own, so a regex edit can't quietly drop one.
+const R92_TOKENS = {
+  rednote: "xhsdiscover",
+  douyin: "aweme",
+  tiktok_old: "musical_ly",
+  bytedance: "BytedanceWebview",
+  tiktok: "TikTok",
+  linkedin: "LinkedInApp",
+  snapchat: "Snapchat",
+};
+
+test("R92: RedNote, Douyin, TikTok, LinkedIn and Snapchat are stopped, one test per token", () => {
+  for (const [name, token] of Object.entries(R92_TOKENS)) {
+    assert.equal(isInAppBrowser(`${IOS} Mobile/15E148 ${token}/1.0`), true, `${name}: ${token}`);
+  }
+});
+
+test("R92: real user agents of those apps are stopped", () => {
+  const apps = {
+    rednote: `${IOS} Mobile/15E148 discover/8.45.1 (iPhone; iOS 17.5; Scale/3.00) Resolution/1170*2532 xhsdiscover NetType/WiFi`,
+    douyin: `${IOS} Mobile/15E148 aweme_29.4.0 JsSdk/2.0 NetType/WIFI Channel/App Store ByteLocale/zh-Hans BytedanceWebview/d8a21c6`,
+    tiktok: `${IOS} Mobile/15E148 musical_ly_35.1.0 JsSdk/2.0 NetType/WIFI Channel/App Store ByteLocale/en Region/US BytedanceWebview/d8a21c6`,
+    tiktok_named: `${IOS} Mobile/15E148 TikTok 35.1.0 (iPhone15,2; iOS 17_5)`,
+    linkedin: `${IOS} Mobile/15E148 [LinkedInApp]/9.30.1523`,
+    snapchat: `${IOS} Mobile/15E148 Snapchat/12.89.0.38 (like Safari/8617.1.17.10.9, panda)`,
+  };
+  for (const [name, ua] of Object.entries(apps)) assert.equal(isInAppBrowser(ua), true, name);
+});
+
+test("plain iOS Safari and iOS Chrome (CriOS) still pass after R92", () => {
+  assert.equal(isInAppBrowser(BROWSERS.safari), false);
+  assert.equal(isInAppBrowser(BROWSERS.chrome_ios), false);
+});
+
 test("Safari and real browsers (including the standalone QQ Browser) go through", () => {
   for (const [name, ua] of Object.entries(BROWSERS)) assert.equal(isInAppBrowser(ua), false, name);
   assert.equal(isInAppBrowser(""), false);

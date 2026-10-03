@@ -5,11 +5,11 @@ Assembles the site as Pages does, serves it locally, and walks volunteers' sessi
 on the stand-in deck:
 - the full session in traditional characters: consent, background, microphone check, six cards
   (a reload, an interruption, a skip and a redo on the way), the download, then the share sheet,
-  "Send again" and "Delete from this phone" (R77);
+  "Send again" and "Delete from this phone" (R77, R90), card notes in the reader's script (R88);
 - finishing early after one card;
 - a blocked microphone, an in-app browser (R84), declining consent, and volunteer mode.
 Every request must go to the test server, the microphone is never asked for before consent,
-and nothing may break the page's Content-Security-Policy. The bundles are checked against the
+nothing may break the page's Content-Security-Policy, and no screen has a text field. The bundles are checked against the
 contract (check_bundle.py) and for fidelity (every clip is the fixture's speech, at the right
 pitch and speed).
 
@@ -34,6 +34,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 import numpy as np
+from playwright.sync_api import TimeoutError as PlaywrightTimeout
 from playwright.sync_api import expect, sync_playwright
 from scipy.signal import correlate, resample_poly
 
@@ -50,6 +51,13 @@ STANDIN = "?dev=1&deck=standin"
 TRADITIONAL = {"一杯水", "一杯睡", "買書", "賣書", "一", "不對"}
 SIMPLIFIED = {"一杯水", "一杯睡", "买书", "卖书", "一", "不对"}
 TWINS = [{"一杯水", "一杯睡"}, {"買書", "賣書"}, {"买书", "卖书"}]
+# The note under each card, per script (R88), read from the stand-in deck the app uses.
+NOTES = {}
+for _card in json.loads((KIT / "app" / "standin" / "deck.json").read_text())["card"]:
+    NOTES["simplified", _card["text"]] = _card["prompt_note"]
+    NOTES["traditional", _card.get("text_traditional") or _card["text"]] = (
+        _card.get("prompt_note_traditional") or _card["prompt_note"]
+    )
 WECHAT_UA = (
     "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 "
     "(KHTML, like Gecko) Mobile/15E148 MicroMessenger/8.0.49(0x18003137) NetType/WIFI Language/zh_CN"
@@ -180,6 +188,43 @@ GUARD = """
   document.addEventListener("click", (e) => {
     if (e.target.closest && e.target.closest("#consent-agree")) sessionStorage.setItem(KEY, "1");
   }, true);
+  // R77: the page may say "Send again" only once the store holds it. Count the writes in flight
+  // (readwrite transactions not yet complete) and note how many there were whenever the share
+  // button's text changed.
+  window.__writes = 0;
+  window.__shareTextChanges = [];
+  const transaction = IDBDatabase.prototype.transaction;
+  IDBDatabase.prototype.transaction = function (stores, mode, ...rest) {
+    const tx = transaction.call(this, stores, mode, ...rest);
+    if (mode === "readwrite") {
+      window.__writes++;
+      for (const type of ["complete", "abort"]) tx.addEventListener(type, () => window.__writes--, {once: true});
+    }
+    return tx;
+  };
+  document.addEventListener("DOMContentLoaded", () => {
+    const button = document.getElementById("share-button");
+    new MutationObserver(() =>
+      window.__shareTextChanges.push({text: button.textContent, writes: window.__writes}),
+    ).observe(button, {childList: true, characterData: true, subtree: true});
+  });
+  // The kit never asks for free text (PROMISES: no names, no notes): no text field on any screen,
+  // in the page as parsed or as the app builds it.
+  const TEXT_FIELDS = "input[type=text], input:not([type]), textarea, [contenteditable]";
+  window.__textFields = [];
+  const scan = (node) => {
+    if (node.nodeType !== 1) return;
+    for (const el of [node, ...node.querySelectorAll(TEXT_FIELDS)]) {
+      if (el.matches(TEXT_FIELDS)) window.__textFields.push(`<${el.localName}> in #${el.closest("section")?.id}`);
+    }
+  };
+  new MutationObserver((records) => {
+    for (const r of records) {
+      if (r.type === "attributes") scan(r.target);
+      else r.addedNodes.forEach(scan);
+    }
+  }).observe(document, {childList: true, subtree: true, attributes: true, attributeFilter: ["contenteditable", "type"]});
+  document.addEventListener("DOMContentLoaded", () => scan(document.documentElement));
   // Playback of a take (a blob: URL) must work under the CSP's media-src.
   window.__played = 0;
   const play = HTMLMediaElement.prototype.play;
@@ -230,10 +275,13 @@ def new_context(
 
 
 def page_clean(page, problems: list[str]) -> None:
-    """At the end of a page's flow: no CSP violation, no microphone before consent."""
+    """At the end of a page's flow: no CSP violation, no text field, no microphone before consent."""
     violations = page.evaluate("window.__cspViolations")
     if violations:
         problems.append(f"CSP violations: {violations}")
+    fields = page.evaluate("window.__textFields")
+    if fields:
+        problems.append(f"text fields: {fields}")
     if page.evaluate("window.__micBeforeConsent === true"):
         problems.append("getUserMedia was called before consent")
 
@@ -265,13 +313,42 @@ Object.defineProperty(document, "hidden", {value: false, configurable: true});
 """
 
 
+# What the store holds, read straight from IndexedDB (the page must have opened it already).
+STORED_SESSION = """
+async () => new Promise((resolve, reject) => {
+  const open = indexedDB.open("tonekit-kit");
+  open.onerror = () => reject(open.error);
+  open.onsuccess = () => {
+    const db = open.result;
+    const get = db.transaction("session").objectStore("session").get("current");
+    get.onsuccess = () => { db.close(); resolve(get.result ?? null); };
+    get.onerror = () => reject(get.error);
+  };
+})
+"""
+
+
+def stored_session(page) -> dict | None:
+    return page.evaluate(STORED_SESSION)
+
+
+def delete_confirm_text(page) -> str:
+    """Taps "Delete from this phone", reads the native confirm, and cancels it."""
+    seen: list[str] = []
+    page.once("dialog", lambda d: (seen.append(d.message), d.dismiss()))
+    page.click("#done-delete")
+    assert len(seen) == 1, seen
+    return seen[0]
+
+
 def start_session(page, base: str) -> None:
     """Welcome and consent, from a fresh page."""
     page.goto(base + STANDIN)
     expect(page.locator("#dev-banner")).to_be_visible()
     page.click("#welcome-start")
     expect(page.locator("#screen-consent")).to_be_visible()
-    expect(page.locator("#consent-text h2").first).to_be_visible()
+    # P12's CONSENT.md headings are ## (rendered h3), the stand-in's # (h2).
+    expect(page.locator("#consent-text :is(h2, h3)").first).to_be_visible()
     page.click("#consent-agree")
     expect(page.locator("#screen-background")).to_be_visible()
 
@@ -288,12 +365,25 @@ def check_microphone(page) -> None:
 
 
 def card_face(page, faces: set[str], lang: str) -> str:
-    """The card on screen: its text must be one of `faces`, tagged `lang`."""
+    """The card on screen: its text must be one of `faces`, tagged `lang`, with the deck's note
+    for that script under it (R88: 睡覺 for a traditional reader, 睡觉 for a simplified one)."""
     text = page.locator("#card-text")
     expect(text).not_to_be_empty()
     expect(text).to_have_attribute("lang", lang)
     shown = text.inner_text()
     assert shown in faces, f"{shown!r} is not one of {sorted(faces)}"
+    script = "traditional" if lang == "zh-Hant" else "simplified"
+    note = NOTES[script, shown]
+    note_box = page.locator("#card-note")
+    if note:
+        expect(note_box).to_have_text(copy_text("card.note").replace("{note}", note))
+        expect(note_box).to_have_attribute("lang", lang)
+    else:
+        expect(note_box).to_be_hidden()
+    if shown == "一杯睡":
+        assert ("睡覺" in note) == (script == "traditional") and ("睡觉" in note) == (
+            script == "simplified"
+        ), note
     return shown
 
 
@@ -400,11 +490,20 @@ def volunteer_session(
         record(page)
         page.click("#card-next")
 
+    # Every card was shown, the g01 error card (睡覺 / 睡觉 in its note) among them (R88).
+    assert "一杯睡" in shown, shown
+
+    # R90: nothing has been shared or downloaded yet, so the delete confirm says so.
+    expect(page.locator("#screen-done")).to_be_visible()
+    assert delete_confirm_text(page) == copy_text("done.delete_confirm_unsent")
     bundle, code = download_bundle(page, tmp)
-    # A download can't be confirmed, so the session stays (done screen, same code).
+    # A download can't be confirmed, so the session stays (done screen, same code). The store
+    # remembers that it was downloaded, so the delete confirm no longer says nothing was sent.
+    page.wait_for_function(f"async () => (await ({STORED_SESSION.strip()})()).downloaded === true")
     page.reload()
     expect(page.locator("#screen-done")).to_be_visible()
     expect(page.locator("#done-code")).to_have_text(code)
+    assert delete_confirm_text(page) == copy_text("done.delete_confirm")
     page_clean(page, problems)
 
     # R77: the share sheet's "success" deletes nothing; the button offers to send again.
@@ -413,15 +512,23 @@ def volunteer_session(
     share = page.locator("#share-button")
     expect(share).to_be_enabled(timeout=10_000)
     expect(share).to_have_text(copy_text("share.button"))
+    assert stored_session(page)["shared"] is False
     share.click()
     expect(page.locator("#share-status")).to_have_text(copy_text("share.done"))
     expect(share).to_have_text(copy_text("share.again"))
+    # The page never claims a state the store doesn't hold: "Send again" is already saved.
+    assert stored_session(page)["shared"] is True
+    again = [
+        c for c in page.evaluate("window.__shareTextChanges") if c["text"] == copy_text("share.again")
+    ]
+    assert again and all(c["writes"] == 0 for c in again), again  # no save still in flight
     shared = page.evaluate("window.__shared")
     assert shared == {
         "name": bundle.name,
         "type": "application/zip",
         "size": bundle.stat().st_size,
     }, shared
+    page.wait_for_function("() => !document.getElementById('share-button').dataset.busy")
     page.reload()
     expect(page.locator("#screen-done")).to_be_visible()
     expect(page.locator("#done-code")).to_have_text(code)
@@ -436,11 +543,13 @@ def volunteer_session(
     page.once("dialog", lambda d: (dialogs.append(d.message), d.dismiss()))
     page.click("#done-delete")
     expect(share).to_be_visible()
+    expect(page.locator('[data-copy="done.body"]')).to_be_visible()
     page.once("dialog", lambda d: (dialogs.append(d.message), d.accept()))
     page.click("#done-delete")
     expect(page.locator("#share-status")).to_have_text(copy_text("done.deleted"))
     expect(share).to_be_hidden()
     expect(page.locator("#done-delete")).to_be_hidden()
+    expect(page.locator('[data-copy="done.body"]')).to_be_hidden()  # "now send them" is moot
     assert dialogs == [copy_text("done.delete_confirm")] * 2, dialogs
     page_clean(page, problems)
     page.reload()
@@ -473,7 +582,11 @@ def finish_early(browser, base: str, tmp: Path, problems: list[str]) -> Path:
     page.once("dialog", lambda d: (dialogs.append(d.message), d.accept()))
     finish.click()
     assert dialogs == [copy_text("card.finish_early_confirm")] * 2, dialogs
+    # R90: before anything is sent the delete confirm says so; once the file was downloaded, not.
+    expect(page.locator("#screen-done")).to_be_visible()
+    assert delete_confirm_text(page) == copy_text("done.delete_confirm_unsent")
     bundle, _ = download_bundle(page, tmp)
+    assert delete_confirm_text(page) == copy_text("done.delete_confirm")
     page_clean(page, problems)
     context.close()
     with zipfile.ZipFile(bundle) as z:
@@ -525,6 +638,14 @@ def in_app_browser(browser, base: str, problems: list[str]) -> None:
     for hidden in ("#screen-welcome", "#dev-banner", "#error-banner"):
         expect(page.locator(hidden)).to_be_hidden()
     page_clean(page, problems)
+    # The text-field check must see one when there is one (a probe, after the page's own check).
+    page.evaluate(
+        "document.body.append(Object.assign(document.createElement('textarea'), {id: 'probe'}))"
+    )
+    try:
+        page.wait_for_function("window.__textFields.length === 1", timeout=2000)
+    except PlaywrightTimeout:
+        problems.append("the text-field check did not see a probe textarea")
     context.close()
 
 

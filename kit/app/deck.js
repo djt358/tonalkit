@@ -51,6 +51,13 @@ export function cardFace(card, script) {
   };
 }
 
+/**
+ * The note under a card (R88): the traditional one for a reader of traditional characters when
+ * the card has it, else `prompt_note`. "" when there is none.
+ */
+export const cardNote = (card, script) =>
+  (script === "traditional" && card.prompt_note_traditional) || card.prompt_note || "";
+
 /** Cards a volunteer sees: approved ones only, unless in dev mode. */
 export const shownCards = (cards, dev) => (dev ? cards : cards.filter((c) => c.status === "approved"));
 

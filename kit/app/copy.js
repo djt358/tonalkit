@@ -23,7 +23,7 @@ export const COPY_KEYS = [
   "card.finish_early", "card.finish_early_confirm",
   "pause.title", "pause.body", "pause.resume",
   "done.title", "done.body", "done.code_label", "done.code_note",
-  "done.delete", "done.delete_confirm", "done.deleted",
+  "done.delete", "done.delete_confirm", "done.delete_confirm_unsent", "done.deleted",
   "share.button", "share.fallback", "share.done", "share.again",
   "error.mic_blocked", "error.unsupported", "error.storage", "error.generic", "error.in_app_browser",
 ];

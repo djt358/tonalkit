@@ -82,8 +82,14 @@ export function createSession({ deck, cards, dev, now = new Date(), code = newCo
     index: 0,
     cards: {}, // card id -> {takes, kept, skipped, duration_s, peak, quiet}
     step: "consent", // consent | background | mic | cards | done
+    shared: false, // the share sheet reported success (R77)
+    downloaded: false, // the fallback download link was tapped (R90)
   };
 }
+
+/** R90: before the bundle was shared or downloaded, a delete says nothing has been sent. */
+export const deleteConfirmKey = (session) =>
+  session.shared || session.downloaded ? "done.delete_confirm" : "done.delete_confirm_unsent";
 
 /** Progress for one card (created on first use). */
 export function cardState(session, id) {

@@ -80,11 +80,11 @@ test("a deployed CONSENT.md without its version marker (or marked standin) is re
   assert.match(standin.consentProblem, /stand-in/);
 });
 
-test("the copy keys added for R74, R77, R84 and the review are present", () => {
+test("the copy keys added for R74, R77, R84, R90 and the reviews are present", () => {
   for (const key of [
     "background.script.label", "background.script.simplified", "background.script.traditional",
     "consent.declined", "card.finish_early", "card.finish_early_confirm", "share.again",
-    "done.delete", "done.delete_confirm", "done.deleted", "error.in_app_browser",
+    "done.delete", "done.delete_confirm", "done.delete_confirm_unsent", "done.deleted", "error.in_app_browser",
   ]) assert.ok(COPY_KEYS.includes(key), key);
   assert.ok(!COPY_KEYS.includes("background.script.prefer_not"));
 });

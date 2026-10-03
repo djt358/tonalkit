@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
-import { loadDeck, parseDeck, shownCards, deckFromStored, DeckError, sha256Hex, cardFace } from "../../app/deck.js";
+import { loadDeck, parseDeck, shownCards, deckFromStored, DeckError, sha256Hex, cardFace, cardNote } from "../../app/deck.js";
 
 const STANDIN = new URL("../../app/standin/deck.json", import.meta.url);
 const standinBytes = readFileSync(STANDIN);
@@ -34,6 +34,24 @@ test("R74: a traditional reader sees text_traditional where the card has one, ta
   assert.deepEqual(cardFace(plain, "traditional"), { text: "一", lang: "zh-Hant" });
   assert.deepEqual(cardFace(both, "simplified"), { text: "不对", lang: "zh-Hans" });
   assert.deepEqual(cardFace({ ...both, text_traditional: "" }, "traditional"), { text: "不对", lang: "zh-Hant" });
+});
+
+test("R88: a traditional reader sees prompt_note_traditional when the card has it, else prompt_note", () => {
+  const both = { prompt_note: "Read it as written: 睡 as in 睡觉.", prompt_note_traditional: "Read it as written: 睡 as in 睡覺." };
+  assert.equal(cardNote(both, "traditional"), "Read it as written: 睡 as in 睡覺.");
+  assert.equal(cardNote(both, "simplified"), "Read it as written: 睡 as in 睡觉.");
+  const plain = { prompt_note: "Read it as written: mài, as in selling." };
+  assert.equal(cardNote(plain, "traditional"), plain.prompt_note, "no traditional note: the plain one");
+  assert.equal(cardNote({ ...plain, prompt_note_traditional: "" }, "traditional"), plain.prompt_note);
+  assert.equal(cardNote({ id: "r01" }, "traditional"), "", "no note at all");
+  assert.equal(cardNote({ prompt_note: "" }, "simplified"), "");
+});
+
+test("the stand-in deck's g01-e carries both notes (R88)", () => {
+  const { cards } = parseDeck(standinBytes.toString("utf8"));
+  const g01e = cards.find((c) => c.id === "g01-e");
+  assert.match(cardNote(g01e, "traditional"), /睡覺/);
+  assert.match(cardNote(g01e, "simplified"), /睡觉/);
 });
 
 test("the sha256 is over the exact bytes served (whitespace included)", async () => {

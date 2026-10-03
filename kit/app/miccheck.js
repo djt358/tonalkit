@@ -8,6 +8,11 @@ export const NOISY_FLOOR_DB = -45; // room level above this: "a bit noisy"
 export const LOW_SPEECH_DB = -40; // voice level below this: "a bit quiet"
 const FLOOR_P = 0.1;
 const SPEECH_P = 0.9;
+// iOS can deliver digital silence for the first frames while the microphone warms up: those
+// would read as a very quiet room (or a covered microphone), so they are not counted, as long as
+// a second of real frames remains.
+export const WARMUP_FRAMES = 4;
+const MIN_FRAMES_AFTER_WARMUP = 20;
 
 /** Nearest-rank percentile (p in [0, 1]) of `values`; -Infinity when there are none. */
 export function percentile(values, p) {
@@ -17,10 +22,12 @@ export function percentile(values, p) {
 }
 
 /**
- * @param {number[]} levelsDb the check's level frames (dBFS RMS)
+ * @param {number[]} allLevelsDb the check's level frames (dBFS RMS), warm-up included
  * @returns {{verdict: "ok"|"noisy"|"low", floor: number, speech: number}}
  */
-export function micVerdict(levelsDb) {
+export function micVerdict(allLevelsDb) {
+  const levelsDb =
+    allLevelsDb.length >= WARMUP_FRAMES + MIN_FRAMES_AFTER_WARMUP ? allLevelsDb.slice(WARMUP_FRAMES) : allLevelsDb;
   const floor = percentile(levelsDb, FLOOR_P);
   const speech = percentile(levelsDb, SPEECH_P);
   const verdict = floor > NOISY_FLOOR_DB ? "noisy" : speech < LOW_SPEECH_DB ? "low" : "ok";

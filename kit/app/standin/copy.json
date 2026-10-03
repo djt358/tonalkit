@@ -57,6 +57,7 @@
   "done.code_note": "Keep this code if you ever want your recordings deleted.",
   "done.delete": "Delete from this phone",
   "done.delete_confirm": "Delete your recordings from this phone? This can't be undone. Anything you already sent DJ is kept.",
+  "done.delete_confirm_unsent": "Delete your recordings from this phone? Nothing has been sent to DJ yet, so they will be gone for good.",
   "done.deleted": "Deleted from this phone.",
   "share.button": "Send to DJ",
   "share.fallback": "Save the file, then send it to DJ",

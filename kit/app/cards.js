@@ -2,7 +2,7 @@
 // "finish and send what I have" once something is kept.
 import { $, setText, currentScreen } from "./ui.js";
 import { cardState, hasKeptTake, skipRemaining } from "./session.js";
-import { cardFace } from "./deck.js";
+import { cardFace, cardNote } from "./deck.js";
 import { processTake } from "./take.js";
 
 const MAX_TAKE_S = 30; // a forgotten Stop ends the take here (it is kept, not thrown away)
@@ -71,7 +71,9 @@ export function cardScreen(app) {
     setText($("card-pinyin"), app.session.speaker.reading === "hanzi+pinyin" ? card.pinyin ?? "" : "");
     const hintKey = { isolated: "card.isolated_hint", phrase: "card.phrase_hint" }[card.context];
     setText($("card-hint"), hintKey ? app.t(hintKey) : "");
-    setText($("card-note"), card.prompt_note ? app.t("card.note", { note: card.prompt_note }) : "");
+    const note = cardNote(card, app.session.speaker.script);
+    $("card-note").lang = face.lang; // the note names characters: they need the reader's script's glyphs
+    setText($("card-note"), note ? app.t("card.note", { note }) : "");
     update();
     if (app.session.cards[id]?.kept) {
       const wav = await app.readClip(id);

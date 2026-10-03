@@ -4,7 +4,7 @@
 import { $, show, applyCopy, setMeter, setText, choiceGroup, selectChoice, currentScreen, onTap } from "./ui.js";
 import { loadCopy, optionKey } from "./copy.js";
 import { loadDeck, deckFromStored, DEFAULT_DECK_ID } from "./deck.js";
-import { createSession, isoUtc, SPEAKER_OPTIONS, defaultScript, sessionDevice } from "./session.js";
+import { createSession, isoUtc, SPEAKER_OPTIONS, defaultScript, sessionDevice, deleteConfirmKey } from "./session.js";
 import { Capture, captureSupported } from "./capture.js";
 import { isInAppBrowser } from "./browser.js";
 import { micVerdict, MIC_CHECK_S } from "./miccheck.js";
@@ -162,7 +162,7 @@ function showDownload() {
 
 /** "Delete from this phone": the only way, short of ?new=1, that the recordings are removed. */
 async function deleteFromPhone() {
-  if (!confirm(app.t("done.delete_confirm"))) return;
+  if (!confirm(app.t(deleteConfirmKey(app.session)))) return; // R90: unsent says so
   await app.store.clear();
   app.clips.clear();
   const link = $("share-fallback");
@@ -170,7 +170,7 @@ async function deleteFromPhone() {
   link.removeAttribute("href");
   app.session = null;
   app.bundle = null;
-  for (const id of ["share-button", "share-fallback", "done-delete"]) $(id).hidden = true;
+  for (const id of ["share-button", "share-fallback", "done-delete", "done-body"]) $(id).hidden = true;
   setText($("share-status"), app.t("done.deleted"));
 }
 
@@ -275,17 +275,26 @@ function wire() {
   });
 
   // A share iOS calls a success may be Copy, Save to Files or a send that fails later, so the
-  // recordings stay and the button offers to send again (R77).
+  // recordings stay and the button offers to send again (R77). The page says "Send again" only
+  // once the store holds that the bundle was shared: a reload right after must agree with it.
   onTap("share-button", async () => {
     if (!app.bundle) return;
     const result = await shareBundle(app.bundle); // first thing in the tap (iOS)
     if (result === "shared") {
       app.session.shared = true;
-      markShared();
       await save();
+      markShared();
     } else if (result !== "cancelled") {
       showDownload();
     }
+  });
+
+  // A tap on the fallback link starts a download the page can't follow; from then on a delete
+  // must not say nothing has been sent (R90).
+  $("share-fallback").addEventListener("click", async () => {
+    if (!app.session) return;
+    app.session.downloaded = true;
+    await save();
   });
 
   onTap("done-delete", deleteFromPhone);
