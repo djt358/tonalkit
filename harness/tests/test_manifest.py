@@ -74,7 +74,7 @@ def test_optional_fields_default():
     assert c.distractors == []
 
 
-@pytest.mark.parametrize("s", ["gate", "diag_t23", "diag_count", "diag_minimal", "quiet", "register"])
+@pytest.mark.parametrize("s", ["gate", "diag_t23", "diag_count", "diag_minimal", "diag_context", "quiet", "register"])
 def test_every_recorded_set_is_accepted(s):
     assert Clip.model_validate(row(set=s)).set == s
 
@@ -84,7 +84,7 @@ def test_the_synthetic_set_is_accepted_with_its_synthetic_field():
     assert c.set == "synthetic"
 
 
-@pytest.mark.parametrize("s", ["gate", "diag_t23", "diag_count", "diag_minimal", "quiet", "register"])
+@pytest.mark.parametrize("s", ["gate", "diag_t23", "diag_count", "diag_minimal", "diag_context", "quiet", "register"])
 def test_a_synthetic_field_outside_the_synthetic_set_is_rejected(s):
     with pytest.raises(ValidationError, match="synthetic"):
         Clip.model_validate(row(set=s, synthetic={"from": "gate-01-correct"}))

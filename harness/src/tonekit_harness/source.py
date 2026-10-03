@@ -25,6 +25,8 @@ from .voice import PackTones, Voice
 MIN_VOICED_FRAMES = 5  # a syllable needs this many voiced frames to be redrawn (50 ms)
 MAX_GAP_FRAMES = 2  # unvoiced frames a voiced core tolerates inside itself (20 ms)
 MIN_REGISTER_ST = 4.0  # tonekit's minimum register width, expanded symmetrically
+# The data-register id of the volunteers' recordings, which are never resynthesised (R80).
+NEVER_RESYNTHESISED = "volunteer-corpus"
 
 
 @dataclass(frozen=True)
@@ -39,6 +41,16 @@ class Source:
     calib_json: str | None
     accent: str
     register_json: str | None  # the speaker's register from their register clips; None: cold
+
+
+def refuse_volunteer_audio(clip: Clip) -> None:
+    """Resynthesis would imitate a volunteer's voice, which the consent promises never to do (R80).
+    A clip from the volunteer corpus is refused here, at the door every perturbation comes through."""
+    if clip.source == NEVER_RESYNTHESISED:
+        raise SynthError(
+            f"{clip.id}: volunteers' recordings are never resynthesised (the consent says we never "
+            f"imitate a voice); perturb clips from DJ's own or public corpora instead"
+        )
 
 
 def _semitones(hz: np.ndarray) -> np.ndarray:
@@ -131,7 +143,9 @@ def prepare(
     are decoded with it, and `adversary.search` grades the clip's perturbations with it.
 
     Only correct, non-synthetic clips can be perturbed: the label of a perturbed clip comes from
-    the family, and would be wrong for a clip that is already wrong or already synthetic."""
+    the family, and would be wrong for a clip that is already wrong or already synthetic. Clips
+    whose `source` is the volunteer corpus are refused outright (`refuse_volunteer_audio`)."""
+    refuse_volunteer_audio(clip)
     if clip.set == "synthetic":
         raise SynthError(f"{clip.id}: a synthetic clip cannot be perturbed again")
     if clip.label != "correct":
@@ -187,9 +201,13 @@ def load_sources(
 
     A clip with nothing to perturb is skipped with a warning on stderr; its message is appended to
     `skipped`, if given, so the caller can report how many. It is an error (`SynthError`, raised
-    when the generator is exhausted) if no clip could be perturbed."""
+    when the generator is exhausted) if no clip could be perturbed. A manifest holding any clip
+    from the volunteer corpus is refused whole, before anything is analysed: dropping those clips
+    quietly would let a mixed selection look as if it had worked (R80)."""
     manifest_path = Path(manifest_path)
     clips = manifest.load(manifest_path)
+    for clip in clips:
+        refuse_volunteer_audio(clip)
     files = calibration.load(pack, calib)
     pack_toml, calib_json = files.pack_toml, files.calib_json
     grader = evaluate.Grader(

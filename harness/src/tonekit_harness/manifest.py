@@ -5,24 +5,25 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Literal
+from typing import Literal, get_args
 
-from pydantic import BaseModel, ConfigDict, ValidationError, model_validator
+from pydantic import Field, ValidationError, model_validator
 
-ClipSet = Literal["gate", "diag_t23", "diag_count", "diag_minimal", "quiet", "register", "synthetic"]
-ClipLabel = Literal["correct", "tone_error", "graded", "n/a"]
+from .contracts.base import StrictModel
+
+# The deck's vocabulary (contracts.md section 1); a clip may also be synthetic, or `graded`.
+CardSet = Literal["gate", "diag_t23", "diag_count", "diag_minimal", "diag_context", "quiet", "register"]
+CardLabel = Literal["correct", "tone_error", "n/a"]
+Context = Literal["phrase", "isolated"]  # phrase: sandhi applies; isolated: the citation reading
+ClipSet = Literal[*get_args(CardSet), "synthetic"]
+ClipLabel = Literal[*get_args(CardLabel), "graded"]
 
 
 class ManifestError(ValueError):
     """A manifest could not be read; the message starts with `<path>:<line>:`."""
 
 
-class _Model(BaseModel):
-    # Unknown keys are errors: a typo such as "distractor" must not silently drop data.
-    model_config = ConfigDict(extra="forbid")
-
-
-class Candidate(_Model):
+class Candidate(StrictModel):
     id: str
     tones: list[str]
     # May be shorter than `tones`; missing entries mean "no label".
@@ -37,12 +38,12 @@ class Candidate(_Model):
         return self
 
 
-class Condition(_Model):
+class Condition(StrictModel):
     noise: str
     distance: str
 
 
-class Clip(_Model):
+class Clip(StrictModel):
     id: str
     path: str
     speaker: str
@@ -56,6 +57,11 @@ class Clip(_Model):
     source: str  # a data-register.csv id
     synthetic: dict | None = None
     needs_listen: bool = False
+    # Set for clips recorded from a deck (contracts.md section 4).
+    card: str | None = None  # deck card id
+    deck: str | None = None  # deck id
+    take: int | None = Field(default=None, ge=1)  # takes recorded for the kept clip
+    context: Context | None = None
 
     @model_validator(mode="after")
     def _synthetic_iff_synthetic_set(self) -> Clip:

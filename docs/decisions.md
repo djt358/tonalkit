@@ -1,6 +1,6 @@
 # Decisions
 
-The choices that shaped tonekit's behaviour, data and build, numbered `R1` to `R57`. Code comments
+The choices that shaped tonekit's behaviour, data and build, numbered `R1` to `R92`. Code comments
 and tests cite them as "ruling R27" or just `R27`; this is where they are written down. Each entry
 says what was decided, why, and what it costs if it turns out wrong. The spec
 ([`docs/superpowers/specs/`](superpowers/specs/2026-09-28-tone-assessment-design.md)) says what
@@ -422,6 +422,211 @@ P0 measures a 3-second utterance in the Swift latency test. **Why.** pYIN's dens
 four times over the latency budget on a server core and its memory is unbounded (about 500 MB at 120
 seconds), which can kill an iOS app; P0's latency is informational. **Cost if wrong.** The Mac run
 shows latency well over budget, which is expected until P1.
+
+## Volunteer recordings and the engine (S0.5)
+
+### R63: Each card's sandhi is checked on its own surface tones
+
+**Decision.** A `phrase` card's `produced_tones` must equal the sandhi of its own `citation_pinyin`
+(and `text`), and its `pinyin` shows those tones; for a correct card that is the intended reading,
+for an error card the erroneous one. **Why.** The first contract sentence checked `intended.tones`
+and failed its own example error card. **Cost if wrong.** A legitimate card shape is refused with a
+clear message.
+
+### R64: A run of three or more third tones accepts every binary bracketing
+
+**Decision.** T3 runs accept every binary bracketing (n=3: 2-2-3 and 3-2-3; n=4: 2-2-2-3, 3-2-2-3,
+2-3-2-3). **Why.** Natural speech groups such runs either way. **Cost if wrong.** A reading outside
+the list is refused until added.
+
+### R65: 一 and 不 follow the next syllable's citation tone
+
+**Decision.** 一 and 不 change by the following syllable's citation tone, not before a neutral tone
+or when final; 一 right after 第 keeps yī (第一次); other ordinal readings (一月) must be
+`isolated` cards or reworded. **Why.** It keeps
+the checker deterministic. **Cost if wrong.** A rare card is refused falsely.
+
+### R66: Pairs are scoped to their set
+
+**Decision.** A card pair is identified by `(set, pair)`, and both cards share the intended
+reading. **Why.** Different sets reuse short pair ids. **Cost if wrong.** None.
+
+### R67: Gate inputs and checks have fixed fields
+
+**Decision.** `[[input]]` is `{metric, file, summary}` (file relative, no `..`) and `[[check]]` is
+`{id, kind = "paths_unchanged", base, paths, summary}` with git pathspecs. **Why.** The contract
+named the sections without fields. **Cost if wrong.** A rename regenerates the schema.
+
+### R68: The purge log counts files, never names them
+
+**Decision.** `purge-log.jsonl` records how many files a purge removed, not their paths. **Why.**
+File names could identify a speaker, and the log is for auditing counts. **Cost if wrong.** A path
+list would be a format change.
+
+### R69: The held-out split of public corpora is a pinned hash
+
+**Decision.** `hashed_split` is the first 8 bytes of sha256(speaker id), big-endian, mod 100: under
+60 calib, under 80 dev, else heldout, pinned by golden tests at the bucket edges. **Why.** It
+decides who is held out, so it must never drift. **Cost if wrong.** Changing it silently moves
+speakers between fitting and held-out sets.
+
+### R70: Recorded corpora default to the gate split
+
+**Decision.** `recorded` corpora (volunteers, DJ) default to `gate`; `public` and `synthetic`
+corpora to the hash split. **Why.** The contract covered recorded and public sets only.
+**Cost if wrong.** None: gates refuse synthetic speakers anyway.
+
+### R71: The harness has no network client
+
+**Decision.** A test fails if anything in `harness/src` imports a network client. **Why.** It is the
+mechanism behind the consent's "never sent to any other service". **Cost if wrong.** A legitimate
+network use needs a deliberate edit of the list.
+
+### R72: Volunteer recordings are for testing and tuning
+
+**Decision.** Consent v1 covers testing and tuning tonekit and Bendy on volunteer audio. Volunteer
+speakers stay in the `gate` split for S1; a later decision may move consenting speakers into
+`calib`. The consent says plainly that a deletion removes the audio and everything kept from it,
+but can't pull back settings already released. **Why.** DJ's decision (2026-10-01). **Cost if
+wrong.** One consent sentence.
+
+### R73: First languages wait for P1
+
+**Decision.** Speakers carry their Mandarin background, not a first language; P1's gate reports its
+first-language requirement as a missing input until a P1 contract adds `Speaker.l1`. **Why.** S1
+doesn't need it and there is no data behind it yet. **Cost if wrong.** None for S1.
+
+### R74: Cards can be read in traditional characters
+
+**Decision.** Cards may carry `text_traditional`; the kit asks which script a person reads and
+records `speaker.script`. **Why.** Taiwan and Hong Kong volunteers reading odd error cards in an
+unfamiliar script would misread or be put off (DJ confirmed). **Cost if wrong.** One deck column
+to maintain.
+
+### R75: Bundles and phone audio can never be committed
+
+**Decision.** `.gitignore` and `scripts/check-no-audio.sh` also cover `.zip`, `.m4a`, `.caf` and
+`.aac`. **Why.** A volunteer bundle is a zip of WAVs, and the repository is public. **Cost if
+wrong.** None.
+
+### R76: Minimal sets and context contrasts
+
+**Decision.** `diag_minimal` cards are correct readings of different words, each naming another
+member as a distractor; a `diag_context` set contrasts citation (isolated) and sandhi (phrase)
+readings of the same syllables. **Why.** A forced error in every minimal set would be wrong, and DJ
+called sandhi vs citation critical. **Cost if wrong.** One enum value and one rule.
+
+### R77: Sharing never deletes a volunteer's recordings
+
+**Decision.** After a successful share the kit keeps the recordings and offers "Send again"; they
+are deleted only when the person confirms "Delete from this phone" or starts a new session.
+**Why.** iOS reports success for Copy, Save to Files, or a send that later fails, and the zip is the
+only copy. **Cost if wrong.** Recordings linger on the volunteer's phone until they delete them.
+
+### R78: The consent names where recordings are analysed
+
+**Decision.** The consent says recordings are analysed on DJ's computers and in a private cloud
+workspace DJ uses with an AI assistant (Anthropic's Claude), and excludes that workspace from
+"never shared with any other service". DJ confirms the wording. **Why.** A cloud workspace is a
+service; an honest consent names it. **Cost if wrong.** One sentence.
+
+### R79: Volunteer recordings are cleared for evaluation and calibration
+
+**Decision.** The `volunteer-corpus` register row is `allow` for fitting shipped calibration,
+following R72, so the S1 gate can issue a verdict on volunteer clips. **Why.** `verify` would make
+every volunteer gate run read "NOT A GATE". **Cost if wrong.** If DJ narrows the consent, the row
+goes back to `verify`.
+
+### R80: Volunteer recordings are never resynthesised
+
+**Decision.** WORLD resynthesis (`tkh synth`, `tkh adversary`) refuses any corpus whose source is
+`volunteer-corpus`. **Why.** It makes "never clone or imitate your voice" true by code. **Cost if
+wrong.** No synthetic perturbations of volunteer clips, which were never needed.
+
+### R81: Pair completeness applies to gate and T2/T3 pairs only
+
+**Decision.** One correct and one error card per pair is checked only in `gate` and `diag_t23`;
+elsewhere `pair` only groups. `diag_minimal` and `diag_context` cards are correct readings, and a
+minimal card names at least one other member as a distractor. **Why.** Nothing grades the other
+sets as pairs. **Cost if wrong.** A malformed group in another set goes unflagged.
+
+### R82: Accents default by background; public splits are enforced
+
+**Decision.** `Speaker.accent` is optional (default: Taiwan background → `cmn-TW`, else
+`cmn-standard`) and checked against the pack's accents at load. `public` and `synthetic` corpora
+must store the hash split; `recorded` corpora can move speakers. **Why.** A hand-edited
+`corpus.toml` must not put a held-out speaker into fitting. **Cost if wrong.** A deliberate manual
+split of a public corpus needs a new corpus kind.
+
+### R83: Unreported browser settings are recorded as null
+
+**Decision.** `device.constraints` always has `echoCancellation`, `noiseSuppression` and
+`autoGainControl`, each `true`, `false` or `null` when the browser doesn't report it. **Why.** iOS
+Safari omits two of them, and a missing key failed every iPhone bundle. **Cost if wrong.** None.
+
+### R84: In-app browsers are stopped; weekend deploys are frozen
+
+**Decision.** The kit shows "open this in Safari" before consent when it detects an in-app browser
+(WeChat, Weibo, QQ, Instagram, Facebook, Line). Kit deploys to GitHub Pages are frozen from
+Saturday 08:00 PT until DJ says otherwise. **Why.** WeChat is the likeliest way native speakers
+open a link and its webview may not share files; a mid-weekend deploy would mix code with resumed
+sessions. **Cost if wrong.** A volunteer in an unlisted in-app browser hits the old failure.
+
+### R85: A manifest with any volunteer clip is refused whole
+
+**Decision.** `load_sources` refuses a whole manifest that holds any `volunteer-corpus` clip,
+rather than skipping those clips. **Why.** A mixed manifest is a mistake to surface, not to work
+around. **Cost if wrong.** The manifest has to be split.
+
+### R86: The script question defaults by background
+
+**Decision.** The kit preselects traditional for Taiwan and Hong Kong/Macau backgrounds until the
+person picks. **Why.** It saves a tap on the likely answer. **Cost if wrong.** One tap.
+
+### R87: Superseded by R89
+
+**Decision.** A first narrowing of T3 sandhi before a neutral syllable, replaced by R89. **Why.**
+It still let a 3-5 citation pass as 2-5. **Cost if wrong.** None; R89 stands.
+
+### R88: Card notes can be written in traditional characters
+
+**Decision.** Cards may carry `prompt_note_traditional`, shown instead of `prompt_note` when the
+speaker reads traditional. **Why.** Notes name characters ("睡 as in 睡觉"), which differ by script.
+**Cost if wrong.** One more column.
+
+### R89: Every scored card has one native reading
+
+**Decision.** A citation 3-3 (水果) has exactly the surface 2-3. A citation 3-5, with the neutral
+syllable written as neutral (你们, 姐姐), keeps 3-5. A `correct` card whose citation allows more
+than one native surface is refused, including a phrase whose T3 run of three or more has two
+groupings (一把雨伞). **Why.** One `produced_tones` list grades the other native reading wrong.
+Words whose neutral syllable is underlyingly T3 (哪里 ná li, 小姐, 想想) have two native readings,
+so they stay out of decks. **Cost if wrong.** A few natural words and phrases are unavailable to
+decks until cards can carry alternative produced lists.
+
+### R90: Deleting before sending says nothing has been sent
+
+**Decision.** "Delete from this phone" stays on the done screen. Before anything has been shared,
+its confirm says nothing has reached DJ and deleting removes the recordings for good
+(`done.delete_confirm_unsent`); after a share it is `done.delete_confirm`. **Why.** Someone who
+decides not to send can still delete, and nobody reads "DJ keeps what you sent" when nothing was
+sent. **Cost if wrong.** One copy key.
+
+### R91: Deck approvals are pinned to what the card shows
+
+**Decision.** DJ's audit is recorded in `kit/deck/sources/approvals.csv` by `tkh deck approve`.
+Each row pins a card id to a fingerprint (the first 12 hex digits of the sha256 of the card's
+canonical JSON without `status`). The builder approves a card only while that fingerprint matches,
+drops rejected cards and reports stale approvals. `tkh deck check --ship` fails unless every card
+is approved and every pair and minimal set is whole. **Why.** Error cards are derived from lexicon
+rows, so approving a source row can't stand for approving what the volunteer sees. **Cost if
+wrong.** An edited card needs approving again.
+
+### R92: More in-app browsers are stopped
+
+**Decision.** R84's stop screen also matches RedNote, Douyin and TikTok, LinkedIn and Snapchat.
+**Why.** RedNote in particular is a likely way Bay Area Mandarin speakers pass a link on. **Cost
+if wrong.** None.
 
 ## Process
 

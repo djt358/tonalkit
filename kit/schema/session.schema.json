@@ -1,0 +1,271 @@
+{
+  "$defs": {
+    "Consent": {
+      "additionalProperties": false,
+      "properties": {
+        "agreed_at": {
+          "format": "date-time",
+          "title": "Agreed At",
+          "type": "string"
+        },
+        "version": {
+          "minLength": 1,
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "version",
+        "agreed_at"
+      ],
+      "title": "Consent",
+      "type": "object"
+    },
+    "DeckRef": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "pattern": "^[a-z0-9-]+$",
+          "title": "Id",
+          "type": "string"
+        },
+        "sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Sha256",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "sha256"
+      ],
+      "title": "DeckRef",
+      "type": "object"
+    },
+    "Device": {
+      "additionalProperties": false,
+      "properties": {
+        "constraints": {
+          "$ref": "#/$defs/DeviceConstraints"
+        },
+        "input_sample_rate": {
+          "exclusiveMinimum": 0,
+          "title": "Input Sample Rate",
+          "type": "integer"
+        },
+        "user_agent": {
+          "minLength": 1,
+          "title": "User Agent",
+          "type": "string"
+        }
+      },
+      "required": [
+        "user_agent",
+        "input_sample_rate",
+        "constraints"
+      ],
+      "title": "Device",
+      "type": "object"
+    },
+    "DeviceConstraints": {
+      "additionalProperties": false,
+      "description": "What the browser reported (null if it did not say), not what the kit asked for.",
+      "properties": {
+        "autoGainControl": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Autogaincontrol"
+        },
+        "echoCancellation": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Echocancellation"
+        },
+        "noiseSuppression": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Noisesuppression"
+        }
+      },
+      "required": [
+        "echoCancellation",
+        "noiseSuppression",
+        "autoGainControl"
+      ],
+      "title": "DeviceConstraints",
+      "type": "object"
+    },
+    "SessionClip": {
+      "additionalProperties": false,
+      "properties": {
+        "card": {
+          "pattern": "^[a-z0-9-]+$",
+          "title": "Card",
+          "type": "string"
+        },
+        "duration_s": {
+          "exclusiveMinimum": 0,
+          "title": "Duration S",
+          "type": "number"
+        },
+        "file": {
+          "title": "File",
+          "type": "string"
+        },
+        "peak": {
+          "minimum": 0,
+          "title": "Peak",
+          "type": "number"
+        },
+        "takes": {
+          "minimum": 1,
+          "title": "Takes",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "card",
+        "file",
+        "takes",
+        "duration_s",
+        "peak"
+      ],
+      "title": "SessionClip",
+      "type": "object"
+    },
+    "SpeakerInfo": {
+      "additionalProperties": false,
+      "properties": {
+        "background": {
+          "enum": [
+            "native",
+            "heritage",
+            "learner",
+            "prefer_not"
+          ],
+          "title": "Background",
+          "type": "string"
+        },
+        "grew_up_hearing": {
+          "enum": [
+            "mainland",
+            "taiwan",
+            "singapore_malaysia",
+            "hong_kong_macau",
+            "other",
+            "prefer_not"
+          ],
+          "title": "Grew Up Hearing",
+          "type": "string"
+        },
+        "reading": {
+          "enum": [
+            "hanzi",
+            "hanzi+pinyin"
+          ],
+          "title": "Reading",
+          "type": "string"
+        },
+        "script": {
+          "enum": [
+            "simplified",
+            "traditional"
+          ],
+          "title": "Script",
+          "type": "string"
+        }
+      },
+      "required": [
+        "background",
+        "grew_up_hearing",
+        "reading",
+        "script"
+      ],
+      "title": "SpeakerInfo",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "clips": {
+      "items": {
+        "$ref": "#/$defs/SessionClip"
+      },
+      "title": "Clips",
+      "type": "array"
+    },
+    "consent": {
+      "$ref": "#/$defs/Consent"
+    },
+    "deck": {
+      "$ref": "#/$defs/DeckRef"
+    },
+    "device": {
+      "$ref": "#/$defs/Device"
+    },
+    "finished_at": {
+      "format": "date-time",
+      "title": "Finished At",
+      "type": "string"
+    },
+    "schema": {
+      "const": "tonekit.session.v1",
+      "title": "Schema",
+      "type": "string"
+    },
+    "session": {
+      "description": "six characters from ABCDEFGHJKLMNPQRSTUVWXYZ23456789, random, made by the kit",
+      "pattern": "^[A-HJ-NP-Z2-9]{6}$",
+      "title": "Session",
+      "type": "string"
+    },
+    "skipped": {
+      "default": [],
+      "items": {
+        "pattern": "^[a-z0-9-]+$",
+        "type": "string"
+      },
+      "title": "Skipped",
+      "type": "array"
+    },
+    "speaker": {
+      "$ref": "#/$defs/SpeakerInfo"
+    },
+    "started_at": {
+      "format": "date-time",
+      "title": "Started At",
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema",
+    "deck",
+    "session",
+    "started_at",
+    "finished_at",
+    "consent",
+    "speaker",
+    "device",
+    "clips"
+  ],
+  "title": "Session",
+  "type": "object"
+}

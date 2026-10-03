@@ -1,0 +1,5 @@
+# kit/tests (e2e.py; check_bundle.py uses jsonschema once kit/schema/ exists). CI installs these.
+playwright==1.56.0
+numpy>=2
+scipy>=1.13
+jsonschema>=4
