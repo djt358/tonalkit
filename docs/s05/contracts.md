@@ -42,6 +42,7 @@ intended = { id = "g01", tones = ["4", "1", "3"], labels = ["yi", "bei", "shui"]
 produced_tones = ["4", "1", "3"] # what the card asks to be said
 distractors = []                 # candidates, same shape as `intended`
 prompt_note = ""                 # optional, shown under the card (see the error-card example)
+prompt_note_traditional = ""     # optional, needs prompt_note; shown instead when the speaker reads traditional (R88)
 status = "unverified"            # unverified | approved (DJ audit); the kit ships approved cards only
 
 [[card]]
@@ -56,6 +57,7 @@ context = "phrase"
 intended = { id = "g01", tones = ["4", "1", "3"], labels = ["yi", "bei", "shui"] }
 produced_tones = ["4", "1", "4"]
 prompt_note = "Read it as written: 睡 as in 睡觉."
+prompt_note_traditional = "Read it as written: 睡 as in 睡覺."
 status = "unverified"
 ```
 
@@ -73,14 +75,22 @@ Rules the model enforces:
   readings of the same syllables: 一 / 一杯 / 一块, 不 / 不对, 水 / 水果; they are `correct`
   readings (R76, R81);
 - `context = "phrase"` ⇒ each card's own `produced_tones` equal the sandhi of its own
-  `citation_pinyin` (一, 不, T3 runs with every binary bracketing; R63–R65), and `pinyin` shows
+  `citation_pinyin` (一, 不, T3 runs with every binary bracketing; R63–R65; a neutral syllable
+  written as neutral keeps the T3 before it, R89), and `pinyin` shows
   `produced_tones`. On a correct card that is also `intended.tones`; on an error card it is the
   erroneous surface form. An error whose changed syllable alters a neighbour's sandhi changes two
   surface tones and is refused: pick error words that change one surface tone only;
 - `context = "isolated"` ⇒ `produced_tones` equal the citation tones, no sandhi;
-- `text_traditional`, when present, has the same length as `text`.
+- a `correct` card has exactly one native reading: a phrase whose citation allows more than one
+  surface (a T3 run of three or more with two groupings, e.g. 一把雨伞) is refused, because one
+  `produced_tones` list would grade the other native reading wrong (R89);
+- `text_traditional`, when present, has the same length as `text`; `prompt_note_traditional`
+  only appears with `prompt_note`.
 
-`status = "approved"` is set by DJ's audit only.
+`status = "approved"` is set by DJ's audit only: the deck builder reads
+`kit/deck/sources/approvals.csv` (`card_id, fingerprint, decision, note`, written by `tkh deck
+approve`) and approves a card only while its fingerprint still matches; `tkh deck check --ship`
+fails unless every card is approved and every pair and minimal set is whole (R91).
 
 ## 2. Session bundle (the zip the kit exports)
 
@@ -193,7 +203,8 @@ context: "phrase" | "isolated" | None
 ```
 
 `speaker` refers to a `[[speaker]]` id in the clip's corpus, and graders read the accent from
-there. The CLI's `--accent` stays as an override.
+there. Intake writes each clip's `source` as its corpus's `source`: WORLD resynthesis refuses
+`volunteer-corpus` clips by that field (R80). The CLI's `--accent` stays as an override.
 
 ## 5. Gate file (`gates/<id>.toml`)
 
