@@ -28,6 +28,8 @@ def summary(deck: Deck, path: Path) -> str:
     cards = deck.card
     pairs = {(c.set, c.pair) for c in cards if c.pair is not None}
     traditional = sum(getattr(c, "text_traditional", None) is not None for c in cards)
+    noted = [c for c in cards if c.prompt_note]
+    traditional_notes = sum(getattr(c, "prompt_note_traditional", None) is not None for c in noted)
     lines = [
         f"OK {path}",
         f"  deck {deck.deck.id} ({deck.deck.lect}, version {deck.deck.version}): {len(cards)} cards, {len(pairs)} pairs",
@@ -36,6 +38,7 @@ def summary(deck: Deck, path: Path) -> str:
         _counts("labels", Counter(c.label for c in cards)),
         _counts("status", Counter(c.status for c in cards)),
         f"  traditional text on {traditional} of {len(cards)} cards",
+        f"  traditional note on {traditional_notes} of {len(noted)} cards that have a note",
         f"  sha256 {deck_sha256(path)}",
     ]
     return "\n".join(lines)

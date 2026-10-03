@@ -98,6 +98,23 @@ def test_a_rejected_card_can_be_approved_again_because_approve_works_from_the_wh
     assert deck_cards(tmp_path / "out")["r08"]["status"] == "approved"
 
 
+def test_approve_all_leaves_a_standing_rejection_alone_and_a_fixed_card_comes_back_into_the_deck(sources, tmp_path, capsys):
+    run_deck(capsys, "approve", "--sources", str(sources), "r08", "--reject", "--note", "too long")
+    code, text, _ = run_deck(capsys, "approve", "--sources", str(sources), "--all")
+    assert code == 0 and "approved 75 cards" in text
+    rows = {r.card_id: r for r in read_approvals(sources / "approvals.csv")}
+    assert len(rows) == 76 and (rows["r08"].decision, rows["r08"].note) == ("rejected", "too long")
+    build(capsys, sources, tmp_path / "out")
+    assert "r08" not in deck_cards(tmp_path / "out")
+    # the source changes, so the card is no longer the one that was rejected: it is back, unverified
+    register = sources / "register.csv"
+    register.write_text(register.read_text(encoding="utf-8").replace("short pause", "long pause"), encoding="utf-8")
+    _, text, _ = build(capsys, sources, tmp_path / "out")
+    assert deck_cards(tmp_path / "out")["r08"]["status"] == "unverified" and "stale rejection r08" in text
+    _, text, _ = run_deck(capsys, "approve", "--sources", str(sources), "--all")
+    assert "approved 76 cards" in text and {r.decision for r in read_approvals(sources / "approvals.csv")} == {"approved"}
+
+
 def test_rejecting_one_card_of_a_pair_is_refused_by_the_contract_and_the_message_says_why(sources, tmp_path, capsys):
     run_deck(capsys, "approve", "--sources", str(sources), "g01-e", "--reject")
     code, text, err = build(capsys, sources, tmp_path / "out")

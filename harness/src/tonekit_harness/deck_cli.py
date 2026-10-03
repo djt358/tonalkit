@@ -68,8 +68,9 @@ def _build(args: argparse.Namespace) -> int:
 def _approve(args: argparse.Namespace) -> int:
     path = _sources(args) / APPROVALS
     try:
-        built = _built(args, approvals=False)  # every card as the sources make it, whatever was decided before
-        rows = decisions(built.data["card"], args.ids, everything=args.all, rejected=args.reject, note=args.note)
+        every = _built(args, approvals=False).data["card"]  # every card as the sources make it
+        deck = _built(args, approvals=True).data["card"] if args.all else every  # without the rejected ones
+        rows = decisions(every, deck, args.ids, everything=args.all, rejected=args.reject, note=args.note)
         write_approvals(path, merge(read_approvals(path), rows))
     except (BuildError, DeckError) as e:
         print(f"error: {e}", file=sys.stderr)
@@ -125,7 +126,7 @@ def register(subparsers) -> None:
     )
     _build_options(a)
     a.add_argument("ids", nargs="*", metavar="ID", help="the cards to approve (g01-c, r03, ...)")
-    a.add_argument("--all", action="store_true", help="every card the built deck has")
+    a.add_argument("--all", action="store_true", help="every card the built deck has (not the ones that stand rejected)")
     a.add_argument("--reject", action="store_true", help="record a rejection instead; the builder then drops the card")
     a.add_argument("--note", default="", metavar="TEXT", help="a note to keep with the rows")
     a.set_defaults(func=_approve)

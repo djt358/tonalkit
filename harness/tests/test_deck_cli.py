@@ -22,6 +22,7 @@ def test_check_reports_a_good_deck(tmp_path, capsys):
     lines = out.splitlines()
     assert lines[0].startswith("OK ") and "5 cards, 2 pairs" in lines[1]
     assert "sets: register 1, gate 4" in out and "status: unverified 5" in out and "sha256 " in out
+    assert "traditional note on 2 of 3 cards that have a note" in out
 
 
 @needs_c0_fix
