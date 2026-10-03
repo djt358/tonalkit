@@ -42,8 +42,8 @@ def test_the_deck_has_the_sets_and_counts_the_plan_asks_for(deck):
     assert (deck.deck.id, deck.deck.lect) == ("s05-v1", "cmn")
 
 
-def test_every_card_is_unverified_until_djs_audit(deck):
-    assert {c.status for c in deck.card} == {"unverified"}
+def test_every_card_is_approved_by_djs_audit(deck):  # 2026-10-02, "approve all" (R91)
+    assert {c.status for c in deck.card} == {"approved"}
 
 
 def test_every_card_has_traditional_text_of_the_same_length(deck):
@@ -198,8 +198,13 @@ def simplified_only_characters() -> set[str]:
     from every card's text, and from the example words of the lexicon and the t23 pairs."""
     pairs = [(c.text, c.text_traditional) for c in json_cards()]
     for name, column in (("tone_variants.csv", "variant"), ("tone_variants.csv", "as_in"), ("diag_t23.csv", "as_in")):
-        pairs += [(r.get(column), r.get(f"{column}_traditional", r.get(column))) for r in read_rows(SOURCES / name, required=[column], strict=False)]
-    return {s for simple, trad in pairs if len(simple) == len(trad) for s, t in zip(simple, trad, strict=True) if s != t}
+        pairs += [
+            (r.get(column), r.get(f"{column}_traditional", r.get(column)))
+            for r in read_rows(SOURCES / name, required=[column], strict=False)
+        ]
+    return {
+        s for simple, trad in pairs if len(simple) == len(trad) for s, t in zip(simple, trad, strict=True) if s != t
+    }
 
 
 def json_cards() -> list:
@@ -228,7 +233,9 @@ def test_the_traditional_notes_the_brief_names(deck):
     assert notes["t02-e"] == "Read it as written: 淺 as in 淺色 (light-coloured)."
     assert notes["t03-e"] == "Read it as written: 騎 as in 騎車 (to ride a bike)."
     assert notes["n02"].endswith("then say the whole phrase: 一本書 (yì běn shū).")
-    assert notes["n03"].startswith("Say 就是 (jiù shì, a filler") and notes["n03"].endswith("then say 一碗飯 (yì wǎn fàn).")
+    assert notes["n03"].startswith("Say 就是 (jiù shì, a filler") and notes["n03"].endswith(
+        "then say 一碗飯 (yì wǎn fàn)."
+    )
 
 
 def test_the_deck_is_ready_to_ship_but_for_djs_approvals(deck):

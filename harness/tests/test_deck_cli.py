@@ -87,10 +87,13 @@ def test_build_writes_the_contract_file_the_json_and_the_audit_sheet_next_to_the
     code, text, err = run(capsys, "build", "--out", str(out))
     assert code == 0 and err == ""
     assert (out / "s05-v1.toml").exists() and (out / "s05-v1.json").exists()
-    assert "76 cards" in text and "gate: 20 pairs chosen" in text and "approvals: 0 of 76 cards approved" in text
+    assert "76 cards" in text and "gate: 20 pairs chosen" in text and "approvals: 76 of 76 cards approved" in text
     assert f"wrote {out / 's05-v1.audit.md'}" in text
     audit = (out / "s05-v1.audit.md").read_text(encoding="utf-8")
-    assert audit.startswith("# Prompt deck s05-v1: audit sheet") and "Gate phrases: the stand-in gate_standin.csv." in audit
+    assert (
+        audit.startswith("# Prompt deck s05-v1: audit sheet")
+        and "Gate phrases: the stand-in gate_standin.csv." in audit
+    )
     code, text, _ = run(capsys, "check", str(out / "s05-v1.toml"))
     assert code == 0 and "76 cards" in text
 
@@ -110,7 +113,10 @@ def test_build_takes_the_gate_phrases_from_a_gmeasure_table(tmp_path, capsys):
         encoding="utf-8",
     )
     out = tmp_path / "out"
-    code, text, _ = run(capsys, "build", "--out", str(out), "--gmeasure", str(table), "--gate-pairs", "3")
+    sources = copy_sources(tmp_path)  # no approvals: the repository's approve the stand-in gate
+    code, text, _ = run(
+        capsys, "build", "--sources", str(sources), "--out", str(out), "--gmeasure", str(table), "--gate-pairs", "3"
+    )
     assert code == 0
     assert "gate: 3 pairs chosen" in text
     assert "can't use g_measure.csv:5 一张纸: its own pinyin does not hold" in text
