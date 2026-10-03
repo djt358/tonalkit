@@ -1,18 +1,12 @@
 """tkh deck build and tkh deck check."""
 
 import json
-import shutil
 
-from deck_support import DECK_DIR, SOURCES, needs_c0_fix, small_deck_data
+from deck_support import DECK_DIR, copy_sources, needs_c0_fix, run_deck, small_deck_data
 
-from tonekit_harness import cli
 from tonekit_harness.deck_build.emit import toml_text
 
-
-def run(capsys, *argv) -> tuple[int, str, str]:
-    code = cli.main(["deck", *argv])
-    out = capsys.readouterr()
-    return code, out.out, out.err
+run = run_deck
 
 
 def write_deck(tmp_path, data, name="d.toml"):
@@ -21,6 +15,7 @@ def write_deck(tmp_path, data, name="d.toml"):
     return path
 
 
+@needs_c0_fix
 def test_check_reports_a_good_deck(tmp_path, capsys):
     code, out, err = run(capsys, "check", str(write_deck(tmp_path, small_deck_data())))
     assert (code, err) == (0, "")
@@ -29,6 +24,7 @@ def test_check_reports_a_good_deck(tmp_path, capsys):
     assert "sets: register 1, gate 4" in out and "status: unverified 5" in out and "sha256 " in out
 
 
+@needs_c0_fix
 def test_check_refuses_an_error_card_that_changes_two_surface_tones_and_says_so(tmp_path, capsys):
     data = small_deck_data()
     error = next(c for c in data["card"] if c["id"] == "g01-e")
@@ -42,6 +38,7 @@ def test_check_refuses_an_error_card_that_changes_two_surface_tones_and_says_so(
     assert err.rstrip().endswith("problems") or "problem" in err.splitlines()[-1]
 
 
+@needs_c0_fix
 def test_check_refuses_citation_tones_where_speakers_produce_sandhi(tmp_path, capsys):
     data = small_deck_data()
     correct = next(c for c in data["card"] if c["id"] == "g01-c")
@@ -56,6 +53,7 @@ def test_check_refuses_citation_tones_where_speakers_produce_sandhi(tmp_path, ca
     assert "phrase reading 1-1-3 is not a sandhi reading of 'yī bēi shuǐ' (4-1-3)" in err
 
 
+@needs_c0_fix
 def test_check_lists_every_problem_and_counts_them(tmp_path, capsys):
     data = small_deck_data()
     data["card"][1]["pinyin"] = "yī bēi shuǐ"
@@ -82,23 +80,24 @@ def test_check_reads_the_kits_json_too(tmp_path, capsys):
     assert code == 0 and "5 cards" in out
 
 
-def copy_sources(tmp_path):
-    out = tmp_path / "sources"
-    shutil.copytree(SOURCES, out)
-    return out
+@needs_c0_fix
+def test_build_writes_the_contract_file_the_json_and_the_audit_sheet_next_to_them(tmp_path, capsys):
+    out = tmp_path / "out"
+    code, text, err = run(capsys, "build", "--out", str(out))
+    assert code == 0 and err == ""
+    assert (out / "s05-v1.toml").exists() and (out / "s05-v1.json").exists()
+    assert "76 cards" in text and "gate: 20 pairs chosen" in text and "approvals: 0 of 76 cards approved" in text
+    assert f"wrote {out / 's05-v1.audit.md'}" in text
+    audit = (out / "s05-v1.audit.md").read_text(encoding="utf-8")
+    assert audit.startswith("# Prompt deck s05-v1: audit sheet") and "Gate phrases: the stand-in gate_standin.csv." in audit
+    code, text, _ = run(capsys, "check", str(out / "s05-v1.toml"))
+    assert code == 0 and "76 cards" in text
 
 
 @needs_c0_fix
-def test_build_writes_the_contract_file_and_the_json_and_the_audit_sheet(tmp_path, capsys):
-    out = tmp_path / "out"
-    code, text, err = run(capsys, "build", "--out", str(out), "--audit", str(tmp_path / "audit.md"))
-    assert code == 0 and err == ""
-    assert (out / "s05-v1.toml").exists() and (out / "s05-v1.json").exists()
-    assert "76 cards" in text and "gate: 20 pairs chosen" in text
-    audit = (tmp_path / "audit.md").read_text(encoding="utf-8")
-    assert audit.startswith("Gate phrases: the stand-in gate_standin.csv.") and "| id | set | text |" in audit
-    code, text, _ = run(capsys, "check", str(out / "s05-v1.toml"))
-    assert code == 0 and "76 cards" in text
+def test_the_audit_sheet_can_be_written_somewhere_else(tmp_path, capsys):
+    code, _, _ = run(capsys, "build", "--out", str(tmp_path / "out"), "--audit", str(tmp_path / "sheet.md"))
+    assert code == 0 and (tmp_path / "sheet.md").exists() and not (tmp_path / "out" / "s05-v1.audit.md").exists()
 
 
 @needs_c0_fix
@@ -120,6 +119,7 @@ def test_build_takes_the_gate_phrases_from_a_gmeasure_table(tmp_path, capsys):
     assert gate == ["一杯水", "一本书", "一辆车"]
 
 
+@needs_c0_fix
 def test_build_reports_a_broken_source_and_writes_nothing(tmp_path, capsys):
     sources = copy_sources(tmp_path)
     (sources / "register.csv").write_text("text,citation_pinyin\n妈,mā\n", encoding="utf-8")

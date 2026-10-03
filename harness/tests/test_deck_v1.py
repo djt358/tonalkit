@@ -14,6 +14,9 @@ from tonekit_harness.contracts.deck import Deck, deck_sha256, load_deck, parse_d
 from tonekit_harness.contracts.lects import lect_rules
 from tonekit_harness.deck_build.assemble import build_deck
 from tonekit_harness.deck_build.emit import json_text, toml_text
+from tonekit_harness.deck_build.notes import names_characters
+from tonekit_harness.deck_build.rows import read_rows
+from tonekit_harness.deck_build.ship_check import ship_problems
 from tonekit_harness.repo import repo_root
 
 pytestmark = needs_c0_fix
@@ -147,6 +150,92 @@ def test_count_cards_ask_for_the_spell_only(deck):
         assert len(c.produced_tones) == 3 and c.label == "correct" and c.prompt_note
 
 
+ERROR_TEXTS = {
+    "g01": "一杯睡", "g02": "一本树", "g03": "一张直", "g04": "一碗烦", "g05": "一条雨", "g06": "一只毛", "g07": "一瓶救",
+    "g08": "一块病", "g09": "一辆扯", "g10": "一双写", "g11": "一盘财", "g12": "一把到", "g13": "一湾水", "g14": "一巴伞",
+    "g15": "一包躺", "g16": "一片运", "g17": "一头扭", "g18": "一袋蜜", "g19": "一束滑", "g20": "一座巧",
+}  # fmt: skip
+
+
+def test_the_gate_error_words_are_the_ones_dj_vetted_not_the_rare_ones_of_the_first_draft(deck):
+    errors = {c.pair: c for c in of_set(deck, "gate") if c.label == "tone_error"}
+    assert {pair: c.text for pair, c in errors.items()} == ERROR_TEXTS
+    rare = {"彻", "密", "才", "就", "画"}
+    assert not [c.id for c in errors.values() if rare & set(c.text)]
+    assert errors["g07"].prompt_note == "Read it as written: 救 as in 救命 (to save a life)."
+    assert errors["g09"].prompt_note == "Read it as written: 扯 as in 拉扯 (to pull)."
+    assert errors["g11"].prompt_note == "Read it as written: 财 as in 发财 (to get rich)."
+    assert errors["g18"].prompt_note == "Read it as written: 蜜 as in 蜂蜜 (honey)."
+    assert errors["g19"].prompt_note == "Read it as written: 滑 as in 滑冰 (to skate)."
+    assert errors["g20"].prompt_note == "Read it as written: 巧 as in 技巧 (skill)."
+
+
+def test_every_error_changes_one_surface_tone_and_no_neighbours_sandhi(deck):
+    cards = {c.id: c for c in deck.card}
+    for pair in ERROR_TEXTS:
+        c, e = cards[f"{pair}-c"], cards[f"{pair}-e"]
+        assert sum(a != b for a, b in zip(c.produced_tones, e.produced_tones, strict=True)) == 1, pair
+
+
+def test_the_t2_t4_minimal_set_is_xie_and_not_shui(deck):
+    xie = [c for c in of_set(deck, "diag_minimal") if c.pair == "m02"]
+    assert [(c.text, c.text_traditional, c.pinyin) for c in xie] == [("鞋", "鞋", "xié"), ("谢", "謝", "xiè")]
+    assert [c.produced_tones for c in xie] == [["2"], ["4"]]
+
+
+def test_the_count_notes_name_the_syllables_with_pinyin_and_say_the_filler_plainly(deck):
+    notes = {c.id: c.prompt_note for c in of_set(deck, "diag_count")}
+    assert notes == {
+        "n01": "Say 嗯 (a thinking sound, like um), pause as if you are thinking, then say 一杯水 (yì bēi shuǐ).",
+        "n02": "Start the phrase, stop after 一本 (yì běn) as if you lost your place, then say the whole phrase: 一本书 (yì běn shū).",
+        "n03": "Say 就是 (jiù shì, a filler like the English I mean), pause as if you are searching for the words, "
+        "then say 一碗饭 (yì wǎn fàn).",
+    }  # fmt: skip
+
+
+def simplified_only_characters() -> set[str]:
+    """Characters the deck itself shows in a simplified form that differs from the traditional one:
+    from every card's text, and from the example words of the lexicon and the t23 pairs."""
+    pairs = [(c.text, c.text_traditional) for c in json_cards()]
+    for name, column in (("tone_variants.csv", "variant"), ("tone_variants.csv", "as_in"), ("diag_t23.csv", "as_in")):
+        pairs += [(r.get(column), r.get(f"{column}_traditional", r.get(column))) for r in read_rows(SOURCES / name, required=[column], strict=False)]
+    return {s for simple, trad in pairs if len(simple) == len(trad) for s, t in zip(simple, trad, strict=True) if s != t}
+
+
+def json_cards() -> list:
+    return parse_deck(json.loads(JSON.read_text(encoding="utf-8"))).card
+
+
+def test_every_note_that_names_characters_has_a_traditional_note_in_traditional_forms(deck):
+    named = [c for c in deck.card if names_characters(c.prompt_note)]
+    assert len(named) == 27  # 20 gate and 4 diag_t23 errors, and the 3 count cards
+    assert all(c.prompt_note_traditional for c in named)
+    assert not [c.id for c in deck.card if c.prompt_note_traditional and not c.prompt_note]
+    simplified = simplified_only_characters()
+    assert {"觉", "树", "烦", "钱", "浅", "骑", "财", "发", "书", "饭", "后", "鱼"} <= simplified
+    for c in named:
+        assert not simplified & set(c.prompt_note_traditional), (c.id, c.prompt_note_traditional)
+    assert not [c.id for c in deck.card if not names_characters(c.prompt_note) and c.prompt_note_traditional]
+
+
+def test_the_traditional_notes_the_brief_names(deck):
+    notes = {c.id: c.prompt_note_traditional for c in deck.card if c.prompt_note_traditional}
+    assert notes["g01-e"] == "Read it as written: 睡 as in 睡覺 (to sleep)."
+    assert notes["g02-e"] == "Read it as written: 樹 as in 大樹 (tree)."
+    assert notes["g11-e"] == "Read it as written: 財 as in 發財 (to get rich)."
+    assert notes["g10-e"] == "Read it as written: 寫 as in 寫字 (to write)."
+    assert notes["t01-e"] == "Read it as written: 魚 as in 金魚 (goldfish)."
+    assert notes["t02-e"] == "Read it as written: 淺 as in 淺色 (light-coloured)."
+    assert notes["t03-e"] == "Read it as written: 騎 as in 騎車 (to ride a bike)."
+    assert notes["n02"].endswith("then say the whole phrase: 一本書 (yì běn shū).")
+    assert notes["n03"].startswith("Say 就是 (jiù shì, a filler") and notes["n03"].endswith("then say 一碗飯 (yì wǎn fàn).")
+
+
+def test_the_deck_is_ready_to_ship_but_for_djs_approvals(deck):
+    problems = ship_problems(deck)
+    assert [p for p in problems if "not approved" not in p] == []  # every pair and set whole, eight register cards
+
+
 def test_the_committed_files_are_what_the_sources_build():
     built = build_deck(SOURCES)
     assert TOML.read_text(encoding="utf-8") == toml_text(built.data)
@@ -186,6 +275,6 @@ console.log(JSON.stringify({{ id: deck.id, n: deck.cards.length, sha: deck.sha25
 def test_the_sources_hold_no_gmeasure_table():
     # DJ's real g_measure CSV never enters the repository; the stand-in is flagged by its name
     assert sorted(p.name for p in SOURCES.iterdir()) == sorted(
-        ["meta.toml", "diag_context.csv", "diag_count.csv", "diag_minimal.csv", "diag_t23.csv",
+        ["meta.toml", "approvals.csv", "diag_context.csv", "diag_count.csv", "diag_minimal.csv", "diag_t23.csv",
          "gate_standin.csv", "register.csv", "tone_variants.csv"]
     )  # fmt: skip

@@ -11,16 +11,18 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from . import trial
+from .coverage import Coverage, coverage_of
 from .errors import BuildError
 from .error_word import derive_error
 from .gate_select import Left, Usable, select
 from .lexicon import Lexicon
+from .native_reading import native_reading_problem
 from .pairs import pair_cards
 from .reading import Reading
 from .rows import Row, read_rows
 
 STANDIN_COLUMNS = ["text", "citation_pinyin", "spoken_pinyin"]
-STANDIN_OPTIONAL = ["text_traditional", "flag", "status"]
+STANDIN_OPTIONAL = ["text_traditional", "flag"]
 
 
 @dataclass(frozen=True)
@@ -28,7 +30,6 @@ class GateRow:
     where: str  # file:line, for the report
     reading: Reading
     flag: str = ""
-    status: str = "unverified"
 
 
 @dataclass
@@ -39,10 +40,13 @@ class GateBuild:
     selected: list[Usable] = field(default_factory=list)
     unusable: list[Left] = field(default_factory=list)  # rows that cannot make a pair
     passed_over: list[Left] = field(default_factory=list)  # usable rows the choice did not need
+    coverage: Coverage | None = None
 
     def report_lines(self) -> list[str]:
         n = len(self.selected)
         lines = [f"gate: {n} pair{'' if n == 1 else 's'} chosen from {self.source or 'the rows given'}"]
+        if self.coverage is not None:
+            lines.append("  " + self.coverage.line())
         lines += [f"  can't use {x.where} {x.text}: {x.reason}" for x in self.unusable]
         lines += [f"  left out  {x.where} {x.text}: {x.reason}" for x in self.passed_over]
         return lines
@@ -58,7 +62,7 @@ def _standin_row(row: Row) -> GateRow:
         "phrase", row.get("text_traditional") or None,
     )  # fmt: skip
     flag = "stand-in phrase" + (f"; {row.get('flag')}" if row.get("flag") else "")
-    return GateRow(row.where, reading, flag, row.get("status", "unverified"))
+    return GateRow(row.where, reading, flag)
 
 
 def _shape_problem(r: Reading) -> str | None:
@@ -75,7 +79,13 @@ def _shape_problem(r: Reading) -> str | None:
         return "text_traditional is not the same length as text"
     if not 3 <= len(r.text) <= 4:
         return f"a gate phrase is 一 + measure word + noun of 3 or 4 syllables, not {len(r.text)}"
-    if r.text[0] != "一" or (citation[0].base, citation[0].tone) != ("yi", "1"):
+    first = citation[0]
+    if r.text[0] == "一" and first.base == "yi" and first.tone != "1":
+        return (
+            f"the citation of 一 is yī, but the citation pinyin has {first.text} "
+            "(the spoken pinyin is where yì and yí go)"
+        )
+    if r.text[0] != "一" or (first.base, first.tone) != ("yi", "1"):
         return "not a phrase that starts with the numeral 一 (yī)"
     return None
 
@@ -88,6 +98,8 @@ def usable_or_left(row: GateRow, lexicon: Lexicon) -> Usable | Left:
     r = row.reading
     if (why := _shape_problem(r)) is not None:
         return Left(row.where, r.text, why)
+    if why := native_reading_problem(r):
+        return Left(row.where, r.text, why)
     if problems := trial.reading_problems(_correct_card(r)):
         return Left(row.where, r.text, f"its own pinyin does not hold: {problems[0]}")
 
@@ -97,7 +109,7 @@ def usable_or_left(row: GateRow, lexicon: Lexicon) -> Usable | Left:
     sub, reasons = derive_error(r, lexicon, accept)
     if sub is None:
         return Left(row.where, r.text, "no error word the contract accepts (" + "; ".join(reasons) + ")")
-    return Usable(row.where, r, sub, row.flag, row.status)
+    return Usable(row.where, r, sub, row.flag)
 
 
 def build_gate(
@@ -123,10 +135,19 @@ def build_gate(
         raise BuildError(
             f"only {len(out.selected)} of {pairs} gate pairs can be made\n" + "\n".join(out.report_lines())
         )
+    out.coverage = coverage_of(out.selected, pairs)
+    if problems := out.coverage.problems():
+        raise BuildError(
+            "the gate pairs do not cover the sandhi cases\n"
+            + "\n".join(f"  {p}" for p in problems)
+            + "\n"
+            + "\n".join(out.report_lines())
+        )
     for i, u in enumerate(out.selected, start=1):
         pair = f"g{i:02d}"
+        variant = u.substitution.variant
         c, e = pair_cards(
-            "gate", pair, u.reading, u.substitution.error, note=u.substitution.variant.note(), status=u.status
+            "gate", pair, u.reading, u.substitution.error, note=variant.note(), note_traditional=variant.note_traditional()
         )
         out.cards += [c, e]
         out.flags |= _flags(c["id"], e["id"], u)

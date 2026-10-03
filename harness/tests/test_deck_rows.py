@@ -49,3 +49,11 @@ def test_extra_values_and_missing_files_are_errors(tmp_path):
         read_rows(write(tmp_path, "a,b\n1,2,3\n"), required=["a", "b"])
     with pytest.raises(BuildError, match="cannot read"):
         read_rows(tmp_path / "nope.csv", required=["a"])
+
+
+def test_a_quoted_value_may_hold_line_breaks_and_unicode_separators(tmp_path):
+    path = tmp_path.joinpath("q.csv")
+    path.write_bytes('a,b\n"one\ntwo\u2028three\x85four",x\n"\r\nr",y\nlast,z\n'.encode())
+    rows = read_rows(path, required=["a", "b"])
+    assert [r.get("a") for r in rows] == ["one\ntwo\u2028three\x85four", "r", "last"]  # stripped, not split
+    assert [r.where for r in rows] == ["q.csv:3", "q.csv:5", "q.csv:6"]  # the line a record ends on

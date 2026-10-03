@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .errors import BuildError
+from .notes import error_note
 from .reading import RULES
 from .rows import Row, read_rows
 
@@ -36,7 +37,11 @@ class Variant:
 
     def note(self) -> str:
         """The prompt note of an error card made with this variant."""
-        return f"Read it as written: {self.variant} as in {self.as_in} ({self.gloss})."
+        return error_note(self.variant, self.as_in, self.gloss)
+
+    def note_traditional(self) -> str:
+        """The same note in traditional characters (R88)."""
+        return error_note(self.variant_traditional, self.as_in_traditional, self.gloss)
 
 
 class Lexicon:

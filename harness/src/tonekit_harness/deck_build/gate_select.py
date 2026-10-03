@@ -22,7 +22,6 @@ class Usable:
     reading: Reading
     substitution: Substitution
     flag: str
-    status: str
 
     @property
     def after_yi(self) -> str:
@@ -46,6 +45,11 @@ class Left:
     where: str
     text: str
     reason: str
+
+
+def t3_run_quota(n: int) -> int:
+    """How many of n pairs must have a run of third tones inside the phrase."""
+    return n * T3_RUNS_PER_TEN // 10
 
 
 def quotas(n: int) -> dict[str, int]:
@@ -74,7 +78,7 @@ def select(usable: Sequence[Usable], n: int) -> tuple[list[Usable], list[Left]]:
         return u not in chosen and len(chosen) < n and per_measure.get(u.measure, 0) < MAX_PER_MEASURE
 
     for u in usable:  # a run of third tones inside the phrase
-        if sum(c.has_t3_run for c in chosen) < n * T3_RUNS_PER_TEN // 10 and u.has_t3_run and free(u):
+        if sum(c.has_t3_run for c in chosen) < t3_run_quota(n) and u.has_t3_run and free(u):
             take(u)
     for tone, quota in quotas(n).items():  # each tone after 一
         for u in usable:

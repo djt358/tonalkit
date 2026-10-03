@@ -1,7 +1,7 @@
 """Assembling the deck from its sources, in the order the cards are read: the register warm-up
 first (eight clips are what a speaker's register needs), then the gate, then the sandhi contrasts,
-then the other diagnostics. The finished deck goes through the contract models; a deck that
-`parse_deck` refuses is never written."""
+then the other diagnostics. DJ's approvals (R91) are applied to the finished cards, and the deck goes
+through the contract models; a deck that `parse_deck` refuses is never written."""
 
 from __future__ import annotations
 
@@ -10,7 +10,9 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from ..contracts.deck import Deck, parse_deck
+from ..contracts.deck import Deck, DeckError, parse_deck
+from .approval_apply import Applied, apply_approvals
+from .approvals import FILE as APPROVALS, read_approvals
 from .contract_view import contract_card, dropped_fields
 from .errors import BuildError
 from .gate import GateBuild, build_gate, standin_rows
@@ -31,10 +33,11 @@ class Built:
     deck: Deck  # the same, validated by the contract
     flags: dict[str, str]  # card id -> what DJ should look at
     gate: GateBuild
+    approvals: Applied
     dropped: list[str] = field(default_factory=list)  # newer card fields the model cannot hold yet
 
     def report_lines(self) -> list[str]:
-        lines = self.gate.report_lines()
+        lines = self.gate.report_lines() + self.approvals.report_lines()
         if self.dropped:
             lines.append(
                 f"note: the contract model has no {', '.join(self.dropped)} yet, so the TOML leaves "
@@ -66,10 +69,14 @@ def build_deck(
     gmeasure: str | Path | None = None,
     gmeasure_map: Mapping[str, str] | None = None,
     gate_pairs: int = 20,
+    approvals: bool = True,
 ) -> Built:
     """The deck made from the sources in `sources`. `gmeasure` replaces the stand-in gate phrases
-    with the rows of DJ's g_measure table. Raises `BuildError` for a source that cannot be read
-    or a gate with too few pairs, and `DeckError` if the finished deck breaks the contract."""
+    with the rows of DJ's g_measure table. `approvals` applies the sources' approvals.csv (R91);
+    without it every card is `unverified` and none is dropped (what `tkh deck approve` works from).
+    Raises `BuildError` for a source that cannot be read, a gate that does not cover the sandhi
+    cases, or an approvals file that names a card the deck does not have, and `DeckError` if the
+    finished deck breaks the contract."""
     sources = Path(sources)
     gate = _gate(sources, Path(gmeasure) if gmeasure else None, gmeasure_map, gate_pairs)
     flags = dict(gate.flags)
@@ -85,6 +92,22 @@ def build_deck(
     add(t23_cards(sources / "diag_t23.csv"))
     add(minimal_cards(sources / "diag_minimal.csv"))
     add(single_cards(sources / "diag_count.csv", set_="diag_count", prefix="n", context="phrase"))
-    data = {"deck": _meta(sources), "card": cards}
-    deck = parse_deck({"deck": data["deck"], "card": [contract_card(c) for c in cards]}, source="deck")
-    return Built(data, deck, flags, gate, dropped_fields())
+    applied = apply_approvals(cards, read_approvals(sources / APPROVALS) if approvals else [])
+    for stale in applied.stale:
+        flags[stale.approval.card_id] = "; ".join(filter(None, [flags.get(stale.approval.card_id), stale.line()]))
+    data = {"deck": _meta(sources), "card": applied.cards}
+    deck = _contract_deck(data, applied)
+    return Built(data, deck, flags, gate, applied, dropped_fields())
+
+
+def _contract_deck(data: dict, applied: Applied) -> Deck:
+    try:
+        return parse_deck({"deck": data["deck"], "card": [contract_card(c) for c in data["card"]]}, source="deck")
+    except DeckError as e:
+        if not applied.rejected:
+            raise
+        dropped = ", ".join(a.card_id for a in applied.rejected)
+        raise DeckError(
+            f"{e}\nrejected and dropped: {dropped}. Dropping a card can leave its pair or set incomplete: change "
+            "its source so the card changes (the rejection goes stale), or reject its partner too"
+        ) from e

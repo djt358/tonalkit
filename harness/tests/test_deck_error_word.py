@@ -1,6 +1,6 @@
 """deck_build.error_word: the deliberate-error twin of a phrase, judged by the contract."""
 
-from deck_support import gate_row
+from deck_support import gate_row, needs_c0_fix
 
 from tonekit_harness.deck_build import trial
 from tonekit_harness.deck_build.error_word import candidate_positions, derive_error, error_reading
@@ -68,6 +68,7 @@ def test_a_variant_for_another_reading_of_the_character_is_not_used():
     assert "把 is read bà here but the lexicon's 巴 is for bǎ" in reasons
 
 
+@needs_c0_fix
 def test_a_run_of_three_third_tones_has_no_single_spoken_form():
     # 笑 (xiào) swapped for 晓 (xiǎo) leaves three third tones in a row: 2-2-3 and 3-2-3 are both fine
     correct = correct_of("一小笑伞", "yī xiǎo xiào sǎn", "yì xiǎo xiào sǎn")

@@ -1,8 +1,9 @@
 """Sets of single cards (no pairs): `register`, `diag_context` and `diag_count`.
 
 Columns: text, citation_pinyin, spoken_pinyin; optional text_traditional, context (isolated or
-phrase), repeat (the row becomes that many cards), note (shown under the card), flag (what DJ
-should look at), status. For a hesitation card the pinyin columns cover only the spell, and the
+phrase), repeat (the row becomes that many cards), note (shown under the card), note_traditional
+(the note in traditional characters; required when the note names characters, R88), flag (what DJ
+should look at). For a hesitation card the pinyin columns cover only the spell, and the
 text also shows the hesitation, so the produced tones are the spell's alone."""
 
 from __future__ import annotations
@@ -11,11 +12,12 @@ from pathlib import Path
 
 from .cards import candidate, make_card
 from .errors import BuildError
+from .notes import require_traditional
 from .reading import Reading
 from .rows import Row, read_rows
 
 COLUMNS = ["text", "citation_pinyin", "spoken_pinyin"]
-OPTIONAL = ["text_traditional", "context", "repeat", "note", "flag", "status"]
+OPTIONAL = ["text_traditional", "context", "repeat", "note", "note_traditional", "flag"]
 
 
 def _context(row: Row, default: str | None) -> str:
@@ -38,6 +40,7 @@ def single_cards(path: str | Path, *, set_: str, prefix: str, context: str | Non
     cards: list[dict] = []
     flags: dict[str, str] = {}
     for row in read_rows(path, required=COLUMNS, optional=OPTIONAL):
+        require_traditional(row.get("note"), row.get("note_traditional"), row.where)
         reading = Reading(
             row.need("text"), row.need("citation_pinyin"), row.need("spoken_pinyin"),
             _context(row, context), row.get("text_traditional") or None,
@@ -52,7 +55,7 @@ def single_cards(path: str | Path, *, set_: str, prefix: str, context: str | Non
                     reading=reading,
                     intended=candidate(card_id, reading.spoken_pinyin),
                     note=row.get("note"),
-                    status=row.get("status", "unverified"),
+                    note_traditional=row.get("note_traditional"),
                 )  # fmt: skip
             )
             if row.get("flag"):

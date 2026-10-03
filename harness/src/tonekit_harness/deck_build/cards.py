@@ -29,9 +29,10 @@ def make_card(
     pair: str | None = None,
     distractors: Sequence[dict] = (),
     note: str = "",
-    status: str = "unverified",
+    note_traditional: str = "",
 ) -> dict:
-    """The card for `reading`: it asks for the tones of `reading.spoken_pinyin`."""
+    """The card for `reading`: it asks for the tones of `reading.spoken_pinyin`. Every card is
+    `unverified`: DJ's approval is applied afterwards, pinned to the card's fingerprint (R91)."""
     card: dict = {"id": id, "set": set}
     if pair is not None:
         card["pair"] = pair
@@ -46,6 +47,8 @@ def make_card(
         "produced_tones": [s.tone for s in reading.spoken()],
         "distractors": list(distractors),
         "prompt_note": note,
-        "status": status,
     }
+    if note_traditional:
+        card["prompt_note_traditional"] = note_traditional
+    card["status"] = "unverified"
     return card

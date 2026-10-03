@@ -3,12 +3,14 @@
 import json
 import tomllib
 
-from deck_support import small_deck_data
+from deck_support import needs_c0_fix, small_deck_data
 
 from tonekit_harness.contracts.deck import load_deck
 from tonekit_harness.deck_build import contract_view
 from tonekit_harness.deck_build.contract_view import contract_card
 from tonekit_harness.deck_build.emit import json_text, toml_text, write_deck
+
+pytestmark = needs_c0_fix
 
 
 def test_the_toml_reads_back_as_the_same_cards():
@@ -53,9 +55,20 @@ def test_the_written_toml_loads_clean(tmp_path):
 
 
 def test_a_field_the_model_cannot_hold_yet_stays_in_the_json_and_out_of_the_toml(tmp_path, monkeypatch):
-    monkeypatch.setattr(contract_view, "dropped_fields", lambda: ["text_traditional"])
+    monkeypatch.setattr(contract_view, "dropped_fields", lambda: ["text_traditional", "prompt_note_traditional"])
     data = small_deck_data()
     toml_path, json_path = write_deck(data, tmp_path)
-    assert all("text_traditional" not in c for c in tomllib.loads(toml_path.read_text(encoding="utf-8"))["card"])
-    assert all("text_traditional" in c for c in json.loads(json_path.read_text(encoding="utf-8"))["card"])
+    in_toml = tomllib.loads(toml_path.read_text(encoding="utf-8"))["card"]
+    in_json = json.loads(json_path.read_text(encoding="utf-8"))["card"]
+    assert all("text_traditional" not in c and "prompt_note_traditional" not in c for c in in_toml)
+    assert all("text_traditional" in c for c in in_json)
+    assert [c["id"] for c in in_json if "prompt_note_traditional" in c] == ["g01-e", "g02-e"]
     load_deck(toml_path)  # the contract file is clean either way
+
+
+def test_the_traditional_note_follows_the_note_in_the_toml_and_the_json(tmp_path):
+    toml_path, json_path = write_deck(small_deck_data(), tmp_path)
+    (error,) = [c for c in tomllib.loads(toml_path.read_text(encoding="utf-8"))["card"] if c["id"] == "g02-e"]
+    assert list(error)[-3:] == ["prompt_note", "prompt_note_traditional", "status"]
+    assert error["prompt_note_traditional"] == "Read it as written: 樹 as in 大樹 (tree)."
+    assert load_deck(toml_path).card[4].prompt_note_traditional == error["prompt_note_traditional"]

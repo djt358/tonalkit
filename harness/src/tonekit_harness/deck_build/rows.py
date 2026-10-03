@@ -1,9 +1,11 @@
 """Reading the CSV sources of the deck: UTF-8 (a spreadsheet's BOM is fine), a header row, one
-record per line. Values are stripped, blank lines skipped. A problem names the file and the line."""
+record per line, a quoted value may hold line breaks. Values are stripped, blank lines skipped. A
+problem names the file and the line."""
 
 from __future__ import annotations
 
 import csv
+import io
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -14,7 +16,7 @@ from .errors import BuildError
 @dataclass(frozen=True)
 class Row:
     path: Path
-    line: int  # the line of the record in the file (the header is line 1)
+    line: int  # the line the record ends on (the header is line 1; a value with line breaks spans lines)
     values: Mapping[str, str]
 
     @property
@@ -47,7 +49,7 @@ def read_rows(
         text = path.read_text(encoding="utf-8-sig")
     except OSError as e:
         raise BuildError(f"{path}: cannot read: {e.strerror or e}") from e
-    reader = csv.DictReader(text.splitlines())
+    reader = csv.DictReader(io.StringIO(text, newline=""))  # not splitlines(): a quoted value may span lines
     header = [h.strip() for h in reader.fieldnames or []]
     missing = [c for c in required if c not in header]
     if missing:

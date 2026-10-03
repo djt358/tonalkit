@@ -57,6 +57,7 @@ def test_a_context_the_row_gives_wins_and_a_bad_one_names_its_line(tmp_path):
         )
 
 
+@needs_c0_fix
 def test_a_card_whose_spoken_pinyin_keeps_the_citation_tone_is_refused_by_the_contract(tmp_path):
     path = csv(tmp_path, "text,citation_pinyin,spoken_pinyin,context\n水果,shuǐ guǒ,shuǐ guǒ,phrase\n")
     cards, _ = single_cards(path, set_="register", prefix="x", context=None)
@@ -129,3 +130,38 @@ def test_a_t23_error_that_changes_two_surface_tones_is_refused_by_the_contract(t
     cards, _ = t23_cards(csv(tmp_path, both))
     (problem,) = trial.problems(cards)
     assert "differ from intended in 2 positions" in problem and "it needs exactly one" in problem
+
+
+def test_a_note_that_names_characters_needs_a_traditional_version(tmp_path):
+    head = "text,text_traditional,citation_pinyin,spoken_pinyin,note,note_traditional\n"
+    with pytest.raises(BuildError, match=r"s\.csv:2: the note names characters, so it needs a traditional version"):
+        single_cards(csv(tmp_path, head + "一本书,一本書,yī běn shū,yì běn shū,Stop after 一本.,\n"), set_="diag_count", prefix="n", context="phrase")
+    (card,), _ = single_cards(
+        csv(tmp_path, head + "一本书,一本書,yī běn shū,yì běn shū,Say 一本书.,Say 一本書.\n"),
+        set_="diag_count", prefix="n", context="phrase",
+    )  # fmt: skip
+    assert list(card)[-3:] == ["prompt_note", "prompt_note_traditional", "status"]
+    assert (card["prompt_note"], card["prompt_note_traditional"]) == ("Say 一本书.", "Say 一本書.")
+    (plain,), _ = single_cards(
+        csv(tmp_path, head + "水,水,shuǐ,shuǐ,Say it alone.,\n", "p.csv"), set_="register", prefix="x", context="isolated"
+    )  # fmt: skip
+    assert "prompt_note_traditional" not in plain  # no characters named, nothing to write twice
+
+
+def test_the_note_of_a_t23_error_is_also_written_in_traditional_characters(tmp_path):
+    traditional = T23.replace("text,", "text_traditional,error_text_traditional,as_in_traditional,text,", 1).replace(
+        "起床,qǐ chuáng", "起床,騎床,騎車,起床,qǐ chuáng", 1
+    )
+    cards, _ = t23_cards(csv(tmp_path, traditional))
+    assert cards[1]["prompt_note"] == "Read it as written: 骑 as in 骑车 (to ride a bike)."
+    assert cards[1]["prompt_note_traditional"] == "Read it as written: 騎 as in 騎車 (to ride a bike)."
+    assert "prompt_note_traditional" not in cards[0]
+
+
+def test_the_words_of_a_minimal_set_must_share_their_toneless_syllables(tmp_path):
+    with pytest.raises(BuildError) as e:
+        minimal_cards(csv(tmp_path, "group,text,pinyin\nm01,买,mǎi\nm01,汤,tāng\n"))
+    assert "s.csv:2: set m01 mixes syllables: 买 (mai), 汤 (tang)" in str(e.value)
+    with pytest.raises(BuildError, match=r"s\.csv:3: pinyin: "):
+        minimal_cards(csv(tmp_path, "group,text,pinyin\nm01,买,mǎi\nm01,卖,mài!\n"))
+    assert len(minimal_cards(csv(tmp_path, "group,text,pinyin\nm01,鞋,xié\nm01,谢,xiè\n"))[0]) == 2

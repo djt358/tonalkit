@@ -46,3 +46,11 @@ def problem_report(error: DeckError) -> str:
     lines = str(error).splitlines()
     count = max(len(lines) - 1, 1)
     return "\n".join([*lines, f"{count} problem{'s' if count != 1 else ''}"])
+
+
+def ship_report(path: Path, problems: list[str]) -> str:
+    """Why the deck at `path` cannot ship, with how many reasons there are."""
+    count = len(problems)
+    return "\n".join(
+        [f"NOT READY TO SHIP {path}", *(f"  {p}" for p in problems), f"{count} problem{'s' if count != 1 else ''}"]
+    )

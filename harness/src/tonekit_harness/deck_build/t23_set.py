@@ -4,14 +4,15 @@ written out in the source, so the changed syllable can be anywhere.
 
 Columns: text, citation_pinyin, spoken_pinyin, error_text, error_citation_pinyin,
 error_spoken_pinyin, as_in (a common word with the changed character), gloss; optional
-text_traditional, error_text_traditional, as_in_traditional (unused until the contract has a
-traditional note), flag, status. The prompt note names the one character that differs."""
+text_traditional, error_text_traditional, as_in_traditional (for the note in traditional
+characters, R88), flag. The prompt note names the one character that differs."""
 
 from __future__ import annotations
 
 from pathlib import Path
 
 from .errors import BuildError
+from .notes import error_note
 from .pairs import pair_cards
 from .reading import Reading
 from .rows import Row, read_rows
@@ -20,7 +21,7 @@ COLUMNS = [
     "text", "citation_pinyin", "spoken_pinyin", "error_text", "error_citation_pinyin",
     "error_spoken_pinyin", "as_in", "gloss",
 ]  # fmt: skip
-OPTIONAL = ["text_traditional", "error_text_traditional", "as_in_traditional", "flag", "status"]
+OPTIONAL = ["text_traditional", "error_text_traditional", "as_in_traditional", "flag"]
 
 
 def changed_character(text: str, error_text: str, where: str) -> str:
@@ -43,8 +44,17 @@ def _pair(row: Row, pair: str) -> tuple[dict, dict]:
         "phrase", row.get("error_text_traditional") or None,
     )  # fmt: skip
     char = changed_character(correct.text, error.text, row.where)
-    note = f"Read it as written: {char} as in {row.need('as_in')} ({row.need('gloss')})."
-    return pair_cards("diag_t23", pair, correct, error, note=note, status=row.get("status", "unverified"))
+    note = error_note(char, row.need("as_in"), row.need("gloss"))
+    traditional = _traditional_note(row, correct, error, char)
+    return pair_cards("diag_t23", pair, correct, error, note=note, note_traditional=traditional)
+
+
+def _traditional_note(row: Row, correct: Reading, error: Reading, char: str) -> str:
+    """The note with the changed character and the example word in traditional forms (the simplified
+    ones where the row gives none)."""
+    if correct.text_traditional and error.text_traditional:
+        char = changed_character(correct.text_traditional, error.text_traditional, row.where)
+    return error_note(char, row.get("as_in_traditional", row.need("as_in")), row.need("gloss"))
 
 
 def t23_cards(path: str | Path) -> tuple[list[dict], dict[str, str]]:
