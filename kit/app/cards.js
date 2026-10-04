@@ -1,5 +1,6 @@
 // The card screen: one card at a time, record / stop / play / redo / skip / next, and a quiet
 // "finish and send what I have" once something is kept.
+import { Player } from "./playback.js";
 import { $, setText, currentScreen } from "./ui.js";
 import { cardState, hasKeptTake, skipRemaining } from "./session.js";
 import { cardFace, cardNote } from "./deck.js";
@@ -13,20 +14,22 @@ const LONG_TEXT = 6; // characters; longer cards get a smaller font
  */
 export function cardScreen(app) {
   const byId = new Map(app.deck.cards.map((c) => [c.id, c]));
-  const audio = new Audio();
+  const player = new Player();
+  const audio = new Audio(); // fallback when no audio context is open
   let recordingId = null;
   let busy = false;
   let maxTimer = null;
-  let clip = { id: null, url: null }; // the kept take of the card on screen, ready to play
+  let clip = { id: null, url: null, wav: null }; // the kept take of the card on screen, ready to play
 
   const currentId = () => app.session.order[app.session.index];
 
   function setClip(id, wav) {
     if (clip.url) URL.revokeObjectURL(clip.url);
-    clip = { id, url: wav ? URL.createObjectURL(new Blob([wav], { type: "audio/wav" })) : null };
+    clip = { id, url: wav ? URL.createObjectURL(new Blob([wav], { type: "audio/wav" })) : null, wav: wav ?? null };
   }
 
   function stopPlayback() {
+    player.stop();
     audio.pause();
   }
 
@@ -133,9 +136,18 @@ export function cardScreen(app) {
   $("card-redo").addEventListener("click", start);
   $("card-play").addEventListener("click", () => {
     if (!clip.url) return;
+    const ctx = app.capture.ctx;
+    if (ctx && ctx.state !== "closed") {
+      try {
+        player.play(ctx, clip.wav);
+        return;
+      } catch (e) {
+        console.warn("playback through the audio context failed; trying the audio element", e);
+      }
+    }
     audio.src = clip.url;
     audio.currentTime = 0;
-    audio.play().catch(() => {});
+    audio.play().catch((e) => console.warn("playback failed", e));
   });
   $("card-skip").addEventListener("click", async () => {
     cardState(app.session, currentId()).skipped = true;

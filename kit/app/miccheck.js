@@ -33,3 +33,30 @@ export function micVerdict(allLevelsDb) {
   const verdict = floor > NOISY_FLOOR_DB ? "noisy" : speech < LOW_SPEECH_DB ? "low" : "ok";
   return { verdict, floor, speech };
 }
+
+// The live check: people start talking a beat after they read the prompt, and speak up when told
+// they're quiet, so one verdict after a fixed three seconds misleads both ways. Instead the
+// verdict is re-read over the last few seconds while the screen is open: "a bit quiet" only after
+// SPEECH_WAIT_S without a voice loud enough, "that sounds good" as soon as one is heard (and it
+// stays, so a pause after speaking doesn't bring "quiet" back), "noisy" whenever the room is.
+export const WINDOW_FRAMES = 60; // the last 3 s of 50 ms frames
+export const SPEECH_WAIT_S = 6;
+
+/**
+ * @param {number[]} allLevelsDb every level frame since the check started, warm-up included
+ * @param {number} elapsedS seconds since the check started
+ * @param {boolean} heard whether a loud-enough voice has been heard already
+ * @returns {{verdict: "checking"|"ok"|"noisy"|"low", floor: number, speech: number, heard: boolean}}
+ */
+export function liveVerdict(allLevelsDb, elapsedS, heard = false) {
+  const usable = allLevelsDb.slice(Math.min(WARMUP_FRAMES, Math.max(0, allLevelsDb.length - MIN_FRAMES_AFTER_WARMUP)));
+  const window = usable.slice(-WINDOW_FRAMES);
+  const floor = percentile(window, FLOOR_P);
+  const speech = percentile(window, SPEECH_P);
+  if (window.length < MIN_FRAMES_AFTER_WARMUP) return { verdict: "checking", floor, speech, heard };
+  const nowHeard = heard || speech >= LOW_SPEECH_DB;
+  const noisy = floor > NOISY_FLOOR_DB;
+  if (nowHeard) return { verdict: noisy ? "noisy" : "ok", floor, speech, heard: true };
+  if (elapsedS < SPEECH_WAIT_S) return { verdict: "checking", floor, speech, heard: false };
+  return { verdict: noisy ? "noisy" : "low", floor, speech, heard: false };
+}

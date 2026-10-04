@@ -225,8 +225,15 @@ GUARD = """
     }
   }).observe(document, {childList: true, subtree: true, attributes: true, attributeFilter: ["contenteditable", "type"]});
   document.addEventListener("DOMContentLoaded", () => scan(document.documentElement));
-  // Playback of a take (a blob: URL) must work under the CSP's media-src.
+  // Playback of a take: through the capture's audio context (Web Audio), or the audio element
+  // fallback (a blob: URL, under the CSP's media-src).
   window.__played = 0;
+  const startSource = AudioBufferSourceNode.prototype.start;
+  AudioBufferSourceNode.prototype.start = function (...args) {
+    const out = startSource.apply(this, args);
+    window.__played++;
+    return out;
+  };
   const play = HTMLMediaElement.prototype.play;
   HTMLMediaElement.prototype.play = function () {
     const playing = play.call(this);
