@@ -17,6 +17,13 @@ proptest = "1"
 insta = { version = "1", features = ["json"] }
 
 # Dependencies are compiled once and reused across test runs; optimise them even in dev builds.
+[profile.release]
+# rustc below 1.98 strips release builds' debuginfo (Cargo's default `strip = "debuginfo"`) with an
+# llvm-objcopy that can leave a Mach-O's LINKEDIT string pool 4-byte aligned, and macOS 27's dyld
+# refuses such a library ("mis-aligned LINKEDIT string pool", rust-lang/rust#158410). Not stripping
+# avoids it on any toolchain; the libraries are only a little bigger.
+strip = "none"
+
 [profile.dev.package."*"]
 opt-level = 3
 
