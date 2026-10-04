@@ -153,10 +153,17 @@ $TONEKIT_DATA/
   corpora/<corpus id>/corpus.toml
   corpora/<corpus id>/manifest.jsonl
   corpora/<corpus id>/audio/...
+  corpora/<corpus id>/audio/<CODE>/<card id>.wav  # intake: a session's clips, byte for byte
+  corpora/<corpus id>/sessions/<CODE>.json        # intake: the session's session.json, byte for byte
   inbox/                      # bundles waiting for intake
   stale/<corpus id>.json      # outputs made from this corpus are stale (purge, relabel); cleared by the next run
+  reports/<corpus id>.md      # where intake tells `tkh eval` to write (reports list clips by session code)
   purge-log.jsonl
 ```
+
+A stale marker (`contracts.registry.StaleMarker`) is `{"corpus": "<id>", "reasons": [{"reason":
+"purged session K7Q2MD", "marked_at": "<UTC time>"}]}`; marking again appends a reason, and a
+marker that can't be read is replaced by one that says so.
 
 `corpus.toml`:
 
@@ -205,6 +212,12 @@ context: "phrase" | "isolated" | None
 `speaker` refers to a `[[speaker]]` id in the clip's corpus, and graders read the accent from
 there. Intake writes each clip's `source` as its corpus's `source`: WORLD resynthesis refuses
 `volunteer-corpus` clips by that field (R80). The CLI's `--accent` stays as an override.
+
+Rows intake writes: `id` is `<CODE>-<card id>`, and `pair` is `<CODE>-<deck pair>`, since a
+manifest holds many speakers and a gate pair is one speaker's two readings (the deck's pair is
+`card`'s). `condition` is `{"noise": "uncontrolled", "distance": "handheld"}`; `needs_listen` is
+false. A recorded `gate` or `diag_t23` card whose twin was skipped gets no row (pairs are graded
+whole).
 
 ## 5. Gate file (`gates/<id>.toml`)
 
@@ -256,10 +269,12 @@ Removes, for that session:
 - the audio;
 - the manifest rows;
 - the speaker entry;
-- analysis-cache entries (keyed by WAV hash);
-- review pages that embed the audio;
-- everything intake wrote for it: the copy of `session.json`, its QC rows and QC report lines;
-- any bundle left in `inbox/`.
+- analysis-cache entries: the cache keys an entry by a hash over the WAV, the register and the
+  tonekit build, so one session's entries can't be picked out and purge clears the whole cache;
+- review pages that embed the audio (none yet: `tkh review` must write them where purge looks);
+- everything intake wrote for it: the copy of `session.json` (intake keeps no QC rows yet), and
+  any staging area an interrupted intake left;
+- any bundle left in `inbox/` (by name, or by the code in its `session.json`).
 
 What the engine can't reach is DJ's: the original zip in Messages, Mail, Downloads or Files. The
 purge output ends with that reminder.

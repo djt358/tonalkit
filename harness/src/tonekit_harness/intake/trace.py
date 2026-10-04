@@ -76,10 +76,18 @@ def _speakers(doc: dict, code: str) -> tuple[str, ...]:
     )
 
 
-def _rows(corpus: Path, manifest: Path, code: str) -> int:
+def manifest_text(manifest: Path) -> str:
+    """The manifest's text ("" when there is none); raises `IntakeError` when it is not UTF-8."""
     if not manifest.is_file():
-        return 0
-    text = manifest.read_text(encoding="utf-8")
+        return ""
+    try:
+        return manifest.read_text(encoding="utf-8")
+    except UnicodeDecodeError as e:
+        raise IntakeError(f"{manifest}: not UTF-8 text ({e}); fix it, then run again") from e
+
+
+def _rows(corpus: Path, manifest: Path, code: str) -> int:
+    text = manifest_text(manifest)
     return without_rows(text, lambda row: layout.is_session_row(row, corpus, manifest, code))[1]
 
 

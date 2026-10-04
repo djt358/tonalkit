@@ -22,7 +22,7 @@ from .manifest_lines import without_rows
 from .packs import pack_path
 from .purge_log import append_purge_record
 from .stale import mark_stale
-from .trace import CorpusTrace, corpus_document, find_session
+from .trace import CorpusTrace, corpus_document, find_session, manifest_text
 
 
 @dataclass(frozen=True)
@@ -58,7 +58,7 @@ def _corpus_text(root: Path, trace: CorpusTrace, code: str, repo: Path) -> str |
 def _manifest_text(trace: CorpusTrace, code: str) -> str | None:
     if not trace.rows:
         return None
-    text = trace.manifest.read_text(encoding="utf-8")
+    text = manifest_text(trace.manifest)
     return without_rows(text, lambda row: layout.is_session_row(row, trace.corpus, trace.manifest, code))[0]
 
 

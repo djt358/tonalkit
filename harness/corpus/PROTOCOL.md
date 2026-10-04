@@ -53,6 +53,21 @@ From `harness/`:
    used for that speaker's other clips. Analyses are cached in `.cache/analysis/` (keyed by the
    WAV bytes, the register and the installed `tonekit_py`); `--no-cache` bypasses the cache.
 
+## Volunteer bundles (the S0.5 kit)
+
+Volunteer recordings never go in `corpus/`. `tkh intake` takes a kit bundle (the zip, or the folder
+it unzips to) into a corpus under the data root (`$TONEKIT_DATA`, default `~/tonekit-data`;
+`docs/s05/contracts.md` section 3). From `harness/`:
+
+    uv run tkh intake ~/Downloads/tonekit-s05-v1-K7Q2MD.zip
+
+It checks the bundle, finds the deck it was recorded with by its hash, and writes one row per kept
+clip: id `<CODE>-<card>`, pair `<CODE>-<deck pair>`, condition `{"noise": "uncontrolled",
+"distance": "handheld"}` (nothing measures a volunteer's room or distance), `needs_listen` false (a
+deliberate error read as the correct word shows up in the report as an accepted tone-error clip,
+which is the list to listen to). It then prints the `tkh eval` command to run, with the report
+under the data root. `tkh purge --session CODE` deletes a session on request.
+
 ## Manifest: `corpus/manifest.jsonl`
 
 One JSON object per line. Blank lines are skipped. Unknown keys are rejected, so a misspelt field

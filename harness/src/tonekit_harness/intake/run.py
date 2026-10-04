@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ..contracts.bundle import Bundle, BundleError, read_bundle
-from ..contracts.registry import Speaker, corpus_dir
+from ..contracts.registry import CorpusFile, Speaker, corpus_dir
 from . import layout
 from .checks import check_staged, manifest_ids
 from .commit import MoveNew, Replace, apply_all, move_dir_into_place
@@ -20,9 +20,9 @@ from .deck_lookup import find_deck
 from .errors import IntakeError
 from .manifest_lines import appended
 from .packs import pack_path
-from .rows import join_session
+from .rows import Joined, join_session
 from .stage import Staged, clear_leftovers, stage
-from .trace import find_session
+from .trace import find_session, manifest_text
 
 
 @dataclass(frozen=True)
@@ -94,19 +94,35 @@ def _commit(staged: Staged, corpus: Path, created: bool, code: str) -> None:
     ])  # fmt: skip
 
 
-def intake_bundle(path: Path, opts: IntakeOptions) -> IntakeResult:
-    """Take one bundle (zip or unzipped folder) into a corpus. Raises `IntakeError` (or `OSError`)
-    with nothing written."""
+@dataclass(frozen=True)
+class _Plan:
+    """Everything a session adds, worked out and checked before anything is written."""
+
+    bundle: Bundle
+    deck_where: str
+    lect: str
+    pack: Path
+    corpus_id: str
+    corpus: Path
+    created: bool
+    updated: CorpusFile  # the corpus file with the session's speaker
+    speaker: Speaker
+    manifest: Path
+    manifest_text: str  # the corpus's manifest with the session's rows appended
+    joined: Joined
+
+
+def _plan(path: Path, opts: IntakeOptions) -> _Plan:
     bundle = _read(path)
     session = bundle.session
     code = session.session
     _refuse_if_present(opts.root, code)
     found = find_deck(session.deck, repo=opts.repo, explicit=opts.deck)
-    deck = found.deck
-    pack = pack_path(opts.repo, deck.deck.lect)
-    corpus_id = opts.corpus_id or layout.default_corpus_id(deck.deck.id)
+    lect = found.deck.deck.lect
+    pack = pack_path(opts.repo, lect)
+    corpus_id = opts.corpus_id or layout.default_corpus_id(found.deck.deck.id)
     base, created = existing_or_new(
-        opts.root, corpus_id, lect=deck.deck.lect, pack=pack, source=opts.source, register=opts.register
+        opts.root, corpus_id, lect=lect, pack=pack, source=opts.source, register=opts.register
     )
     speaker = session_speaker(session)
     updated = with_speaker(base, speaker, pack)
@@ -115,44 +131,65 @@ def intake_bundle(path: Path, opts: IntakeOptions) -> IntakeResult:
     manifest = corpus / updated.corpus.manifest
     joined = join_session(
         session,
-        deck,
+        found.deck,
         source=updated.corpus.source,
         path_of=lambda card: layout.manifest_relpath(corpus, manifest, code, card),
     )
     if not joined.rows:
         raise IntakeError(f"session {code} has no clip to keep (every card skipped or kept out); nothing written")
+    old = manifest_text(manifest)
     manifest_ids(manifest, opts.register)  # refuse a corpus manifest that is already broken
-    old = manifest.read_text(encoding="utf-8") if manifest.exists() else ""
+    return _Plan(
+        bundle=bundle, deck_where=found.where, lect=lect, pack=pack, corpus_id=corpus_id, corpus=corpus,
+        created=created, updated=updated, speaker=speaker, manifest=manifest,
+        manifest_text=appended(old, [r.model_dump_json() for r in joined.rows]), joined=joined,
+    )  # fmt: skip
+
+
+def _write(plan: _Plan, opts: IntakeOptions) -> None:
+    """Stage, check, move in; on any failure, discard the staging area and re-raise."""
+    code = plan.bundle.session.session
     clear_leftovers(opts.root, code)
     try:
         staged = stage(
             opts.root,
-            bundle,
-            [r.card for r in joined.rows if r.card is not None],
-            manifest_name=updated.corpus.manifest,
-            manifest_text=appended(old, [r.model_dump_json() for r in joined.rows]),
-            corpus_text=corpus_toml_text(updated),
+            plan.bundle,
+            [r.card for r in plan.joined.rows if r.card is not None],
+            manifest_name=plan.updated.corpus.manifest,
+            manifest_text=plan.manifest_text,
+            corpus_text=corpus_toml_text(plan.updated),
         )
-        check_staged(staged, register=opts.register, pack=pack)
-        _commit(staged, corpus, created, code)
+        check_staged(staged, register=opts.register, pack=plan.pack)
+        _commit(staged, plan.corpus, plan.created, code)
     except BaseException:
         _discard_staging(opts.root, code)
         raise
     _discard_staging(opts.root, code)
-    per_set = Counter(r.set for r in joined.rows)
+
+
+def _result(path: Path, plan: _Plan) -> IntakeResult:
+    session = plan.bundle.session
     return IntakeResult(
-        code=code,
+        code=session.session,
         bundle=path,
-        deck_where=found.where,
-        speaker=speaker,
-        lect=deck.deck.lect,
-        corpus_id=corpus_id,
-        corpus=corpus,
-        created=created,
-        source=updated.corpus.source,
-        manifest=manifest,
-        pack=pack,
-        per_set=dict(per_set),
+        deck_where=plan.deck_where,
+        speaker=plan.speaker,
+        lect=plan.lect,
+        corpus_id=plan.corpus_id,
+        corpus=plan.corpus,
+        created=plan.created,
+        source=plan.updated.corpus.source,
+        manifest=plan.manifest,
+        pack=plan.pack,
+        per_set=dict(Counter(r.set for r in plan.joined.rows)),
         skipped=list(session.skipped),
-        kept_out=joined.kept_out,
+        kept_out=plan.joined.kept_out,
     )
+
+
+def intake_bundle(path: Path, opts: IntakeOptions) -> IntakeResult:
+    """Take one bundle (zip or unzipped folder) into a corpus. Raises `IntakeError` (or `OSError`)
+    with nothing written."""
+    plan = _plan(path, opts)
+    _write(plan, opts)
+    return _result(path, plan)
