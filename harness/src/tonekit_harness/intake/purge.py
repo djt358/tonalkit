@@ -13,6 +13,7 @@ from ..atomic import write_text_atomic
 from ..contracts.registry import PurgeRecord, RegistryError, corpus_file_path, inbox_dir, load_corpus_file
 from . import layout
 from .analysis_cache import clear_analysis_cache
+from .reports import remove_files, reports_mentioning
 from .bundle_match import session_bundles
 from .commit import remove_tree
 from .corpus_toml import corpus_toml_text
@@ -39,6 +40,7 @@ class PurgeOutcome:
     staging: int  # leftover staging areas removed
     inbox: int  # bundles removed from inbox/
     cache_entries: int  # analysis-cache files cleared
+    reports: int  # reports under the data root that listed the session's clips
     log: Path
 
 
@@ -93,20 +95,26 @@ def purge_session(
     nothing changed). `cache_dir` is `tkh eval`'s analysis cache."""
     trace = find_session(root, code)
     inbox = session_bundles(inbox_dir(root), code)
-    if not trace.found and not inbox:
+    reports = reports_mentioning(root, code)
+    if not trace.found and not inbox and not reports:
         return None
     plans = [_plan(root, t, code, repo) for t in trace.corpora]  # may refuse: before any change
     files = sum(_apply(root, p, code) for p in plans)
     files += sum(remove_tree(d) for d in trace.staging)
     files += sum(remove_tree(p) for p in inbox)
     cache = clear_analysis_cache(cache_dir) if trace.corpora else 0
+    files += remove_files(reports)
     at = now or datetime.now(UTC)
     for t in trace.corpora:
         mark_stale(root, t.corpus_id, f"purged session {code}", now=at)
-    record = PurgeRecord(
-        session=code, purged_at=at, files_removed=files, corpora=[t.corpus_id for t in trace.corpora]
-    )
+    record = PurgeRecord(session=code, purged_at=at, files_removed=files, corpora=[t.corpus_id for t in trace.corpora])
     log = append_purge_record(root, record)
     return PurgeOutcome(
-        record=record, corpora=trace.corpora, staging=len(trace.staging), inbox=len(inbox), cache_entries=cache, log=log
+        record=record,
+        corpora=trace.corpora,
+        staging=len(trace.staging),
+        inbox=len(inbox),
+        cache_entries=cache,
+        reports=len(reports),
+        log=log,
     )

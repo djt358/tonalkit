@@ -272,6 +272,8 @@ Removes, for that session:
 - analysis-cache entries: the cache keys an entry by a hash over the WAV, the register and the
   tonekit build, so one session's entries can't be picked out and purge clears the whole cache;
 - review pages that embed the audio (none yet: `tkh review` must write them where purge looks);
+- reports under `$TONEKIT_DATA/reports/` that mention the session (they list clips by id;
+  the next `tkh eval` makes new ones);
 - everything intake wrote for it: the copy of `session.json` (intake keeps no QC rows yet), and
   any staging area an interrupted intake left;
 - any bundle left in `inbox/` (by name, or by the code in its `session.json`).

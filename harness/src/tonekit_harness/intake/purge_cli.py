@@ -34,6 +34,10 @@ def _done_lines(o: PurgeOutcome) -> list[str]:
         lines.append(f"  removed {o.staging} unfinished intake staging area(s)")
     if o.inbox:
         lines.append(f"  removed {o.inbox} bundle(s) from inbox/")
+    if o.reports:
+        lines.append(
+            f"  removed {o.reports} report(s) under the data root that listed its clips (tkh eval makes new ones)"
+        )
     if o.cache_entries:
         lines.append(
             f"  cleared tkh eval's analysis cache ({o.cache_entries} entries in {DEFAULT_CACHE_DIR}): "
@@ -47,7 +51,7 @@ def _reminder(code: str, repo: Path) -> list[str]:
     """The last lines of every purge: what the engine cannot reach (contracts section 6)."""
     lines = [
         "What only you can delete: the original zip wherever it reached you (Messages, Mail, AirDrop "
-        "or Downloads, Files) and any copy outside the data root, such as an unzipped folder or a backup.",
+        "or Downloads, Files) and any copy outside the data root, such as an unzipped folder, a backup or a report written elsewhere.",
     ]
     return lines + [f"  still on disk: {p}" for p in session_bundles(repo / RAW_COPIES, code)]
 
@@ -65,7 +69,6 @@ def _run(args: argparse.Namespace) -> int:
         print(f"purge {code}: nothing found under {root}; nothing changed")
     else:
         print("\n".join([f"purge {code}"] + _done_lines(outcome)))
-        print(f"Reports made from those corpora before now still list {code}'s clips: re-run tkh eval to replace them.")
     print("\n".join(_reminder(code, repo)))
     return 0
 

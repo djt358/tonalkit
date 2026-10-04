@@ -167,3 +167,21 @@ def test_rows_of_a_manifest_in_a_subdirectory_are_found_by_their_audio(tmp_path,
     outcome = purge(root, "K7Q2MD", cache)
     assert outcome is not None and outcome.corpora[0].rows == 6
     assert (corpus / "lists" / "manifest.jsonl").read_text() == ""
+
+
+def test_purge_removes_the_reports_that_list_the_session_and_keeps_the_others(tmp_path, root, cache):
+    intake_bundle(kit_bundle(tmp_path / "in"), options(root))
+    reports = root / "reports"
+    reports.mkdir()
+    (reports / "volunteers-s05-v1.md").write_text("| K7Q2MD-g01 | 0.8 |\n", encoding="utf-8")
+    (reports / "other.md").write_text("| ABCDEF-g01 | 0.8 |\n", encoding="utf-8")
+    outcome = purge(root, "K7Q2MD", cache)
+    assert outcome.reports == 1
+    assert sorted(p.name for p in reports.iterdir()) == ["other.md"]
+
+
+def test_a_report_alone_is_still_purged(tmp_path, root, cache):
+    (root / "reports").mkdir(parents=True)
+    (root / "reports" / "old.md").write_text("K7Q2MD-r01\n", encoding="utf-8")
+    outcome = purge(root, "K7Q2MD", cache)
+    assert outcome is not None and outcome.reports == 1 and outcome.record.files_removed == 1
