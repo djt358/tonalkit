@@ -776,7 +776,7 @@ def check_fidelity(bundle: Path, shown: list[str]) -> list[str]:
     }:
         problems.append(f"constraints {constraints}")
     if session["consent"]["version"] not in {"standin"} and not re.fullmatch(
-        r"v\d+", session["consent"]["version"]
+        r"v\d+(?:\.\d+)*", session["consent"]["version"]
     ):
         problems.append(f"consent version {session['consent']['version']}")
     # The gate pairs' twins are never read back to back.

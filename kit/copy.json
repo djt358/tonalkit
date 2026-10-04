@@ -2,22 +2,18 @@
   "welcome.title": "Thanks for helping out",
   "welcome.body": "You'll read about 70 short cards aloud, about 20 minutes in all. Find a quiet spot, ideally on your own, and speak the way you normally do; every accent helps. A few cards look a little off on purpose, so read every card exactly as written, even if it looks wrong. You're not being tested. The app is. You can pause and pick it up within a few days.",
   "welcome.start": "Get started",
-
   "consent.title": "Before you start",
   "consent.agree": "I agree",
   "consent.decline": "No thanks",
   "consent.declined": "No problem, and thanks for considering it. Nothing was recorded, so you can close this page.",
-
   "background.title": "A little about you",
-  "background.intro": "Quick questions about you. The first two help DJ see how results differ across kinds of speakers. The last two set how the cards look. You can pick Prefer not to say on the first two.",
+  "background.intro": "Quick questions about you. The first two help us see how results differ across kinds of speakers. The last two set how the cards look. You can pick Prefer not to say on the first two.",
   "background.next": "Next",
-
   "background.background.label": "How would you describe yourself as a Mandarin speaker?",
   "background.background.native": "Native speaker: Mandarin was my first language",
   "background.background.heritage": "Heritage speaker: I grew up with Mandarin at home, and English became my main language",
   "background.background.learner": "Learner: I picked it up later",
   "background.background.prefer_not": "Prefer not to say",
-
   "background.grew_up_hearing.label": "Which Mandarin did you mostly hear growing up?",
   "background.grew_up_hearing.mainland": "Mainland China",
   "background.grew_up_hearing.taiwan": "Taiwan",
@@ -25,15 +21,12 @@
   "background.grew_up_hearing.hong_kong_macau": "Hong Kong or Macau",
   "background.grew_up_hearing.other": "Somewhere else",
   "background.grew_up_hearing.prefer_not": "Prefer not to say",
-
   "background.reading.label": "How would you like to see the cards?",
   "background.reading.hanzi": "Characters only",
   "background.reading.hanzi_pinyin": "Characters with pinyin",
-
   "background.script.label": "Which characters do you read more easily?",
   "background.script.simplified": "Simplified (简体)",
   "background.script.traditional": "Traditional (繁體)",
-
   "mic.title": "Check your microphone",
   "mic.body": "Your phone will ask to use the microphone. Tap Allow. Your recordings stay on your phone until you choose to share them.",
   "mic.allow": "Allow microphone",
@@ -42,7 +35,6 @@
   "mic.level_low": "A bit quiet. Hold the phone closer, or speak up a little.",
   "mic.noisy": "A little noisy. That's fine, or move somewhere quieter if it's easy.",
   "mic.continue": "Continue",
-
   "card.progress": "{n} of {total}",
   "card.record": "Record",
   "card.stop": "Stop",
@@ -56,28 +48,24 @@
   "card.saved": "Saved on your phone.",
   "card.finish_early": "Finish and send what I have",
   "card.finish_early_confirm": "Finish now? The cards you haven't recorded will count as skipped.",
-
   "pause.title": "Taking a break?",
   "pause.body": "Your recordings so far are saved on this phone. Open the same link in Safari within a few days and you'll pick up where you left off.",
   "pause.resume": "Continue where I left off",
-
   "done.title": "All done. Thank you!",
-  "done.body": "You're done with the cards. Tap Share with DJ to send your recordings. If it doesn't go through, you can send again. Once DJ has them, you can delete your copy.",
+  "done.body": "You're done with the cards. Tap Share to send your recordings. If it doesn't go through, you can send again. Once we have them, you can delete your copy.",
   "done.code_label": "Your code",
-  "done.code_note": "Keep this code if you ever want your recordings deleted: just send it to DJ. It's also in the name of the file you share.",
+  "done.code_note": "Keep this code if you ever want your recordings deleted: just send it to us. It's also in the name of the file you share.",
   "done.delete": "Delete from this phone",
-  "done.delete_confirm": "Delete your recordings and answers from this phone? This can't be undone. DJ keeps what you already sent; to have DJ delete it too, send DJ your code.",
-  "done.delete_confirm_unsent": "Nothing has been sent to DJ yet. Deleting removes your recordings from this phone for good.",
-  "done.deleted": "Deleted from this phone. Thank you again for helping. To have DJ delete what you sent, send DJ your code.",
-
-  "share.button": "Share with DJ",
+  "done.delete_confirm": "Delete your recordings and answers from this phone? This can't be undone. We keep what you already sent; to have us delete it too, send us your code.",
+  "done.delete_confirm_unsent": "Nothing has been sent to us yet. Deleting removes your recordings from this phone for good.",
+  "done.deleted": "Deleted from this phone. Thank you again for helping. To have us delete what you sent, send us your code.",
+  "share.button": "Share",
   "share.again": "Send again",
-  "share.fallback": "Save to Files, then send it to DJ",
+  "share.fallback": "Save to Files, then send it to us",
   "share.done": "Thank you. You're all done.",
-
   "error.mic_blocked": "The microphone is blocked. Open Settings, tap Apps, then Safari, then Microphone, and choose Allow. Then reload this page.",
   "error.unsupported": "This page needs Safari on an iPhone. If you opened it inside another app, tap the ⋯ or share button and choose Open in Safari (在Safari中打开).",
   "error.in_app_browser": "Please open this page in Safari. It opened inside another app, where recording or sharing may not work. Tap the ⋯ or share button, then choose Open in Safari (在Safari中打开).",
   "error.storage": "This page can't save your recordings on your phone. That can happen in a Private tab or when storage is full. Try a normal Safari tab, then reload.",
-  "error.generic": "Something went wrong. Reload the page; your recordings so far should still be there. If it keeps happening, tell DJ."
+  "error.generic": "Something went wrong. Reload the page; your recordings so far should still be there. If it keeps happening, let us know."
 }

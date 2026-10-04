@@ -107,22 +107,22 @@ def test_the_heritage_option_describes_a_childhood_not_an_ability():
 def test_deleting_from_the_phone_says_it_cannot_be_undone_and_what_dj_keeps():
     confirm = copy()["done.delete_confirm"]
     assert "can't be undone" in confirm
-    assert "DJ keeps what you already sent" in confirm and "send DJ your code" in confirm
+    assert "We keep what you already sent" in confirm and "send us your code" in confirm
     assert "\n" not in confirm  # it is the text of a native confirm() box
 
 
 def test_deleting_before_sending_says_nothing_has_been_sent():
-    # R90: the confirm before any share. Nobody should read "DJ keeps what you sent" when nothing was.
+    # R90: the confirm before any share. Nobody should read "we keep what you sent" when nothing was.
     unsent = copy()["done.delete_confirm_unsent"]
-    assert unsent == "Nothing has been sent to DJ yet. Deleting removes your recordings from this phone for good."
+    assert unsent == "Nothing has been sent to us yet. Deleting removes your recordings from this phone for good."
     assert "\n" not in unsent  # it is the text of a native confirm() box
-    assert "keeps" not in unsent and "send DJ your code" not in unsent
+    assert "keep" not in unsent and "send us your code" not in unsent
 
 
 def test_the_done_screen_does_not_claim_every_card_was_read():
     # "Finish and send what I have" reaches this screen with cards left, so it can't say "every card".
     body = copy()["done.body"]
-    assert body.startswith("You're done with the cards. Tap Share with DJ to send your recordings.")
+    assert body.startswith("You're done with the cards. Tap Share to send your recordings.")
     assert "every card" not in body.lower()
 
 
