@@ -1,6 +1,6 @@
 """The session bundle the kit exports (contracts.md section 2): a zip of `session.json` and one
-16 kHz mono 16-bit PCM WAV per recorded card. `read_bundle` checks the zip's layout and the WAV
-headers; decoding and quality control of the audio is intake's job."""
+16 kHz mono 16-bit PCM WAV per recorded card, or the folder it unzips to. `read_bundle` checks the
+layout and the WAV headers; decoding and quality control of the audio is intake's job."""
 
 from __future__ import annotations
 
@@ -18,6 +18,7 @@ from typing import Literal
 from pydantic import AwareDatetime, Field, ValidationError, model_validator
 
 from .base import StrictModel, format_validation_error
+from .bundle_folder import zip_folder
 from .enums import Background, GrewUpHearing, Script
 from .ids import CARD_ID_CHARS, CARD_ID_PATTERN, CardId
 from .wav_check import WavHeader, check_wav
@@ -31,7 +32,7 @@ _CLIP_MEMBER = re.compile(rf"clips/{CARD_ID_CHARS}\.wav")
 
 
 class BundleError(ValueError):
-    """A bundle could not be read; the message starts with the zip's path."""
+    """A bundle could not be read; the message starts with the bundle's path (zip or folder)."""
 
 
 class DeckRef(StrictModel):
@@ -110,16 +111,25 @@ class Session(StrictModel):
 
 @dataclass(frozen=True)
 class Bundle:
-    path: Path
+    path: Path  # the zip, or the folder it was unzipped to
     session: Session
     audio: dict[str, WavHeader]  # by card id: the header of clips/<card>.wav
 
     def clip_bytes(self, card: str) -> bytes:
-        """The WAV file of `card`, as it is in the zip."""
+        """The WAV file of `card`, as it is in the bundle."""
         if card not in self.audio:
             raise KeyError(f"no clip for card {card!r} in {self.path}")
+        return self._member(f"clips/{card}.wav")
+
+    def session_bytes(self) -> bytes:
+        """`session.json` exactly as it is in the bundle."""
+        return self._member(SESSION_FILE)
+
+    def _member(self, name: str) -> bytes:
+        if self.path.is_dir():
+            return (self.path / name).read_bytes()
         with zipfile.ZipFile(self.path) as z:
-            return z.read(f"clips/{card}.wav")
+            return z.read(name)
 
 
 # What reading a member of a damaged zip can raise: a bad CRC or header (BadZipFile), a broken or
@@ -129,16 +139,28 @@ class Bundle:
 _DAMAGE = (zipfile.BadZipFile, zlib.error, OSError, lzma.LZMAError, EOFError, NotImplementedError, RuntimeError)
 
 
-def read_bundle(zip_path: str | Path) -> Bundle:
-    """Read and validate a bundle zip. Raises `BundleError` listing every problem, including every
-    member that is damaged (a bad CRC, a broken stream)."""
-    path = Path(zip_path)
+def read_bundle(bundle_path: str | Path) -> Bundle:
+    """Read and validate a bundle: the kit's zip, or the folder it unzips to, which is checked the
+    same way (OS metadata such as Finder's .DS_Store is left out, see `bundle_folder`). Raises
+    `BundleError` listing every problem, including every member that is damaged (a bad CRC, a
+    broken stream)."""
+    path = Path(bundle_path)
+    if path.is_dir():
+        try:
+            z = zip_folder(path)
+        except OSError as e:
+            raise BundleError(f"{path}: cannot read the folder: {e}") from None
+        return _read_zip(path, z)
     if not path.is_file():
         raise BundleError(f"{path}: does not exist")
     try:
         z = zipfile.ZipFile(path)
     except zipfile.BadZipFile:
         raise BundleError(f"{path}: not a zip file") from None
+    return _read_zip(path, z)
+
+
+def _read_zip(path: Path, z: zipfile.ZipFile) -> Bundle:
     with z:
         names = [i.filename for i in z.infolist() if not i.is_dir()]
         if SESSION_FILE not in names:

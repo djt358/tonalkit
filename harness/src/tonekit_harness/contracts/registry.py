@@ -66,6 +66,10 @@ def purge_log_path(root: Path) -> Path:
     return root / "purge-log.jsonl"
 
 
+def stale_path(root: Path, corpus_id: str) -> Path:
+    return root / "stale" / f"{corpus_id}.json"
+
+
 # ---- speakers and corpora -----------------------------------------------------------------
 
 
@@ -245,3 +249,20 @@ def load_purge_log(path: str | Path) -> list[PurgeRecord]:
             except ValidationError as e:
                 raise RegistryError(f"{where}: {format_validation_error(e)}") from e
     return records
+
+
+# ---- stale markers ------------------------------------------------------------------------
+
+
+class StaleReason(StrictModel):
+    reason: str = Field(min_length=1)
+    marked_at: AwareDatetime
+
+
+class StaleMarker(StrictModel):
+    """`stale/<corpus id>.json`: what was computed from the corpus (the scoreboard, a calibration
+    fitted on it) no longer matches it, and why. Written by what invalidated it (a purge, a
+    relabel), removed by the next run that recomputes from it; marking twice keeps both reasons."""
+
+    corpus: str
+    reasons: list[StaleReason] = Field(min_length=1)  # oldest first

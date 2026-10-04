@@ -7,32 +7,16 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from ..toml_write import toml_value
 from .contract_view import contract_card
-
-
-def _string(value: str) -> str:
-    # A JSON string is a valid TOML basic string (same escapes); keep hanzi as they are.
-    return json.dumps(value, ensure_ascii=False)
-
-
-def _value(value: object) -> str:
-    if isinstance(value, str):
-        return _string(value)
-    if isinstance(value, int) and not isinstance(value, bool):
-        return str(value)
-    if isinstance(value, list):
-        return "[" + ", ".join(_value(v) for v in value) + "]"
-    if isinstance(value, dict):
-        return "{ " + ", ".join(f"{k} = {_value(v)}" for k, v in value.items()) + " }"
-    raise TypeError(f"cannot write {value!r} as TOML")
 
 
 def toml_text(data: dict) -> str:
     """The deck contract file: `[deck]`, then one `[[card]]` per card in key order. Fields the
     contract model cannot hold yet (see `contract_view`) are left out."""
-    lines = ["[deck]"] + [f"{k} = {_value(v)}" for k, v in data["deck"].items()]
+    lines = ["[deck]"] + [f"{k} = {toml_value(v)}" for k, v in data["deck"].items()]
     for card in data["card"]:
-        lines += ["", "[[card]]"] + [f"{k} = {_value(v)}" for k, v in contract_card(card).items()]
+        lines += ["", "[[card]]"] + [f"{k} = {toml_value(v)}" for k, v in contract_card(card).items()]
     return "\n".join(lines) + "\n"
 
 
