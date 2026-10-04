@@ -9,7 +9,7 @@ from kit_support import CONSENT, GUIDE, KIT, PROMISES, REPO, copy, text
 
 HEADER = ["Promise", "Where we say it", "Mechanism that keeps it", "Test"]
 QUOTED = re.compile(r'(CONSENT|GUIDE|copy [\w.]+) "([^"]+)"')
-STATUS = re.compile(r"\(built(?:, as policy)?\)|\b(?:P4|C0|E1) \(built\)|\b(?:P4|P5) \(pending\)|OP \(operational\)")
+STATUS = re.compile(r"\(built(?:, as policy)?\)|\b(?:P4|P5|C0|E1) \(built\)|\b(?:P4|P5) \(pending\)|OP \(operational\)")
 
 # Files a task built on its own branch arrive with its merge. Until then they are not here to check:
 # a path (or test name) is exempt only while the marker that its branch is merged is missing.
