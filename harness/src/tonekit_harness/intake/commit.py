@@ -11,6 +11,19 @@ from pathlib import Path
 from ..atomic import write_text_atomic
 
 
+def _make_parents(path: Path) -> list[Path]:
+    """Create the missing parent directories of `path`; returns them, outermost first."""
+    made = [p for p in reversed(path.parents) if not p.exists()]
+    for p in made:
+        p.mkdir()
+    return made
+
+
+def _remove_made(made: list[Path]) -> None:
+    for p in reversed(made):
+        p.rmdir()
+
+
 @dataclass
 class MoveNew:
     """Move `src` to `dst`, which must not exist; parent directories are created (and removed
@@ -23,33 +36,33 @@ class MoveNew:
     def do(self) -> None:
         if self.dst.exists():
             raise FileExistsError(f"{self.dst} already exists")
-        missing = [p for p in reversed(self.dst.parents) if not p.exists()]
-        for p in missing:
-            p.mkdir()
-            self.made.append(p)
+        self.made = _make_parents(self.dst)
         os.rename(self.src, self.dst)
 
     def undo(self) -> None:
         os.rename(self.dst, self.src)
-        for p in reversed(self.made):
-            p.rmdir()
+        _remove_made(self.made)
 
 
 @dataclass
 class Replace:
-    """Put `src` in place of `dst` (which may not exist yet); `undo` restores the old file."""
+    """Put `src` in place of `dst` (which may not exist yet; parent directories are created);
+    `undo` restores the old file."""
 
     src: Path
     dst: Path
     before: str | None = None
+    made: list[Path] = field(default_factory=list)
 
     def do(self) -> None:
         self.before = self.dst.read_text(encoding="utf-8") if self.dst.exists() else None
+        self.made = _make_parents(self.dst)
         os.replace(self.src, self.dst)
 
     def undo(self) -> None:
         if self.before is None:
             self.dst.unlink(missing_ok=True)
+            _remove_made(self.made)
         else:
             write_text_atomic(self.dst, self.before)
 

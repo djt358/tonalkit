@@ -124,15 +124,15 @@ def intake_bundle(path: Path, opts: IntakeOptions) -> IntakeResult:
     manifest_ids(manifest, opts.register)  # refuse a corpus manifest that is already broken
     old = manifest.read_text(encoding="utf-8") if manifest.exists() else ""
     clear_leftovers(opts.root, code)
-    staged = stage(
-        opts.root,
-        bundle,
-        [r.card for r in joined.rows if r.card is not None],
-        manifest_name=updated.corpus.manifest,
-        manifest_text=appended(old, [r.model_dump_json() for r in joined.rows]),
-        corpus_text=corpus_toml_text(updated),
-    )
     try:
+        staged = stage(
+            opts.root,
+            bundle,
+            [r.card for r in joined.rows if r.card is not None],
+            manifest_name=updated.corpus.manifest,
+            manifest_text=appended(old, [r.model_dump_json() for r in joined.rows]),
+            corpus_text=corpus_toml_text(updated),
+        )
         check_staged(staged, register=opts.register, pack=pack)
         _commit(staged, corpus, created, code)
     except BaseException:

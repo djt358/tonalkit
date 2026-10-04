@@ -7,6 +7,16 @@ from kit_support import REPO
 
 HARNESS_SRC = REPO / "harness" / "src"
 
+# Reviewed exceptions, each a deliberate edit (R71): file -> (what it imports, why that cannot carry
+# a recording anywhere).
+ALLOWED = {
+    "tonekit_harness/intake/deck_history.py": (
+        ["subprocess"],
+        "runs `git log` and `git show` on the checkout to find the deck version a bundle names (P5); "
+        "it is given a deck path and commit ids, never a data-root path, with lazy fetching off",
+    ),
+}
+
 
 def scan(tmp_path, source: str) -> dict[str, list[str]]:
     (tmp_path / "module.py").write_text(source, encoding="utf-8")
@@ -14,7 +24,14 @@ def scan(tmp_path, source: str) -> dict[str, list[str]]:
 
 
 def test_the_harness_imports_no_network_client_and_loads_nothing_by_a_hidden_name():
-    assert network_imports(HARNESS_SRC) == {}
+    found = network_imports(HARNESS_SRC)
+    assert {path: names for path, names in found.items() if ALLOWED.get(path, ([], ""))[0] != names} == {}
+
+
+def test_every_reviewed_exception_is_still_needed_and_says_why():
+    found = network_imports(HARNESS_SRC)
+    for path, (names, why) in ALLOWED.items():
+        assert found.get(path) == names and why.strip(), path
 
 
 @pytest.mark.parametrize(
