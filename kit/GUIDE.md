@@ -6,7 +6,7 @@ Open it in Safari, not inside WeChat or another app:
 https://tonalkit.getbendy.app
 
 What you'll do
-Answer a few quick questions, then read about 70 short cards aloud, one word or phrase at a time. Speak the way you normally do; every accent helps. You can pause and finish later if you need to. It should take no more than 20 minutes start-to-finish.
+Answer a few quick questions, then read about 70 short cards aloud, one word or phrase at a time. Speak the way you normally do; every accent helps. You can pause and finish later, within a few days. It should take no more than 20 minutes start-to-finish.
 
 What you need
 - An iPhone
@@ -21,7 +21,7 @@ When you're done
 Tap Share and send the file to me. Just me, please, not a group chat.
 
 Your recordings
-They stay on your phone until you send them, and they carry a random code instead of your name. I use them only to test and tune the app. I analyze them on my own devices, and I'll never publish them or pass them to anyone else. I'll delete your recordings whenever you ask. Full details are on the consent screen.
+They stay on your phone until you send them, and they carry a random code instead of your name. I use them only to test and tune the app. I analyze them in a private workspace, and I'll never publish them or pass them to anyone else. I'll delete your recordings whenever you ask. Full details are on the consent screen.
 
 Thank you so much. It really helps.
 DJ

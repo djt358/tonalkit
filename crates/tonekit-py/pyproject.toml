@@ -22,7 +22,9 @@ classifiers = [
 module-name = "tonekit_py"
 manifest-path = "Cargo.toml"
 # One abi3 wheel serves every CPython >= 3.11 (Cargo.toml: abi3-py311).
-strip = true
+# No strip: on recent macOS, dyld refuses the stripped extension ("mis-aligned LINKEDIT string
+# pool"); the unstripped one is only bigger.
+strip = false
 # Build against the workspace's Cargo.lock exactly: the numbers must not move with a dependency.
 locked = true
 

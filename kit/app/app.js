@@ -7,7 +7,7 @@ import { loadDeck, deckFromStored, DEFAULT_DECK_ID } from "./deck.js";
 import { createSession, isoUtc, SPEAKER_OPTIONS, defaultScript, sessionDevice, deleteConfirmKey } from "./session.js";
 import { Capture, captureSupported } from "./capture.js";
 import { isInAppBrowser } from "./browser.js";
-import { micVerdict, MIC_CHECK_S } from "./miccheck.js";
+import { watchMic } from "./micwatch.js";
 import { openStore } from "./store.js";
 import { buildBundle, shareBundle, bundleName } from "./export.js";
 import { cardScreen } from "./cards.js";
@@ -98,7 +98,10 @@ function showBackground() {
   show("background");
 }
 
+let stopMicCheck = () => {};
+
 function showMic() {
+  stopMicCheck();
   $("mic-allow").hidden = false;
   $("mic-allow").disabled = false;
   $("mic-continue").hidden = true;
@@ -243,13 +246,18 @@ function wire() {
     }
     allow.hidden = true;
     setText($("mic-status"), app.t("mic.checking"));
-    const { verdict, floor, speech } = micVerdict(await app.capture.levels(MIC_CHECK_S));
-    Object.assign($("mic-status").dataset, { verdict, floor: floor.toFixed(1), speech: speech.toFixed(1) });
-    setText($("mic-status"), app.t(VERDICT_COPY[verdict]));
-    $("mic-continue").hidden = false;
+    stopMicCheck();
+    stopMicCheck = watchMic(app.capture, ({ verdict, floor, speech }) => {
+      if (verdict === "checking") return;
+      const status = $("mic-status");
+      Object.assign(status.dataset, { verdict, floor: floor.toFixed(1), speech: speech.toFixed(1) });
+      if (status.textContent !== app.t(VERDICT_COPY[verdict])) setText(status, app.t(VERDICT_COPY[verdict]));
+      $("mic-continue").hidden = false;
+    });
   });
 
   onTap("mic-continue", async () => {
+    stopMicCheck();
     app.capture.resume();
     app.session.step = "cards";
     await save();
