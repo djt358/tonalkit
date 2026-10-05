@@ -181,6 +181,26 @@ incremented), and a cold start returns the fallback register with `n_syllables` 
 register only when `n_syllables > 0`. **Why.** Whispered or silent casts must not advance the
 cold-start counter. **Cost if wrong.** Warm-up takes a few more voiced casts.
 
+### R60: A pitch the signal repeats at half the period of is doubled
+
+**Decision.** Before octave repair, every voiced frame's pitch is doubled when the 512 samples
+around it repeat at half the tracked period at least as well as at the period itself: the
+normalised square-difference function at half the period, best over integer lags within 2 samples,
+is at least 0.5 and at least the full period's minus 0.05; and twice the pitch is within pYIN's
+600 Hz ceiling. It applies to pYIN and external tracks alike (`repair_subharmonics`, then
+`repair_octaves`). **Why.** pYIN carries its pitch across a short unvoiced stretch, so when a tone 4
+ending at the floor runs into a tone 1 an octave higher it can track the whole tone 1 on the
+subharmonic (a 110-260 Hz speaker's tone 1 read at 129.7 Hz, graded 0.000). Every frame of that run
+agrees with its neighbours, so run-local octave repair (R32) cannot see it; the signal can. **Cost if
+wrong.** A voice with most of its energy in even harmonics could be doubled; a second harmonic at
+twice the first's amplitude repeats at 0.6 against 1.0, well clear of the rule. About ten
+512-sample lags per voiced frame. Applying it to external tracks is deliberate (fix round 1): the
+check reads the signal, not the tracker, and any tracker can lock onto half the pitch for a whole
+syllable (`an_external_track_locked_on_the_subharmonic_is_doubled`); an external model whose
+estimates are better than this check would be overruled where the signal repeats at half its
+period. It can change frames in runs of any length, so spec §12's "runs under 5 frames untouched"
+now holds for octave repair only.
+
 ## Decoding
 
 ### R27: Nuclei look at periodicity, and pauses are boundaries
@@ -306,6 +326,110 @@ P1 calibration of the temperature and β on the owner's data, not treated as a d
 **Why.** The seeds are unfitted, and fitting them on synthetic audio is not allowed (spec §9).
 **Cost if wrong.** Bendy's first-session feedback, given on a cold register, is lenient on tones 1
 and 2 until the register warms at 30 syllables.
+
+### R58: Every long voiced run holds a nucleus; a pitch break makes two syllables
+
+**Decision.** A long voiced run (at least 5 voiced frames, gaps of up to 2 bridged: R32, R35) inside
+the speech region with no energy peak adds a nucleus candidate at its highest smoothed level, unless
+some frame within 2 of that is more than `dip_db` louder (the flank of a louder unvoiced peak). A
+candidate within 2 frames outside a long run moves onto the run's nearest frame. Consecutive long
+runs form one *syllable run* unless the pitch moves 3 semitones or more across the gap between them
+(from the last voiced frame before it to the first after it). Two candidates in different syllable
+runs merge only when they are closer than `min_nucleus_gap`, never on a shallow valley alone. Inside
+a gap of one syllable run whose frames are all speech, boundary rules 4 (voicing edges) and 5
+(interior minima) add nothing, and a nucleus's voiced part is its whole syllable run, not only its
+own long run (amending R50): the gap is filled and weighted like any unvoiced frame inside a run, so
+the pack's `unvoiced_ok` region for tone 3 (0.3 to 0.8) can excuse it. One definition of a voiced
+run (`voiced_runs`, `MIN_RUN_FRAMES`) and of a syllable run (`syllable_runs`, `PITCH_BREAK_ST`) in
+`tonekit-core` serves octave repair, nuclei, boundaries and shape extraction. **Why.** Fluent speech
+joins syllables with no dip in level; where the voice moves fast from one tone to the next, pYIN
+loses the pitch for a few frames, and that pitch break (6 to 15 semitones at the sweep's tone 4 into
+tone 1, tone 3 into tone 4 and tone 2 into tone 3 joins) is then the only sign of the join. Under
+R50 a run without a nucleus is evidence nobody measures. On the fluent sweep at 0 dB every clip was
+one nucleus; now only joins with no pitch break are missed (R62). The pitch-break condition was added
+in fix round 1: splitting at any gap of 3 or more frames made a creaky phrase-final tone 3 (pYIN
+losing the pitch at its bottom while the level barely moves) two nuclei, and the closed-set decoder
+spent the extra one as an insertion that let a wrong tone outrank the spoken one (`creak.rs`, 72
+clips at dips of 0 to 1.5 dB: 72 split, a wrong tone at up to 0.860); and a nucleus inside the
+dropout had a TBU with no voiced frame, an all-0.500 tie (on main too). Now all 72 rank the spoken
+tone first, with no wrong tone above 0.184. **Cost if wrong.** The threshold is in absolute
+semitones: a speaker with a narrow range (under about 6 semitones) moves less than 3 across a 2-Chao
+join (tone 1 into tone 2), so such a join is one syllable run, and at a flat level with a pYIN
+dropout but no dip it is not split. A creaky dropout that the pitch comes back from 3 semitones or
+more away (a creak spanning the bottom and part of the rise of a wide speaker's tone 3) still
+splits, as does any creak with a level dip over 2 dB (the energy rule, as on main). Two voiced
+stretches in one TBU that the pitch is continuous across are measured as one contour.
+
+### R59: Between nuclei on a level, the boundary is the pitch break
+
+**Decision.** When two adjacent nuclei lie in different syllable runs (R58) and the smoothed level
+between them dips by no more than `dip_db`, their inter-nucleus boundary candidates are the pitch
+break's edges (the frame after the first run's last voiced frame, and the second run's first voiced
+frame) instead of the level's minimum. **Why.** The minimum of a flat level is noise, and as a TBU
+edge (R50) it cut a syllable's own voiced run short. **Cost if wrong.** None seen: with a real dip
+(any gapped speech) the minimum stands as before, and the fixture did not move.
+
+### R61: A coarticulated join is transition, not tone
+
+**Decision.** At a TBU edge where the voice runs on (the 3 frames on either side of the edge, frames
+`edge − 3 .. edge + 3`, are all above the quiet level by half the speech margin, 5 dB) and the pitch
+runs on (the 3 frames before the edge and the frame at it are all voiced), the 3 frames (30 ms) beside
+the edge, at most a quarter of the TBU, are left out of the nucleus's voiced part, and `TooShort` is
+judged on what is left. The reported span (R55) is unchanged. **Why.** In fluent speech the boundary
+sits at the join, in the middle of the pitch's glide from one tone to the next: a tone 2 after a tone
+1 started at Chao 4.3 instead of 3 and graded as tone 1 at 0.62 to 0.68. Pauses, consonants, the
+speech region's edges and pitch breaks are not joins, so gapped speech is untouched. Half the speech
+margin, not the full one, because in a noisy room (20 dB SNR) a 12 dB dip between two voiced
+syllables falls below the speech threshold while the pitch glides straight through it. Requiring the
+pitch on both sides keeps pYIN's dropouts inside a fast falling tone 4 from being trimmed as joins.
+Three pitched frames before the edge, not one (fix round 1): a voiceless consonant before a vowel is
+loud enough to be at voice level, and pYIN's 64 ms window puts the vowel's pitch on the consonant's
+last frame or two, so the one-frame test trimmed vowel onsets after consonants; in the P0 sweep's
+"30 ms gap + 40 ms onset, 25 dB SNR" condition 2-4-1's tone 2 and tone 1 onsets were trimmed and the
+worst wrong grade rose from 0.221 to 0.336 (the tone 2 graded as a tone 1). It is 0.221 again, and no
+voiced join in the fluent sweep changed. **Cost if wrong.** Real carryover from the previous tone
+lasts longer than 30 ms, so onsets keep some of it; at a join a tone's own first or last 30 ms is not
+measured, which P1's calibration on real speech absorbs; a join whose pitch pYIN loses for a frame
+within 3 before the edge is not trimmed. A fully voiced syllable of 110 to 130 ms joined at both
+edges can fall under the 80 ms `TooShort` floor and lose its contour's interior as evidence (the R1
+review measured 2 of 69 TBUs at 8 syllables/s against 1 untrimmed, and recommended judging it on the
+untrimmed run; fix round 1's binding instruction keeps the trimmed run, where the contour is measured).
+
+### R62: The fluent sweep's known gaps
+
+**Decision.** The CI fluent sweep (`fluent_sweep.rs`) asserts three conditions (5 syllables/s with
+no dip; 5/s with a 6 dB dip; 6/s with a 3 dB dip at 25 dB SNR) for four speakers and the six
+substitution-sweep readings. Six named gaps are held to less, not to nothing. At 0 dB, 1-2-3, 4-1-2
+and 2-4-1 (every speaker) and 4-1-3 (the 110-260 Hz speaker) may missegment, but one that segments
+into three nuclei must pass in full. At 6/s, that speaker's 2-3-4 and 3-4-1 must segment and rank the
+spoken tone first, but a wrong tone may reach 0.5. In every gap clip no wrong tone may reach the
+pack's heard threshold (0.6) unless it is one of five named ones (`HEARD`, all in missegmented 0 dB
+clips). A gap or a named exception that stops happening is reported. A report-only matrix covers 4
+to 6 syllables/s, 0 to 12 dB, 30 or 60 ms glides, a fricative onset and 20 dB SNR. **Why.** With no
+level dip and the pitch tracked straight through (a 2-Chao glide from tone 1 to tone 2, or tones 2
+and 4 meeting at the ceiling), no energy or periodicity cue separates the syllables. Finding them
+needs a pitch-landmark cue, which the design (R27, R32, R33, R50) does not have and which is a design
+decision, not a fix. The 6/s gaps are a 15-semitone fall in about 150 ms, faster than the measured
+human maximum speed of pitch change: pYIN loses its ends and the middle fits tone 3 too (3-4-1's
+wrong tone 3 reaches 0.598, 0.002 under the heard threshold). **Cost if wrong.** A missegmented clip
+has two nuclei for three syllables. The closed-set decoder leaves one syllable without a nucleus, on
+the 0.047 floor (R33: `unvoiced_syllable_llr`, `Partial { [Unvoiced] }`), so the clip's `overall`
+is 0.047 for the spoken reading and for every wrong one alike: a native speaker who runs a tone 1
+into a tone 2, or a tone 2 into a tone 4, with no consonant and no dip fails the cast. The merged
+nucleus mostly shows one tone, and the decoder puts it on whichever syllable that tone suits, so a
+wrong tone there grades as heard: in the CI sweep five substitutions reach 0.65 to 0.75 (the
+180-330 Hz speaker's 4-1-2 graded as 4-1-1 at 0.754 against the spoken tone's 0.597, and 1-2-3 as
+1-1-3 at 0.739 against 0.626; 2-4-1 as 2-4-4 or 2-4-3 at 0.654 to 0.687). In the report-only matrix
+after fix round 1, with no dip 243 of 432 clips missegment and 1,174 of 3,888 substitutions grade too
+well, 1,145 of them above the spoken tone and 72 at or above 0.6. With any dip (3 to 12 dB) 6 of
+1,296 clips missegment (all the 110-260 Hz speaker's 3-4-1 at 6 syllables/s with a fricative onset)
+and 43 of 11,664 substitutions grade too well, 18 of them above the spoken tone (all in those 6
+clips) and none at 0.6. Most syllables start with a consonant, which gives a dip or a pitch break,
+but zero-initial syllables (爱, 安, 二, 饿), y and w syllables whose glide is just the vowel (一 yī,
+五 wǔ, 鱼 yú) and sonorant initials are common, and a glottal onset is optional in fluent speech.
+Synthetic 一 + measure word + noun phrases reach the floor exactly where such a voiced join has no
+dip and no pitch break (一条鱼, 一辆车 and 一个人 at 0 dB: 48 of 384 clips, the same on main;
+`fluent_phrases.rs`).
 
 ## Packs and calibration
 

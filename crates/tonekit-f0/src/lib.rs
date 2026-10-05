@@ -8,8 +8,9 @@
 //!
 //! * [`F0Provider`] is the extension point; [`Pyin`] is the built-in provider. An external track
 //!   is brought to the right length with [`fit_length`].
-//! * [`repair_octaves`] post-processes a track, fixing isolated octave jumps within each voiced
-//!   run.
+//! * [`repair_subharmonics`] and then [`repair_octaves`] post-process a track: the first doubles
+//!   frames whose signal repeats at half the tracked period (a whole run on the subharmonic), the
+//!   second fixes isolated octave jumps within each voiced run.
 //! * [`clipping_ratio`] and [`snr_db`] are the signal checks behind the `Clipped` and `LowSnr`
 //!   issues.
 
@@ -20,9 +21,11 @@ mod energy;
 mod provider;
 mod pyin_provider;
 mod repair;
+mod subharmonic;
 
 pub use checks::{clipping_ratio, snr_db};
 pub use energy::energy;
 pub use provider::{fit_length, F0Provider};
 pub use pyin_provider::Pyin;
 pub use repair::repair_octaves;
+pub use subharmonic::repair_subharmonics;

@@ -59,7 +59,7 @@ Related limits (spec §11.3–11.4):
 | Path | Contents |
 |---|---|
 | `crates/tonekit-core` | Plain data types shared by every crate |
-| `crates/tonekit-f0` | f0 and energy tracks: the pYIN provider, octave repair, signal-quality checks |
+| `crates/tonekit-f0` | f0 and energy tracks: the pYIN provider, subharmonic and octave repair, signal-quality checks |
 | `crates/tonekit-segment` | Speech region, syllable nuclei and candidate syllable boundaries |
 | `crates/tonekit-shape` | Speaker register, Chao-scale normalisation, tone-shape extraction, style fitting |
 | `crates/tonekit-pack` | Language packs: TOML schema, loading, validation, context-dependent expected shapes |

@@ -3,7 +3,9 @@
 //! Three steps over the tracks of `tonekit-f0`, each feeding the next:
 //!
 //! 1. [`speech_region`]: where the speech is, from the frame energy alone.
-//! 2. [`nuclei`]: one energy peak per syllable, kept only where pYIN hears a pitch.
+//! 2. [`nuclei`]: one energy peak per syllable, kept only where pYIN hears a pitch, and at least
+//!    one per long voiced run the pitch breaks around, so syllables run together with no dip
+//!    still count (ruling R58).
 //! 3. [`boundaries`]: a small set of candidate syllable edges for the decoder to search.
 //!
 //! The decoder never assumes how many syllables were spoken. It searches segmentations over
@@ -17,6 +19,7 @@
 mod boundaries;
 mod nuclei;
 mod region;
+mod runs;
 mod smooth;
 
 pub use boundaries::{boundaries, boundaries_with};

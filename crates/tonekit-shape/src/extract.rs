@@ -1,11 +1,12 @@
 //! ToneShape extraction from an f0 track and a syllable span (spec §5, §7).
 
 use tonekit_core::{
-    F0Track, MeasureIssue, Register, TbuSpan, ToneShape, CONTOUR_POINTS, MAX_BRIDGED_GAP_FRAMES,
+    syllable_runs, voiced_runs, F0Track, MeasureIssue, Register, TbuSpan, ToneShape, CONTOUR_POINTS,
 };
 
 use crate::chao::{st_to_chao_f64, voiced_st};
 use crate::fit::{line_slope, quadratic_coefficient, turning_point};
+use crate::joins::{measured_span, Joins};
 
 /// Milliseconds per frame (`HOP` samples at 16 kHz).
 const FRAME_MS: f32 = 10.0;
@@ -86,20 +87,31 @@ pub fn extract(f0: &F0Track, span: &TbuSpan, r: &Register) -> Result<Extracted, 
 /// nucleus's own voiced run counts as the voiced part, so voiced frames elsewhere in `span` (pitch
 /// bleeding from a neighbouring syllable, a stray periodic noise) cannot bend its contour.
 ///
+/// At an edge that `joins` marks as a coarticulated join (ruling R61), the voiced frames within
+/// [`JOIN_TRIM_FRAMES`](crate::JOIN_TRIM_FRAMES) of it (at most a quarter of the span) are left
+/// out: they carry the pitch's transition from or to the neighbouring tone.
+///
 /// A voiced run is a maximal stretch of the span's voiced frames with no gap between consecutive
-/// ones longer than [`MAX_BRIDGED_GAP_FRAMES`], the definition octave repair uses (ruling R32).
-/// The nucleus's run is the one holding its frame, or, when the frame sits outside every run, the
-/// nearest one (the earlier on a tie). Everything else is as in [`extract`], with the run's
-/// frames as the span's voiced frames: `span`, `duration_ms` and the denominator of
-/// `voiced_fraction` stay the whole span's, and a run under three frames is `Err(Unvoiced)`.
+/// ones longer than [`MAX_BRIDGED_GAP_FRAMES`](tonekit_core::MAX_BRIDGED_GAP_FRAMES)
+/// ([`voiced_runs`], ruling R32). The nucleus's run is the one holding its frame, or, when the
+/// frame sits outside every run, the nearest one (the earlier on a tie). When that run is a long
+/// run in a syllable run of several ([`syllable_runs`], ruling R58: long runs the pitch moves less
+/// than 3 semitones across the gaps between), the whole syllable run is the voiced part: a dropout
+/// inside one contour (a creaky tone 3's bottom) is filled like any other unvoiced frame inside
+/// it and shows in `voiced_weights`, where the pack's `unvoiced_ok` region can excuse it. Short
+/// runs between the parts are left out. Everything else is as in [`extract`], with these frames
+/// as the span's voiced frames: `span`, `duration_ms` and the denominator of `voiced_fraction`
+/// stay the whole span's, a voiced part under three frames is `Err(Unvoiced)`, and `TooShort` is
+/// judged on the voiced part after the join trim, the frames the contour is measured on.
 pub fn extract_nucleus(
     f0: &F0Track,
     span: &TbuSpan,
     nucleus: u32,
     r: &Register,
+    joins: Joins,
 ) -> Result<Extracted, MeasureIssue> {
-    let voiced = voiced_frames(f0, span);
-    shape_of(span, own_run(&voiced, nucleus as usize), r)
+    let voiced = voiced_frames(f0, &measured_span(span, joins));
+    shape_of(span, &own_run(&voiced, nucleus as usize), r)
 }
 
 /// A voiced frame of a span: (frame index, semitones, voiced_p).
@@ -117,26 +129,32 @@ fn voiced_frames(f0: &F0Track, span: &TbuSpan) -> Vec<Voiced> {
         .collect()
 }
 
-/// The voiced run of `voiced` (in frame order) holding frame `at`, or the nearest to it; empty
-/// if there are no voiced frames.
-fn own_run(voiced: &[Voiced], at: usize) -> &[Voiced] {
-    let mut best: Option<(usize, &[Voiced])> = None;
-    let mut start = 0;
-    for end in 1..=voiced.len() {
-        let run_ends =
-            end == voiced.len() || voiced[end].0 - voiced[end - 1].0 > MAX_BRIDGED_GAP_FRAMES + 1;
-        if !run_ends {
-            continue;
-        }
-        let run = &voiced[start..end];
-        let (first, last) = (run[0].0, run[run.len() - 1].0);
+/// The voiced run of `voiced` (in frame order) holding frame `at`, or the nearest to it, widened
+/// to its syllable run when it is part of one (ruling R58); empty if there are no voiced frames.
+fn own_run(voiced: &[Voiced], at: usize) -> Vec<Voiced> {
+    let frames: Vec<usize> = voiced.iter().map(|&(i, _, _)| i).collect();
+    let mut best: Option<(usize, std::ops::Range<usize>)> = None;
+    for range in voiced_runs(&frames) {
+        let (first, last) = (frames[range.start], frames[range.end - 1]);
         let distance = first.saturating_sub(at).max(at.saturating_sub(last));
-        if best.is_none_or(|(d, _)| distance < d) {
-            best = Some((distance, run));
+        if best.as_ref().is_none_or(|(d, _)| distance < *d) {
+            best = Some((distance, range));
         }
-        start = end;
     }
-    best.map_or(&[], |(_, run)| run)
+    let Some((_, run)) = best else {
+        return Vec::new();
+    };
+    let st: Vec<f64> = voiced.iter().map(|&(_, s, _)| s).collect();
+    match syllable_runs(&frames, &st)
+        .into_iter()
+        .find(|parts| parts.contains(&run))
+    {
+        Some(parts) => parts
+            .into_iter()
+            .flat_map(|part| voiced[part].iter().copied())
+            .collect(),
+        None => voiced[run].to_vec(),
+    }
 }
 
 /// The shape of the syllable in `span` whose voiced frames are `voiced` (in frame order).

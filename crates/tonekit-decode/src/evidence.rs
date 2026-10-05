@@ -3,12 +3,15 @@
 //!
 //! Each nucleus's shape is extracted once, on its tone-bearing unit (TBU): the span between the
 //! nearest boundary candidates on either side of it, with the voiced part restricted to the
-//! nucleus's own voiced run ([`tonekit_shape::extract_nucleus`]). Every candidate that puts a
-//! syllable on a nucleus is scored on that one shape, so no reading can choose the frames that
-//! suit it best, and the closed-set decode and the lattice see the same evidence.
+//! nucleus's own voiced run, or its syllable run where a dropout splits one contour (ruling R58;
+//! [`tonekit_shape::extract_nucleus`]), less the frames beside an edge where it runs straight
+//! into a neighbouring syllable (ruling R61). Every candidate that puts a syllable on a nucleus is
+//! scored on that one shape, so no reading can choose the frames that suit it best, and the
+//! closed-set decode and the lattice see the same evidence.
 
-use tonekit_core::{Analysis, MeasureIssue, TbuSpan};
-use tonekit_shape::{extract_nucleus, Extracted};
+use tonekit_core::{Analysis, EnergyTrack, MeasureIssue, TbuSpan};
+use tonekit_segment::{speech_frames, SegmentParams};
+use tonekit_shape::{extract_nucleus, Extracted, Joins, JOIN_TRIM_FRAMES};
 
 use crate::count_u32;
 
@@ -24,8 +27,11 @@ pub(crate) struct Tbu {
 
 /// The evidence of every distinct nucleus of `a`, in frame order: its TBU ([`tbu_spans`], falling
 /// back to the speech region's edges, or the track's without one) and the shape of its own voiced
-/// run there, normalised by the analysis's register.
+/// run there, normalised by the analysis's register, with the frames beside a coarticulated edge
+/// left out ([`joins`], ruling R61).
 pub(crate) fn tbus(a: &Analysis) -> Vec<Tbu> {
+    let voice_level = voice_level_frames(&a.energy);
+    let pitched: Vec<bool> = a.f0.frames.iter().map(|f| f.hz.is_some()).collect();
     let mut nuclei: Vec<u32> = a.nuclei.iter().map(|n| n.frame).collect();
     nuclei.sort_unstable();
     nuclei.dedup();
@@ -37,10 +43,58 @@ pub(crate) fn tbus(a: &Analysis) -> Vec<Tbu> {
         .into_iter()
         .zip(nuclei)
         .map(|(span, nucleus)| Tbu {
-            segment: extract_nucleus(&a.f0, &span, nucleus, &a.register),
+            segment: extract_nucleus(
+                &a.f0,
+                &span,
+                nucleus,
+                &a.register,
+                joins(&voice_level, &pitched, &span),
+            ),
             span,
         })
         .collect()
+}
+
+/// Which frames are loud enough to be a voice rather than the room (ruling R61): above the quiet
+/// level by half the speech margin. A dip between two syllables can fall below the speech
+/// threshold in a noisy room and still be voice; silence and room noise cannot rise above this.
+fn voice_level_frames(e: &EnergyTrack) -> Vec<bool> {
+    let p = SegmentParams::default();
+    speech_frames(
+        e,
+        &SegmentParams {
+            speech_margin_db: p.speech_margin_db / 2.0,
+            ..p
+        },
+    )
+}
+
+/// Which edges of `span` are coarticulated joins (ruling R61): the voice runs from one syllable
+/// straight into the next, so the [`JOIN_TRIM_FRAMES`] frames on either side of the edge (frames
+/// `edge − 3 .. edge + 3`) are all at voice level (`voice_level[i]`), and the 3 frames before the
+/// edge and the frame at it all have a pitch (`pitched[i]`). A pause, a consonant's silence or
+/// noise, a pitch break, the speech region's own edges and the ends of the track are not joins.
+///
+/// The pitch is required on all 3 frames before the edge, not just the one beside it, because a
+/// voiceless consonant before a vowel is loud enough to be at voice level and pYIN's 64 ms window
+/// reports the vowel's pitch on the consonant's last frame or two: at such an onset only the
+/// frames nearest the vowel have a pitch, and trimming the vowel's first 30 ms there (a tone 2's
+/// low start) made it read as a tone 1.
+fn joins(voice_level: &[bool], pitched: &[bool], span: &TbuSpan) -> Joins {
+    let reach = JOIN_TRIM_FRAMES as usize;
+    let join = |edge: u32| {
+        let edge = edge as usize;
+        edge >= reach
+            && edge + reach <= voice_level.len()
+            && voice_level[edge - reach..edge + reach].iter().all(|&v| v)
+            && pitched
+                .get(edge - reach..=edge)
+                .is_some_and(|p| p.iter().all(|&v| v))
+    };
+    Joins {
+        start: join(span.start_frame),
+        end: join(span.end_frame),
+    }
 }
 
 /// The TBU of each nucleus: from the nearest boundary strictly before the nucleus frame to the
@@ -97,6 +151,63 @@ mod tests {
             start_frame,
             end_frame,
         }
+    }
+
+    #[test]
+    fn an_edge_is_a_join_only_with_voice_all_around_it_and_pitch_on_both_sides() {
+        // Voice on 10..40 and 42..70 (a two-frame pause at 40..42): 30 is inside the first stretch,
+        // 40 and 44 are within three frames of the pause, and 10 and 70 are the ends of the voice.
+        let speech: Vec<bool> = (0..80)
+            .map(|i| (10..40).contains(&i) || (42..70).contains(&i))
+            .collect();
+        let pitched = vec![true; 80];
+        let edges = |start, end| joins(&speech, &pitched, &span(start, end));
+        let both = Joins {
+            start: true,
+            end: true,
+        };
+        assert_eq!(edges(20, 30), both);
+        assert_eq!(
+            edges(30, 40),
+            Joins {
+                start: true,
+                end: false
+            }
+        );
+        assert_eq!(
+            edges(10, 30),
+            Joins {
+                start: false,
+                end: true
+            }
+        );
+        assert_eq!(edges(44, 70), Joins::NONE);
+        assert_eq!(edges(13, 37), both);
+        assert_eq!(
+            edges(12, 38),
+            Joins {
+                start: false,
+                end: false
+            }
+        );
+        // A pitch break at the edge (frame 29 or 30 unvoiced) is not a join either.
+        let mut broken = vec![true; 80];
+        broken[30] = false;
+        assert!(!joins(&speech, &broken, &span(20, 30)).end);
+        assert!(joins(&speech, &broken, &span(20, 34)).end);
+        broken[30] = true;
+        broken[29] = false;
+        assert!(!joins(&speech, &broken, &span(30, 40)).start);
+        // A voiceless onset: loud, with pYIN's pitch reaching only the frame or two before the
+        // vowel. Frames 25 and 26 unpitched, 27 onwards pitched: no edge from 27 to 29 is a join,
+        // 30 (three pitched frames before it) is.
+        let onset: Vec<bool> = (0..80).map(|i| !(25..27).contains(&i)).collect();
+        for edge in 27..30 {
+            assert!(!joins(&speech, &onset, &span(edge, 45)).start, "{edge}");
+        }
+        assert!(joins(&speech, &onset, &span(30, 45)).start);
+        // The ends of the track are never joins.
+        assert_eq!(joins(&[true; 5], &[true; 5], &span(1, 4)), Joins::NONE);
     }
 
     #[test]

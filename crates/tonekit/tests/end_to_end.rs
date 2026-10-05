@@ -570,6 +570,39 @@ fn an_external_octave_error_is_repaired() {
     assert_abs_diff_eq!(a.f0.frames[at].hz.unwrap(), good, epsilon = 0.01);
 }
 
+/// Ruling R60 applies to external tracks too: subharmonic repair reads the signal, not the
+/// tracker, and any tracker can lock onto half the pitch for a whole syllable, where run-local
+/// octave repair sees nothing wrong. A correct external track is left as it is.
+#[test]
+fn an_external_track_locked_on_the_subharmonic_is_doubled() {
+    let s = spoken(&["1", "1", "1"]);
+    let truth = truth_track(&s);
+    let (start, end) = s.syllable_frames[1];
+    let middle = start as usize..end as usize;
+    let mut halved = truth.clone();
+    for f in &mut halved.frames[middle.clone()] {
+        f.hz = f.hz.map(|hz| hz / 2.0);
+    }
+    let a = analyze(&s.pcm, RATE, Some(&warm()), &external(halved)).unwrap();
+    let (mut voiced, mut restored) = (0, 0);
+    for i in middle {
+        if let (Some(got), Some(want)) = (a.f0.frames[i].hz, truth.frames[i].hz) {
+            voiced += 1;
+            restored += usize::from((got / want - 1.0).abs() < 0.02);
+        }
+    }
+    assert!(voiced > 15, "{voiced}");
+    assert_eq!(
+        restored, voiced,
+        "{restored} of {voiced} frames back at the true pitch"
+    );
+
+    let a = analyze(&s.pcm, RATE, Some(&warm()), &external(truth.clone())).unwrap();
+    for (i, (got, want)) in a.f0.frames.iter().zip(&truth.frames).enumerate() {
+        assert_eq!(got.hz, want.hz, "frame {i}");
+    }
+}
+
 /// An external track is untrusted input at the FFI boundary (ruling R43): a hostile or buggy
 /// pitch model may report NaN, negative or infinite Hz and a NaN confidence. `analyze` cleans it
 /// before anything reads it, so nothing downstream sees a non-finite number or panics.

@@ -4,7 +4,10 @@ use tonekit_core::{
     Analysis, AssessError, F0Frame, F0Track, MeasureIssue, Register, RegisterSource, HOP,
     SAMPLE_RATE,
 };
-use tonekit_f0::{clipping_ratio, energy, fit_length, repair_octaves, snr_db, F0Provider, Pyin};
+use tonekit_f0::{
+    clipping_ratio, energy, fit_length, repair_octaves, repair_subharmonics, snr_db, F0Provider,
+    Pyin,
+};
 use tonekit_segment::{boundaries_with, nuclei, speech_region, SegmentParams};
 use tonekit_shape::{cold_register, is_cold, voiced_semitones};
 
@@ -90,8 +93,13 @@ fn usable(r: &Register) -> bool {
 /// Analyses one utterance of 16 kHz mono `pcm`, once, for any number of `decode`, `lattice` and
 /// `assess` calls.
 ///
-/// 1. **f0**: pYIN or the sanitised external track, then octave repair (run-local, ruling R32).
-///    A voiced frame is one with `hz.is_some()` everywhere.
+/// 1. **f0**: pYIN or the sanitised external track, then subharmonic repair (ruling R60: a frame
+///    whose signal repeats at half its tracked period is doubled, up to pYIN's 600 Hz ceiling)
+///    and octave repair (run-local, ruling R32). Both repairs apply to an external track as they
+///    do to pYIN's: subharmonic repair reads the signal, not the tracker, and any tracker can
+///    lock onto half the pitch for a whole syllable. Subharmonic repair can change frames in a
+///    run of any length (octave repair leaves runs under 5 frames alone). A voiced frame is one
+///    with `hz.is_some()` everywhere.
 /// 2. **Energy** and the signal issues: `Clipped` if more than 1% of samples have `|x| >= 0.99`,
 ///    `LowSnr` if the frame energies' `p95 - p10` is under 10 dB.
 /// 3. **Segmentation** under the default [`SegmentParams`], used for every step (the parameters
@@ -141,6 +149,7 @@ pub fn analyze(
             fitted
         }
     };
+    repair_subharmonics(&mut f0, pcm, Pyin::default().fmax);
     repair_octaves(&mut f0);
     let energy = energy(pcm);
 
