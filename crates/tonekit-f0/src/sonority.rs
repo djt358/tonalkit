@@ -1,10 +1,11 @@
 //! How vowel-like each frame's spectrum is (ruling R102): the share of its energy that lies in the
-//! band of the low formants.
+//! band of the low formants, 150 Hz to 2 kHz.
 //!
 //! Vowels, nasals, glides and other sonorants carry most of their energy between about 150 Hz and
 //! 2 kHz (the low harmonics and the first formant, and the second of back and open vowels),
 //! whether or not a pitch tracker can follow their voice: creaky and breathy vowels included.
-//! Fricatives (s, sh, x) carry theirs above 2 kHz, and room rumble lies below 150 Hz. So a frame that is loud, unpitched and
+//! Fricatives (s, sh, x) carry theirs above 2 kHz, and room rumble (a quiet phone's handling
+//! noise) lies below 150 Hz. So a frame that is loud, unpitched and
 //! sonorant is a syllable whose pitch was lost, not a consonant or silence.
 
 use std::f64::consts::{FRAC_1_SQRT_2, PI};
@@ -59,14 +60,15 @@ impl Biquad {
     }
 }
 
-/// Per frame, the share (0 to 1) of the signal's energy above 150 Hz that lies below 2 kHz, over
+/// Per frame, the share (0 to 1) of the signal's energy that lies between 150 Hz and 2 kHz, over
 /// the 25 ms Hann window of [`energy`](crate::energy) centred on each hop (`pcm.len() / HOP + 1`
 /// frames).
 ///
-/// The signal is high-passed at 150 Hz (a second-order Butterworth section), and that is the
-/// reference; it is then low-passed at 2 kHz (two sections, fourth order) for the band. A frame
-/// with no energy above 150 Hz reads 0. Non-finite samples count as silence. A vowel reads about
-/// 0.5 to 1, a fricative under 0.2 and white noise about 0.24 (the band's share of the spectrum), a fricative or white noise under 0.2.
+/// The band is the signal high-passed at 150 Hz (a second-order Butterworth section) and then
+/// low-passed at 2 kHz (two sections, fourth order); the reference is the whole signal, so room
+/// rumble below 150 Hz reads low as well as fricatives above 2 kHz. A silent frame reads 0.
+/// Non-finite samples count as silence. A vowel reads about 0.5 to 1, a fricative or rumble under
+/// 0.3 and white noise about 0.23 (the band's share of the spectrum)., a fricative or white noise under 0.2.
 pub fn sonority(pcm: &[f32]) -> Vec<f32> {
     let x: Vec<f64> = pcm.iter().map(|&v| finite_or_silence(v)).collect();
     let high = Biquad::butterworth(BAND_LOW_HZ, true).run(&x);
@@ -74,10 +76,10 @@ pub fn sonority(pcm: &[f32]) -> Vec<f32> {
     let band = low.run(&low.run(&high));
     frame_power(&band)
         .into_iter()
-        .zip(frame_power(&high))
-        .map(|(b, h)| {
-            if h > 0.0 && h.is_finite() {
-                (b / h).clamp(0.0, 1.0) as f32
+        .zip(frame_power(&x))
+        .map(|(b, all)| {
+            if all > 0.0 && all.is_finite() {
+                (b / all).clamp(0.0, 1.0) as f32
             } else {
                 0.0
             }
@@ -112,6 +114,8 @@ mod tests {
         assert!(middle(&sonority(&tone(500.0, 8000))) > 0.95);
         assert!(middle(&sonority(&tone(1000.0, 8000))) > 0.85);
         assert!(middle(&sonority(&tone(5000.0, 8000))) < 0.05);
+        // Rumble below the band.
+        assert!(middle(&sonority(&tone(60.0, 8000))) < 0.1);
         // Each low-pass section is 3 dB down at the edge: a quarter of the power passes.
         let edge = middle(&sonority(&tone(2000.0, 8000)));
         assert!((0.15..0.35).contains(&edge), "{edge}");
@@ -130,7 +134,7 @@ mod tests {
             .collect();
         let s = sonority(&noise);
         let mean = s[5..s.len() - 5].iter().sum::<f32>() / (s.len() - 10) as f32;
-        assert!((0.15..0.35).contains(&mean), "{mean}");
+        assert!((0.15..0.3).contains(&mean), "{mean}");
     }
 
     #[test]

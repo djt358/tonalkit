@@ -5,10 +5,12 @@ use tonekit_core::{
     SAMPLE_RATE,
 };
 use tonekit_f0::{
-    clipping_ratio, energy, fit_length, repair_octaves, repair_subharmonics, snr_db, sonority,
-    F0Provider, Pyin,
+    clipping_ratio, energy, fit_length, recover_pitch, repair_octaves, repair_subharmonics, snr_db,
+    sonority, F0Provider, Pyin,
 };
-use tonekit_segment::{boundaries_with, nuclei, speech_region, SegmentParams};
+use tonekit_segment::{
+    boundaries_with, nuclei, speech_frames, speech_region, SegmentParams, SONORANT_SHARE,
+};
 use tonekit_shape::{cold_register, is_cold, voiced_semitones};
 
 /// `Clipped` fires when more than this fraction of samples has `|x| >= 0.99`.
@@ -93,15 +95,17 @@ fn usable(r: &Register) -> bool {
 /// Analyses one utterance of 16 kHz mono `pcm`, once, for any number of `decode`, `lattice` and
 /// `assess` calls.
 ///
-/// 1. **f0**: pYIN or the sanitised external track, then subharmonic repair (ruling R60: a frame
+/// 1. **f0**: pYIN, with a pitch recovered where it left loud, vowel-like, clearly periodic
+///    speech unvoiced (ruling R105: `recover_pitch`, on the speech frames and the frames whose
+///    sonority is at least `SONORANT_SHARE`), or the sanitised external track; then subharmonic repair (ruling R60: a frame
 ///    whose signal repeats at half its tracked period is doubled, up to pYIN's 600 Hz ceiling)
 ///    and octave repair (run-local, ruling R32). Both repairs apply to an external track as they
 ///    do to pYIN's: subharmonic repair reads the signal, not the tracker, and any tracker can
 ///    lock onto half the pitch for a whole syllable. Subharmonic repair can change frames in a
 ///    run of any length (octave repair leaves runs under 5 frames alone). A voiced frame is one
 ///    with `hz.is_some()` everywhere.
-/// 2. **Energy**, **sonority** (ruling R102: per frame, the share of the energy above 150 Hz that
-///    lies below 2 kHz, which tells a vowel whose pitch was lost from a consonant) and the signal
+/// 2. **Energy**, **sonority** (ruling R102: per frame, the share of the energy that lies between
+///    150 Hz and 2 kHz, which tells a vowel whose pitch was lost from a consonant) and the signal
 ///    issues: `Clipped` if more than 1% of samples have `|x| >= 0.99`,
 ///    `LowSnr` if the frame energies' `p95 - p10` is under 10 dB.
 /// 3. **Segmentation** under the default [`SegmentParams`], used for every step (the parameters
@@ -143,8 +147,16 @@ pub fn analyze(
         });
     }
 
+    let energy = energy(pcm);
+    let sonority = sonority(pcm);
+    let params = SegmentParams::default();
     let mut f0 = match &opts.f0 {
-        F0Choice::Pyin => Pyin::default().track(pcm),
+        F0Choice::Pyin => {
+            let mut track = Pyin::default().track(pcm);
+            let vowel: Vec<bool> = sonority.iter().map(|&s| s >= SONORANT_SHARE).collect();
+            recover_pitch(&mut track, pcm, &speech_frames(&energy, &params), &vowel);
+            track
+        }
         F0Choice::External(track) => {
             let mut fitted = fit_length(sanitised(track), pcm.len() / HOP + 1);
             fitted.provider = EXTERNAL.to_owned();
@@ -153,8 +165,6 @@ pub fn analyze(
     };
     repair_subharmonics(&mut f0, pcm, Pyin::default().fmax);
     repair_octaves(&mut f0);
-    let energy = energy(pcm);
-    let sonority = sonority(pcm);
 
     let mut issues = Vec::new();
     if clipping_ratio(pcm) > CLIPPED_ABOVE {
@@ -164,7 +174,6 @@ pub fn analyze(
         issues.push(MeasureIssue::LowSnr);
     }
 
-    let params = SegmentParams::default();
     let speech = speech_region(&energy, &params);
     let (nuclei, boundaries) = match &speech {
         Some(region) => {

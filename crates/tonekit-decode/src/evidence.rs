@@ -61,7 +61,8 @@ pub(crate) struct Extended {
 /// Every anchor's TBU is taken as for a nucleus, over the combined boundaries, so a nucleus
 /// sharing a voice stretch with a candidate is measured on its own part of it. A candidate with a
 /// pitch on a frame within 2 of it has a shape like a nucleus; one without is
-/// `Err(Unpitched)`: speech with a vowel's spectrum and no pitch.
+/// `Err(Unpitched)`: speech with a vowel's spectrum and no pitch; so is one whose shape has too
+/// few voiced frames.
 pub(crate) fn extended(a: &Analysis) -> Option<Extended> {
     let region = a.speech.as_ref()?;
     let extra = extra_candidates(
@@ -104,8 +105,8 @@ pub(crate) fn extended(a: &Analysis) -> Option<Extended> {
 }
 
 /// The evidence of `anchors` (sorted, unique) over `bounds`: [`tbus`] for a nucleus, and for an
-/// anchor listed in `candidates` (sorted) that has no pitch within [`VOICING_RADIUS`] frames,
-/// `Err(Unpitched)`.
+/// anchor listed in `candidates` (sorted) that has no pitch within [`VOICING_RADIUS`] frames, or
+/// too few voiced frames for a shape, `Err(Unpitched)`.
 fn tbus_over(a: &Analysis, anchors: &[u32], bounds: &[u32], candidates: &[u32]) -> Vec<Tbu> {
     let voice_level = voice_level_frames(&a.energy);
     let pitched: Vec<bool> = a.f0.frames.iter().map(|f| f.hz.is_some()).collect();
@@ -121,16 +122,25 @@ fn tbus_over(a: &Analysis, anchors: &[u32], bounds: &[u32], candidates: &[u32]) 
         .into_iter()
         .zip(anchors)
         .map(|(span, &anchor)| Tbu {
-            segment: if candidates.binary_search(&anchor).is_ok() && !pitch_near(anchor) {
-                Err(MeasureIssue::Unpitched)
-            } else {
-                extract_nucleus(
-                    &a.f0,
-                    &span,
-                    anchor,
-                    &a.register,
-                    joins(&voice_level, &pitched, &span),
-                )
+            segment: {
+                let candidate = candidates.binary_search(&anchor).is_ok();
+                let shape = if candidate && !pitch_near(anchor) {
+                    Err(MeasureIssue::Unpitched)
+                } else {
+                    extract_nucleus(
+                        &a.f0,
+                        &span,
+                        anchor,
+                        &a.register,
+                        joins(&voice_level, &pitched, &span),
+                    )
+                };
+                // A candidate is speech with a vowel's spectrum: with too little pitch for a
+                // shape it is still an unpitched syllable, not a whisper.
+                match shape {
+                    Err(MeasureIssue::Unvoiced) if candidate => Err(MeasureIssue::Unpitched),
+                    other => other,
+                }
             },
             span,
         })

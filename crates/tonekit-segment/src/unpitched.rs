@@ -5,10 +5,10 @@ use tonekit_core::F0Track;
 use crate::runs::VOICING_RADIUS;
 use crate::smooth::{local_extrema, Extremum};
 
-/// A frame is vowel-like when at least this share of its energy above 150 Hz lies below 2 kHz
+/// A frame is vowel-like when at least this share of its energy lies between 150 Hz and 2 kHz
 /// (`Analysis::sonority`). On the volunteer recordings the unpitched speech frames split into
-/// fricatives and bursts under 0.2 and vowels over 0.5, and 95% of pitched frames read over 0.48
-/// (front vowels in a high voice go down to about 0.3); white noise reads about 0.24.
+/// fricatives, bursts and rumble mostly under 0.3 and vowels over 0.5, and 95% of pitched frames
+/// read over 0.44; white noise reads about 0.23.
 pub const SONORANT_SHARE: f32 = 0.5;
 
 /// The local maxima of the smoothed level `s` in `start..end` that are speech (`speech_at`), have
