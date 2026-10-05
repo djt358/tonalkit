@@ -69,10 +69,16 @@ fn voice_level_frames(e: &EnergyTrack) -> Vec<bool> {
 }
 
 /// Which edges of `span` are coarticulated joins (ruling R61): the voice runs from one syllable
-/// straight into the next, so every frame within [`JOIN_TRIM_FRAMES`] on either side of the edge
-/// is at voice level (`voice_level[i]`) and the frames either side of it both have a pitch
-/// (`pitched[i]`). A pause, a consonant's silence or noise, a pitch break, the speech region's own
-/// edges and the ends of the track are not joins.
+/// straight into the next, so the [`JOIN_TRIM_FRAMES`] frames on either side of the edge (frames
+/// `edge − 3 .. edge + 3`) are all at voice level (`voice_level[i]`), and the 3 frames before the
+/// edge and the frame at it all have a pitch (`pitched[i]`). A pause, a consonant's silence or
+/// noise, a pitch break, the speech region's own edges and the ends of the track are not joins.
+///
+/// The pitch is required on all 3 frames before the edge, not just the one beside it, because a
+/// voiceless consonant before a vowel is loud enough to be at voice level and pYIN's 64 ms window
+/// reports the vowel's pitch on the consonant's last frame or two: at such an onset only the
+/// frames nearest the vowel have a pitch, and trimming the vowel's first 30 ms there (a tone 2's
+/// low start) made it read as a tone 1.
 fn joins(voice_level: &[bool], pitched: &[bool], span: &TbuSpan) -> Joins {
     let reach = JOIN_TRIM_FRAMES as usize;
     let join = |edge: u32| {
@@ -81,7 +87,7 @@ fn joins(voice_level: &[bool], pitched: &[bool], span: &TbuSpan) -> Joins {
             && edge + reach <= voice_level.len()
             && voice_level[edge - reach..edge + reach].iter().all(|&v| v)
             && pitched
-                .get(edge - 1..=edge)
+                .get(edge - reach..=edge)
                 .is_some_and(|p| p.iter().all(|&v| v))
     };
     Joins {
@@ -187,10 +193,18 @@ mod tests {
         let mut broken = vec![true; 80];
         broken[30] = false;
         assert!(!joins(&speech, &broken, &span(20, 30)).end);
-        assert!(joins(&speech, &broken, &span(20, 32)).end);
+        assert!(joins(&speech, &broken, &span(20, 34)).end);
         broken[30] = true;
         broken[29] = false;
         assert!(!joins(&speech, &broken, &span(30, 40)).start);
+        // A voiceless onset: loud, with pYIN's pitch reaching only the frame or two before the
+        // vowel. Frames 25 and 26 unpitched, 27 onwards pitched: no edge from 27 to 29 is a join,
+        // 30 (three pitched frames before it) is.
+        let onset: Vec<bool> = (0..80).map(|i| !(25..27).contains(&i)).collect();
+        for edge in 27..30 {
+            assert!(!joins(&speech, &onset, &span(edge, 45)).start, "{edge}");
+        }
+        assert!(joins(&speech, &onset, &span(30, 45)).start);
         // The ends of the track are never joins.
         assert_eq!(joins(&[true; 5], &[true; 5], &span(1, 4)), Joins::NONE);
     }
