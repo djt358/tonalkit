@@ -412,7 +412,9 @@ def _run(args: argparse.Namespace) -> int:
 
 def register(subparsers) -> None:
     p = subparsers.add_parser(
-        "eval", help="grade the corpus, compute the leave-one-pair-out gate and write a report"
+        "eval",
+        aliases=["evaluate"],
+        help="grade the corpus, compute the leave-one-pair-out gate and write a report",
     )
     p.add_argument("--manifest", required=True, help="corpus manifest (JSONL)")
     p.add_argument("--pack", required=True, help="language pack TOML (e.g. packs/cmn/cmn.toml)")

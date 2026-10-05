@@ -1,0 +1,225 @@
+{
+  "$defs": {
+    "Candidate": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "labels": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Labels",
+          "type": "array"
+        },
+        "tones": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Tones",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "tones",
+        "labels"
+      ],
+      "title": "Candidate",
+      "type": "object"
+    },
+    "Card": {
+      "additionalProperties": false,
+      "properties": {
+        "citation_pinyin": {
+          "minLength": 1,
+          "title": "Citation Pinyin",
+          "type": "string"
+        },
+        "context": {
+          "enum": [
+            "phrase",
+            "isolated"
+          ],
+          "title": "Context",
+          "type": "string"
+        },
+        "distractors": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Candidate"
+          },
+          "title": "Distractors",
+          "type": "array"
+        },
+        "id": {
+          "pattern": "^[a-z0-9-]+$",
+          "title": "Id",
+          "type": "string"
+        },
+        "intended": {
+          "$ref": "#/$defs/Candidate"
+        },
+        "label": {
+          "enum": [
+            "correct",
+            "tone_error",
+            "n/a"
+          ],
+          "title": "Label",
+          "type": "string"
+        },
+        "pair": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z0-9-]+$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Pair"
+        },
+        "pinyin": {
+          "minLength": 1,
+          "title": "Pinyin",
+          "type": "string"
+        },
+        "produced_tones": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Produced Tones",
+          "type": "array"
+        },
+        "prompt_note": {
+          "default": "",
+          "title": "Prompt Note",
+          "type": "string"
+        },
+        "prompt_note_traditional": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Prompt Note Traditional"
+        },
+        "set": {
+          "enum": [
+            "gate",
+            "diag_t23",
+            "diag_count",
+            "diag_minimal",
+            "diag_context",
+            "quiet",
+            "register"
+          ],
+          "title": "Set",
+          "type": "string"
+        },
+        "status": {
+          "default": "unverified",
+          "enum": [
+            "unverified",
+            "approved"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "text": {
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        },
+        "text_traditional": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Text Traditional"
+        }
+      },
+      "required": [
+        "id",
+        "set",
+        "label",
+        "text",
+        "pinyin",
+        "citation_pinyin",
+        "context",
+        "intended",
+        "produced_tones"
+      ],
+      "title": "Card",
+      "type": "object"
+    },
+    "DeckMeta": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "pattern": "^[a-z0-9-]+$",
+          "title": "Id",
+          "type": "string"
+        },
+        "lect": {
+          "minLength": 1,
+          "title": "Lect",
+          "type": "string"
+        },
+        "title": {
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        },
+        "version": {
+          "minimum": 1,
+          "title": "Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "lect",
+        "version",
+        "title"
+      ],
+      "title": "DeckMeta",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "card": {
+      "items": {
+        "$ref": "#/$defs/Card"
+      },
+      "minItems": 1,
+      "title": "Card",
+      "type": "array"
+    },
+    "deck": {
+      "$ref": "#/$defs/DeckMeta"
+    }
+  },
+  "required": [
+    "deck",
+    "card"
+  ],
+  "title": "Deck",
+  "type": "object"
+}

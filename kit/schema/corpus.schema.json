@@ -1,0 +1,151 @@
+{
+  "$defs": {
+    "CorpusMeta": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "pattern": "^[a-z0-9][a-z0-9._-]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "recorded",
+            "public",
+            "synthetic"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "lect": {
+          "minLength": 1,
+          "title": "Lect",
+          "type": "string"
+        },
+        "manifest": {
+          "default": "manifest.jsonl",
+          "title": "Manifest",
+          "type": "string"
+        },
+        "source": {
+          "minLength": 1,
+          "title": "Source",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "source",
+        "kind",
+        "lect"
+      ],
+      "title": "CorpusMeta",
+      "type": "object"
+    },
+    "Speaker": {
+      "additionalProperties": false,
+      "properties": {
+        "accent": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Accent"
+        },
+        "background": {
+          "anyOf": [
+            {
+              "enum": [
+                "native",
+                "heritage",
+                "learner",
+                "prefer_not"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Background"
+        },
+        "grew_up_hearing": {
+          "anyOf": [
+            {
+              "enum": [
+                "mainland",
+                "taiwan",
+                "singapore_malaysia",
+                "hong_kong_macau",
+                "other",
+                "prefer_not"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Grew Up Hearing"
+        },
+        "id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "sessions": {
+          "default": [],
+          "items": {
+            "pattern": "^[A-HJ-NP-Z2-9]{6}$",
+            "type": "string"
+          },
+          "title": "Sessions",
+          "type": "array"
+        },
+        "split": {
+          "enum": [
+            "gate",
+            "dev",
+            "calib",
+            "heldout"
+          ],
+          "title": "Split",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "split"
+      ],
+      "title": "Speaker",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "corpus": {
+      "$ref": "#/$defs/CorpusMeta"
+    },
+    "speaker": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/Speaker"
+      },
+      "title": "Speaker",
+      "type": "array"
+    }
+  },
+  "required": [
+    "corpus"
+  ],
+  "title": "CorpusFile",
+  "type": "object"
+}
