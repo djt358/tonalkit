@@ -58,6 +58,13 @@ class Syllable:
     measured: str  # "Full", "Partial" or "NotMeasured"
     deltas: list[Delta] = field(default_factory=list)
 
+    @property
+    def fallback(self) -> bool:
+        """No nucleus was found for it (the segmenter heard fewer syllables than the card has):
+        tonekit reports it `Partial` with no distance, and its p_correct is the calibration's fixed
+        prior (`unvoiced_syllable_llr`, 0.047 as shipped), not a measurement of its tone."""
+        return self.measured == "Partial" and self.distance is None
+
 
 @dataclass
 class Result:
@@ -74,6 +81,14 @@ class Result:
     syllables: list[Syllable]
     register_source: str  # "cold" (estimated from this clip alone) or "given" (from register clips)
     issues: list[str] = field(default_factory=list)  # the analysis's signal issues, e.g. "LowSnr"
+
+    @property
+    def decided_by_fallback(self) -> bool:
+        """The overall (the lowest syllable) is a fallback syllable's fixed prior: the clip's accept
+        or reject says nothing about its tones."""
+        return self.overall is not None and any(
+            s.fallback and abs(s.p_correct - self.overall) < 1e-9 for s in self.syllables
+        )
 
 
 # ---- reading and caching ----------------------------------------------------------------------
@@ -100,9 +115,7 @@ def read_wav(path: Path, name: str) -> tuple[bytes, np.ndarray]:
     except (ValueError, struct.error, wavfile.WavFileWarning) as e:
         raise EvalError(f"{name}: {path} is not a readable WAV file: {e}") from e
     if rate != TARGET_SR:
-        raise EvalError(
-            f"{name}: {path} is sampled at {rate} Hz, expected {TARGET_SR} Hz (run `tkh ingest`)"
-        )
+        raise EvalError(f"{name}: {path} is sampled at {rate} Hz, expected {TARGET_SR} Hz (run `tkh ingest`)")
     if samples.ndim != 1:
         raise EvalError(f"{name}: {path} is not mono (run `tkh ingest`)")
     return data, to_float32(samples)
@@ -177,13 +190,11 @@ def base_accent(pack_toml: str) -> str:
 
 
 def _measured_kind(measured: str | dict) -> str:
-    """"Full", "Partial" or "NotMeasured" from tonekit's serde form (a string or a one-key map)."""
+    """ "Full", "Partial" or "NotMeasured" from tonekit's serde form (a string or a one-key map)."""
     return measured if isinstance(measured, str) else next(iter(measured))
 
 
-def analyze_pcm(
-    name: str, pcm: np.ndarray, register_json: str | None = None, f0: str | None = None
-) -> str:
+def analyze_pcm(name: str, pcm: np.ndarray, register_json: str | None = None, f0: str | None = None) -> str:
     """`tonekit_py.analyze` of 16 kHz samples, with the f0 track of the provider `f0` (None:
     tonekit's own pYIN). A tonekit or provider failure is an `EvalError` naming `name`."""
     try:
@@ -231,9 +242,7 @@ class Grader:
         """The clip's `Result` and the raw assessment (whose `register_update` chains registers)."""
         return self.assess(clip, self.analysis(clip, register_json))
 
-    def grade_pcm(
-        self, clip: Clip, pcm: np.ndarray, register_json: str | None = None
-    ) -> tuple[Result, dict]:
+    def grade_pcm(self, clip: Clip, pcm: np.ndarray, register_json: str | None = None) -> tuple[Result, dict]:
         """Like `grade`, for samples in memory: `clip.path` is not read and nothing is cached."""
         return self.assess(clip, analyze_pcm(clip.id, pcm, register_json, self.f0))
 
@@ -246,9 +255,7 @@ class Grader:
             "compare_accents": [],
         }
         try:
-            assessed = tonekit_py.assess(
-                analysis_json, self.pack_toml, self.calib_json, json.dumps(request)
-            )
+            assessed = tonekit_py.assess(analysis_json, self.pack_toml, self.calib_json, json.dumps(request))
         except ValueError as e:
             raise EvalError(f"{clip.id}: {e}") from e
         assessment = json.loads(assessed)
@@ -280,9 +287,7 @@ class Grader:
         return result, assessment
 
 
-def _chain_registers(
-    clips: list[Clip], grader: Grader
-) -> tuple[dict[str, str | None], dict[str, Result]]:
+def _chain_registers(clips: list[Clip], grader: Grader) -> tuple[dict[str, str | None], dict[str, Result]]:
     """Each speaker's register after their `register` clips, and those clips' results.
 
     A speaker's register clips are graded in manifest order, each analysed with the register
@@ -383,6 +388,7 @@ def _run(args: argparse.Namespace) -> int:
             clearance=cleared,
             n_minimal=per_set.get("diag_minimal", 0),
             n_count=per_set.get("diag_count", 0),
+            results=results,
             context={
                 "manifest": str(args.manifest),
                 "data register": str(args.register or clearance.default_register()),
@@ -436,7 +442,5 @@ def register(subparsers) -> None:
         help="smoke run: grade synthetic clips and label the report SMOKE (synthetic) instead of "
         "NOT A GATE; it never issues a PASS or FAIL",
     )
-    p.add_argument(
-        "--no-cache", action="store_true", help="neither read nor write the analysis cache"
-    )
+    p.add_argument("--no-cache", action="store_true", help="neither read nor write the analysis cache")
     p.set_defaults(func=_run)
