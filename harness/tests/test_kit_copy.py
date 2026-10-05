@@ -14,7 +14,7 @@ SCREENS = {
     "mic": ["title", "body", "allow", "checking", "level_ok", "level_low", "noisy", "continue"],
     "card": [
         "progress", "record", "stop", "play", "redo", "skip", "next", "note", "isolated_hint", "phrase_hint", "saved",
-        "finish_early", "finish_early_confirm",
+        "no_sound", "finish_early", "finish_early_confirm",
     ],
     "pause": ["title", "body", "resume"],
     "done": ["title", "body", "code_label", "code_note", "delete", "delete_confirm", "delete_confirm_unsent", "deleted"],
@@ -129,6 +129,19 @@ def test_the_done_screen_does_not_claim_every_card_was_read():
 def test_the_phrase_hint_asks_for_one_phrase_not_one_character_at_a_time():
     # A reader going one character at a time says the base tone of 一 and 不 and misses the sandhi.
     assert copy()["card.phrase_hint"] == "Say it as one phrase, at your normal pace."
+
+
+def test_a_quiet_microphone_check_says_how_far_to_hold_the_phone():
+    values = copy()
+    assert values["mic.level_low"] == "A bit quiet. Hold the phone about a hand's width from your mouth."
+    assert "hand's width" in values["mic.body"] and len(values["mic.body"]) < 200  # one short line, no more
+
+
+def test_a_take_with_no_sound_is_not_kept_and_the_volunteer_is_told_what_to_do():
+    # The kit refuses a silent take (kit/app/silence.js): the card stays unrecorded.
+    assert copy()["card.no_sound"] == (
+        "We didn't hear anything. Tap Record and try again. If it keeps happening, reload the page."
+    )
 
 
 APPS = ["WeChat", "RedNote", "Douyin", "TikTok", "LinkedIn", "Snapchat", "Weibo", "QQ", "Instagram", "Facebook", "Line"]
