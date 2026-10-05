@@ -101,7 +101,8 @@ pub fn extract(f0: &F0Track, span: &TbuSpan, r: &Register) -> Result<Extracted, 
 /// it and shows in `voiced_weights`, where the pack's `unvoiced_ok` region can excuse it. Short
 /// runs between the parts are left out. Everything else is as in [`extract`], with these frames
 /// as the span's voiced frames: `span`, `duration_ms` and the denominator of `voiced_fraction`
-/// stay the whole span's, and a voiced part under three frames is `Err(Unvoiced)`.
+/// stay the whole span's, a voiced part under three frames is `Err(Unvoiced)`, and `TooShort` is
+/// judged on the voiced part after the join trim, the frames the contour is measured on.
 pub fn extract_nucleus(
     f0: &F0Track,
     span: &TbuSpan,

@@ -4,7 +4,7 @@
 
 use tonekit::{
     assess, AccentId, Analysis, AssessRequest, Candidate, CandidateId, GradingTarget, LanguagePack,
-    ToneId, ToneTarget,
+    ToneId, ToneTarget, UtteranceAssessment,
 };
 
 const CMN_TOML: &str = include_str!("../../../../packs/cmn/cmn.toml");
@@ -41,8 +41,8 @@ pub fn knots(tone: &str, last: bool) -> Vec<f32> {
     }
 }
 
-/// `p_correct` of each syllable of `intended` on the analysed clip, graded alone (no distractors).
-fn grade(a: &Analysis, pack: &LanguagePack, intended: &[&str]) -> Vec<f32> {
+/// The assessment of `intended` on the analysed clip, graded alone (no distractors).
+pub fn assess_reading(a: &Analysis, pack: &LanguagePack, intended: &[&str]) -> UtteranceAssessment {
     let request = AssessRequest {
         grading: GradingTarget {
             accent: AccentId("cmn-standard".into()),
@@ -64,8 +64,12 @@ fn grade(a: &Analysis, pack: &LanguagePack, intended: &[&str]) -> Vec<f32> {
         external: Vec::new(),
         compare_accents: Vec::new(),
     };
-    assess(a, pack, &request)
-        .unwrap()
+    assess(a, pack, &request).unwrap()
+}
+
+/// `p_correct` of each syllable of `intended` on the analysed clip, graded alone (no distractors).
+fn grade(a: &Analysis, pack: &LanguagePack, intended: &[&str]) -> Vec<f32> {
+    assess_reading(a, pack, intended)
         .syllables
         .iter()
         .map(|s| s.p_correct)
@@ -96,6 +100,11 @@ impl Substitution {
     /// The wrong tone's grade on the substituted syllable.
     pub fn p_wrong(&self) -> f32 {
         self.p_wrong
+    }
+
+    /// The reading graded, e.g. "4-1-1" for spoken 4-1-2 with its last tone wrong.
+    pub fn intended(&self) -> &str {
+        &self.intended
     }
 
     pub fn describe(&self) -> String {

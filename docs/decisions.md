@@ -194,7 +194,12 @@ subharmonic (a 110-260 Hz speaker's tone 1 read at 129.7 Hz, graded 0.000). Ever
 agrees with its neighbours, so run-local octave repair (R32) cannot see it; the signal can. **Cost if
 wrong.** A voice with most of its energy in even harmonics could be doubled; a second harmonic at
 twice the first's amplitude repeats at 0.6 against 1.0, well clear of the rule. About ten
-512-sample lags per voiced frame.
+512-sample lags per voiced frame. Applying it to external tracks is deliberate (fix round 1): the
+check reads the signal, not the tracker, and any tracker can lock onto half the pitch for a whole
+syllable (`an_external_track_locked_on_the_subharmonic_is_doubled`); an external model whose
+estimates are better than this check would be overruled where the signal repeats at half its
+period. It can change frames in runs of any length, so spec §12's "runs under 5 frames untouched"
+now holds for octave repair only.
 
 ## Decoding
 
@@ -322,26 +327,42 @@ P1 calibration of the temperature and β on the owner's data, not treated as a d
 **Cost if wrong.** Bendy's first-session feedback, given on a cold register, is lenient on tones 1
 and 2 until the register warms at 30 syllables.
 
-### R58: Every long voiced run holds a nucleus
+### R58: Every long voiced run holds a nucleus; a pitch break makes two syllables
 
 **Decision.** A long voiced run (at least 5 voiced frames, gaps of up to 2 bridged: R32, R35) inside
 the speech region with no energy peak adds a nucleus candidate at its highest smoothed level, unless
 some frame within 2 of that is more than `dip_db` louder (the flank of a louder unvoiced peak). A
-candidate within 2 frames outside a long run moves onto the run's nearest frame. Two candidates in
-different long runs merge only when they are closer than `min_nucleus_gap`, never on a shallow
-valley alone. One definition of a run (`voiced_runs`, `MIN_RUN_FRAMES` in `tonekit-core`) now serves
-octave repair, nuclei and shape extraction. **Why.** Fluent speech joins syllables with no dip in
-level; where the voice moves fast from one tone to the next, pYIN loses the pitch for a few frames,
-and that pitch break is then the only sign of the join. Under R50 a run without a nucleus is
-evidence nobody measures. On the fluent sweep at 0 dB every clip was one nucleus; now only joins with
-no pitch break are missed (R62). **Cost if wrong.** A dropout of 3 or more frames inside one
-syllable (the creaky bottom of a tone 3) with less than a 2 dB dip now splits it into two nuclei: the
-tone is measured on one part and the other is charged as an insertion (R33). A dip of more than 2 dB
-already split it before.
+candidate within 2 frames outside a long run moves onto the run's nearest frame. Consecutive long
+runs form one *syllable run* unless the pitch moves 3 semitones or more across the gap between them
+(from the last voiced frame before it to the first after it). Two candidates in different syllable
+runs merge only when they are closer than `min_nucleus_gap`, never on a shallow valley alone. Inside
+a gap of one syllable run whose frames are all speech, boundary rules 4 (voicing edges) and 5
+(interior minima) add nothing, and a nucleus's voiced part is its whole syllable run, not only its
+own long run (amending R50): the gap is filled and weighted like any unvoiced frame inside a run, so
+the pack's `unvoiced_ok` region for tone 3 (0.3 to 0.8) can excuse it. One definition of a voiced
+run (`voiced_runs`, `MIN_RUN_FRAMES`) and of a syllable run (`syllable_runs`, `PITCH_BREAK_ST`) in
+`tonekit-core` serves octave repair, nuclei, boundaries and shape extraction. **Why.** Fluent speech
+joins syllables with no dip in level; where the voice moves fast from one tone to the next, pYIN
+loses the pitch for a few frames, and that pitch break (6 to 15 semitones at the sweep's tone 4 into
+tone 1, tone 3 into tone 4 and tone 2 into tone 3 joins) is then the only sign of the join. Under
+R50 a run without a nucleus is evidence nobody measures. On the fluent sweep at 0 dB every clip was
+one nucleus; now only joins with no pitch break are missed (R62). The pitch-break condition was added
+in fix round 1: splitting at any gap of 3 or more frames made a creaky phrase-final tone 3 (pYIN
+losing the pitch at its bottom while the level barely moves) two nuclei, and the closed-set decoder
+spent the extra one as an insertion that let a wrong tone outrank the spoken one (`creak.rs`, 72
+clips at dips of 0 to 1.5 dB: 72 split, a wrong tone at up to 0.860); and a nucleus inside the
+dropout had a TBU with no voiced frame, an all-0.500 tie (on main too). Now all 72 rank the spoken
+tone first, with no wrong tone above 0.184. **Cost if wrong.** The threshold is in absolute
+semitones: a speaker with a narrow range (under about 6 semitones) moves less than 3 across a 2-Chao
+join (tone 1 into tone 2), so such a join is one syllable run, and at a flat level with a pYIN
+dropout but no dip it is not split. A creaky dropout that the pitch comes back from 3 semitones or
+more away (a creak spanning the bottom and part of the rise of a wide speaker's tone 3) still
+splits, as does any creak with a level dip over 2 dB (the energy rule, as on main). Two voiced
+stretches in one TBU that the pitch is continuous across are measured as one contour.
 
 ### R59: Between nuclei on a level, the boundary is the pitch break
 
-**Decision.** When two adjacent nuclei lie in different long voiced runs and the smoothed level
+**Decision.** When two adjacent nuclei lie in different syllable runs (R58) and the smoothed level
 between them dips by no more than `dip_db`, their inter-nucleus boundary candidates are the pitch
 break's edges (the frame after the first run's last voiced frame, and the second run's first voiced
 frame) instead of the level's minimum. **Why.** The minimum of a flat level is noise, and as a TBU
@@ -350,19 +371,29 @@ edge (R50) it cut a syllable's own voiced run short. **Cost if wrong.** None see
 
 ### R61: A coarticulated join is transition, not tone
 
-**Decision.** At a TBU edge where the voice runs on (every frame within 3 on either side is above
-the quiet level by half the speech margin, 5 dB) and the pitch runs on (the frames either side of
-the edge are both voiced), the 3 frames (30 ms) beside the edge, at most a quarter of the TBU, are
-left out of the nucleus's voiced part. The reported span (R55) is unchanged. **Why.** In fluent speech the boundary sits at the join,
-in the middle of the pitch's glide from one tone to the next: a tone 2 after a tone 1 started at
-Chao 4.3 instead of 3 and graded as tone 1 at 0.62 to 0.68. Pauses, consonants, the speech region's
-edges and pitch breaks are not joins, so gapped speech is untouched. Half the speech margin, not
-the full one, because in a noisy room (20 dB SNR) a 12 dB dip between two voiced syllables falls
-below the speech threshold while the pitch glides straight through it. Requiring the pitch on both
-sides keeps pYIN's dropouts inside a fast falling tone 4 from being trimmed as joins. **Cost if
-wrong.** Real carryover from the previous tone lasts longer than 30 ms, so onsets keep some of it;
-and at a join a tone's own first or last 30 ms is not measured, which P1's calibration on real
-speech absorbs.
+**Decision.** At a TBU edge where the voice runs on (the 3 frames on either side of the edge, frames
+`edge − 3 .. edge + 3`, are all above the quiet level by half the speech margin, 5 dB) and the pitch
+runs on (the 3 frames before the edge and the frame at it are all voiced), the 3 frames (30 ms) beside
+the edge, at most a quarter of the TBU, are left out of the nucleus's voiced part, and `TooShort` is
+judged on what is left. The reported span (R55) is unchanged. **Why.** In fluent speech the boundary
+sits at the join, in the middle of the pitch's glide from one tone to the next: a tone 2 after a tone
+1 started at Chao 4.3 instead of 3 and graded as tone 1 at 0.62 to 0.68. Pauses, consonants, the
+speech region's edges and pitch breaks are not joins, so gapped speech is untouched. Half the speech
+margin, not the full one, because in a noisy room (20 dB SNR) a 12 dB dip between two voiced
+syllables falls below the speech threshold while the pitch glides straight through it. Requiring the
+pitch on both sides keeps pYIN's dropouts inside a fast falling tone 4 from being trimmed as joins.
+Three pitched frames before the edge, not one (fix round 1): a voiceless consonant before a vowel is
+loud enough to be at voice level, and pYIN's 64 ms window puts the vowel's pitch on the consonant's
+last frame or two, so the one-frame test trimmed vowel onsets after consonants; in the P0 sweep's
+"30 ms gap + 40 ms onset, 25 dB SNR" condition 2-4-1's tone 2 and tone 1 onsets were trimmed and the
+worst wrong grade rose from 0.221 to 0.336 (the tone 2 graded as a tone 1). It is 0.221 again, and no
+voiced join in the fluent sweep changed. **Cost if wrong.** Real carryover from the previous tone
+lasts longer than 30 ms, so onsets keep some of it; at a join a tone's own first or last 30 ms is not
+measured, which P1's calibration on real speech absorbs; a join whose pitch pYIN loses for a frame
+within 3 before the edge is not trimmed. A fully voiced syllable of 110 to 130 ms joined at both
+edges can fall under the 80 ms `TooShort` floor and lose its contour's interior as evidence (the R1
+review measured 2 of 69 TBUs at 8 syllables/s against 1 untrimmed, and recommended judging it on the
+untrimmed run; fix round 1's binding instruction keeps the trimmed run, where the contour is measured).
 
 ### R62: The fluent sweep's known gaps
 

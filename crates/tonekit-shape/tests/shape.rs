@@ -959,6 +959,27 @@ fn a_nucleus_run_too_short_for_a_shape_is_unvoiced() {
 }
 
 #[test]
+fn too_short_is_judged_on_the_voiced_part_left_after_trimming_joins() {
+    // Fix round 1, item 5: TooShort says the contour's interior is too short to trust, so it is
+    // judged on the frames the shape is measured on. A fully voiced 100 ms TBU is long enough
+    // untrimmed; joined at both edges it loses 2 frames each side (a quarter of 10 is 2) and its
+    // 60 ms voiced part is TooShort.
+    let reg = register_for(100.0, 200.0);
+    let t = track_where(|i| (20..30).contains(&i), |_| 150.0);
+    let both = Joins {
+        start: true,
+        end: true,
+    };
+    let plain = extract_nucleus(&t, &span(20, 30), 25, &reg, Joins::NONE).unwrap();
+    assert!(!plain.issues.contains(&MeasureIssue::TooShort), "{plain:?}");
+    let joined = extract_nucleus(&t, &span(20, 30), 25, &reg, both).unwrap();
+    assert!(
+        joined.issues.contains(&MeasureIssue::TooShort),
+        "{joined:?}"
+    );
+}
+
+#[test]
 fn a_join_edge_leaves_out_the_transition_frames_beside_it() {
     // Ruling R61. One run from 10 to 50: a glide down from Chao 5 on 10..13, Chao 3 on 13..47,
     // a glide up on 47..50. Marked as joins, the glides are left out of the voiced part; the span

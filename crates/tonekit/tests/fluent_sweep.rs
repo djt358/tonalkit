@@ -9,7 +9,10 @@
 //! 180–330 Hz, wide 110–260 Hz) on their warm registers, in three conditions. Each clip must
 //! segment into exactly three nuclei, and for every single full-tone substitution of the spoken
 //! reading the substituted syllable must grade below 0.5 and below the same syllable of the
-//! spoken reading.
+//! spoken reading. The known gaps (ruling R62, [`GAPS`]) are held to less, but not to nothing: a
+//! gap clip that segments must pass in full, an ambiguous one must still rank the spoken tone
+//! first, and no wrong tone in any of them may reach the pack's heard threshold (0.6) unless
+//! [`HEARD`] names it.
 
 mod sweep;
 
@@ -97,7 +100,7 @@ fn clip(reading: &[&str], c: &Condition, speaker: &Speaker) -> Vec<f32> {
     .pcm
 }
 
-/// A clip the CI sweep knows it cannot pass yet, and why (see the rulings in the R1 report).
+/// A clip the CI sweep knows it cannot pass yet, and why (ruling R62).
 struct Gap {
     condition: &'static str,
     /// `None`: every speaker.
@@ -109,7 +112,9 @@ struct Gap {
 
 #[derive(Clone, Copy, PartialEq)]
 enum GapKind {
-    /// No acoustic cue separates two syllables: nothing about the clip is asserted.
+    /// No acoustic cue separates two syllables, so the clip may segment into two nuclei, and then
+    /// a wrong tone can outrank the spoken one (see [`HEARD`]). If it does segment into three, it
+    /// must pass in full.
     Unsegmentable,
     /// Segmented right, and the spoken tone still grades above every substitution, but a wrong
     /// tone can reach 0.5.
@@ -120,8 +125,12 @@ const A: &str = "5 syl/s, 0 dB dip, 40 ms glide";
 const C: &str = "6 syl/s, 3 dB dip, 30 ms glide, 25 dB SNR";
 
 /// The known gaps (ruling R62). The 0 dB condition has no level dip at all, so two syllables are
-/// told apart only where pYIN loses the pitch between them (ruling R58); a 2-Chao glide (T1 → T2)
-/// or no glide at all (T2 → T4 meeting at the ceiling) leaves it tracking straight through.
+/// told apart only where pYIN loses the pitch between them and the pitch breaks across the loss
+/// (ruling R58); a 2-Chao glide (T1 → T2) or no glide at all (T2 → T4 meeting at the ceiling)
+/// leaves it tracking straight through. A missegmented clip has two nuclei for three syllables:
+/// the closed-set decoder leaves one syllable without a nucleus, on the 0.047 floor
+/// (`unvoiced_syllable_llr`, `Partial { [Unvoiced] }`), and the clip's `overall` is 0.047 for the
+/// spoken reading and for every substitution alike.
 const GAPS: [Gap; 6] = [
     Gap {
         condition: A,
@@ -165,9 +174,73 @@ const GAPS: [Gap; 6] = [
         reading: "3-4-1",
         kind: GapKind::Ambiguous,
         why: "a 15 st T4 fall in ~150 ms (beyond the human maximum speed of pitch change): pYIN \
-              loses both its ends, and the mid fall it keeps fits T3 at 0.60",
+              loses both its ends, and the mid fall it keeps fits T3 at 0.598, 0.002 under the \
+              heard threshold",
     },
 ];
+
+/// A wrong tone in a known gap that reaches the pack's heard threshold (0.6), so a learner would be
+/// told they said it (ruling R62). Each is named; any other fails the sweep, and one that stops
+/// happening is reported.
+struct Heard {
+    condition: &'static str,
+    speaker: &'static str,
+    spoken: &'static str,
+    graded_as: &'static str,
+    why: &'static str,
+}
+
+/// Two nuclei for three syllables: the merged nucleus mostly shows one tone, the relaxed decode
+/// puts it on whichever syllable that tone suits and leaves the other on the 0.047 floor.
+const MERGED: &str = "the cue-less pair is one nucleus showing mostly one tone; the decoder \
+                      puts it on the syllable that tone suits and leaves the other at 0.047";
+
+const HEARD: [Heard; 5] = [
+    Heard {
+        condition: A,
+        speaker: "male-low",
+        spoken: "2-4-1",
+        graded_as: "2-4-4",
+        why: MERGED,
+    },
+    Heard {
+        condition: A,
+        speaker: "octave-spanning",
+        spoken: "2-4-1",
+        graded_as: "2-4-3",
+        why: MERGED,
+    },
+    Heard {
+        condition: A,
+        speaker: "octave-spanning",
+        spoken: "2-4-1",
+        graded_as: "2-4-4",
+        why: MERGED,
+    },
+    Heard {
+        condition: A,
+        speaker: "female",
+        spoken: "1-2-3",
+        graded_as: "1-1-3",
+        why: MERGED,
+    },
+    Heard {
+        condition: A,
+        speaker: "female",
+        spoken: "4-1-2",
+        graded_as: "4-1-1",
+        why: MERGED,
+    },
+];
+
+fn heard(condition: &str, speaker: &str, spoken: &str, graded_as: &str) -> Option<usize> {
+    HEARD.iter().position(|h| {
+        h.condition == condition
+            && h.speaker == speaker
+            && h.spoken == spoken
+            && h.graded_as == graded_as
+    })
+}
 
 fn gap(condition: &str, speaker: &str, reading: &str) -> Option<&'static Gap> {
     GAPS.iter().find(|g| {
@@ -226,7 +299,7 @@ fn sweep(pack: &LanguagePack, c: &Condition, speaker: &Speaker) -> Vec<Clip> {
 
 /// Runs `conditions` × [`FLUENT_SPEAKERS`], printing each cell (clips that missegmented, then the
 /// substitutions as `report` prints them); returns every clip with its condition and speaker.
-fn run(conditions: &[Condition]) -> Vec<(String, &'static str, Clip)> {
+fn run(conditions: &[Condition]) -> Vec<(Condition, &'static str, Clip)> {
     let pack = cmn();
     let mut out = Vec::new();
     for c in conditions {
@@ -239,7 +312,7 @@ fn run(conditions: &[Condition]) -> Vec<(String, &'static str, Clip)> {
                 eprintln!("  {}: nuclei at {:?}", k.reading, k.nuclei);
             }
             report(&label, clips.iter().flat_map(|k| &k.substitutions));
-            out.extend(clips.into_iter().map(|k| (c.label(), speaker.name, k)));
+            out.extend(clips.into_iter().map(|k| (*c, speaker.name, k)));
         }
     }
     out
@@ -247,30 +320,67 @@ fn run(conditions: &[Condition]) -> Vec<(String, &'static str, Clip)> {
 
 #[test]
 fn fluent_speech_segments_and_no_substitution_grades_as_well_as_the_spoken_tone() {
+    let threshold = cmn().heard_threshold();
     let mut failed = Vec::new();
-    for (condition, speaker, clip) in run(&CONDITIONS) {
+    let mut seen = [false; HEARD.len()];
+    for (c, speaker, clip) in run(&CONDITIONS) {
+        let condition = c.label();
         let at = format!("{condition}, {speaker}, {}", clip.reading);
         let (segmented, too_well, ranked_wrong) = (
             clip.segmented(),
             clip.graded_too_well(),
             clip.ranked_wrong(),
         );
-        match gap(&condition, speaker, &clip.reading) {
-            None if !segmented || too_well > 0 => failed.push(format!(
-                "{at}: nuclei {:?}, {too_well} of 9 graded too well",
-                clip.nuclei
+        let Some(g) = gap(&condition, speaker, &clip.reading) else {
+            if !segmented || too_well > 0 {
+                failed.push(format!(
+                    "{at}: nuclei {:?}, {too_well} of 9 graded too well",
+                    clip.nuclei
+                ));
+            }
+            continue;
+        };
+        match g.kind {
+            GapKind::Ambiguous if !segmented || ranked_wrong > 0 => failed.push(format!(
+                "{at} (known gap: {}): nuclei {:?}, {ranked_wrong} of 9 ranked above the spoken \
+                 tone",
+                g.why, clip.nuclei
             )),
-            Some(g) if g.kind == GapKind::Ambiguous && (!segmented || ranked_wrong > 0) => failed
-                .push(format!(
-                    "{at} (known gap: {}): nuclei {:?}, {ranked_wrong} of 9 ranked above the \
-                     spoken tone",
-                    g.why, clip.nuclei
-                )),
-            Some(g) if segmented && too_well == 0 => {
+            GapKind::Unsegmentable if segmented && too_well > 0 => failed.push(format!(
+                "{at} (known gap: {}): segmented, but {too_well} of 9 graded too well",
+                g.why
+            )),
+            _ if segmented && too_well == 0 => {
                 eprintln!("{at}: known gap now passes, take it off GAPS ({})", g.why)
             }
             _ => {}
         }
+        // Within a gap, a wrong tone reaches the heard threshold only where HEARD names it.
+        for x in clip
+            .substitutions
+            .iter()
+            .filter(|x| x.p_wrong() >= threshold)
+        {
+            match heard(&condition, speaker, &clip.reading, x.intended()) {
+                Some(k) => seen[k] = true,
+                None => failed.push(format!(
+                    "{at} (known gap: {}): {} reaches the heard threshold {threshold}",
+                    g.why,
+                    x.describe()
+                )),
+            }
+        }
+    }
+    let named = seen.iter().filter(|&&s| s).count();
+    eprintln!(
+        "{named} of {} named wrong tones at or above the heard threshold occurred",
+        HEARD.len()
+    );
+    for (h, _) in HEARD.iter().zip(seen).filter(|(_, s)| !s) {
+        eprintln!(
+            "{}, {}, {} graded as {}: no longer heard, take it off HEARD ({})",
+            h.condition, h.speaker, h.spoken, h.graded_as, h.why
+        );
     }
     assert!(failed.is_empty(), "{failed:#?}");
 }
@@ -297,14 +407,30 @@ fn fluent_speech_full_matrix_report() {
         }
     }
     let clips = run(&matrix);
+    let threshold = cmn().heard_threshold();
     let cells = clips.len() / READINGS.len();
-    let missegmented = clips.iter().filter(|(_, _, k)| !k.segmented()).count();
-    let too_well: usize = clips.iter().map(|(_, _, k)| k.graded_too_well()).sum();
-    let ranked_wrong: usize = clips.iter().map(|(_, _, k)| k.ranked_wrong()).sum();
     eprintln!(
-        "{cells} cells, {} clips: {missegmented} missegmented; of {} substitutions {too_well} \
-         graded too well, {ranked_wrong} ranked above the spoken tone",
+        "{cells} cells, {} clips ({} substitutions):",
         clips.len(),
         clips.len() * 9
     );
+    for dip_db in [0.0, 3.0, 6.0, 12.0] {
+        let at: Vec<&Clip> = clips
+            .iter()
+            .filter(|(c, _, _)| c.dip_db == dip_db)
+            .map(|(_, _, k)| k)
+            .collect();
+        let missegmented = at.iter().filter(|k| !k.segmented()).count();
+        let subs = || at.iter().flat_map(|k| &k.substitutions);
+        let too_well = subs().filter(|x| x.graded_too_well()).count();
+        let ranked_wrong = subs().filter(|x| x.ranked_wrong()).count();
+        let heard = subs().filter(|x| x.p_wrong() >= threshold).count();
+        eprintln!(
+            "  {dip_db} dB dip: {} clips, {missegmented} missegmented; of {} substitutions \
+             {too_well} graded too well, {ranked_wrong} ranked above the spoken tone, {heard} at \
+             or above the heard threshold {threshold}",
+            at.len(),
+            at.len() * 9
+        );
+    }
 }
