@@ -1,11 +1,11 @@
 use tonekit_core::{EnergyTrack, F0Track, FrameRange, Nucleus};
 
 use crate::region::floor_db;
-use crate::runs::{in_separate_runs, long_runs, run_of, Run, VOICING_RADIUS};
+use crate::runs::{in_separate_runs, long_runs, run_of, syllable_runs, Run, VOICING_RADIUS};
 use crate::smooth::{argmax_middle, frame, local_extrema, shallow_valley, smoothed_db, Extremum};
 use crate::SegmentParams;
 
-/// Syllable nuclei inside `region`: energy peaks that are voiced, at least one per long voiced run.
+/// Syllable nuclei inside `region`: energy peaks that are voiced, at least one per syllable run.
 ///
 /// A candidate is a local maximum of the 5-frame moving average of the frame dB, at or above the
 /// speech threshold (p10 dB plus `p.speech_margin_db`), with periodicity at the peak: some frame
@@ -28,10 +28,13 @@ use crate::SegmentParams;
 ///
 /// Candidates are then merged left to right. A candidate joins the nucleus before it when they are
 /// closer than `p.min_nucleus_gap` frames, or when the smoothed minimum between them is above
-/// `min(peak_a, peak_b) - p.dip_db` and they do not lie in two different long voiced runs (each
+/// `min(peak_a, peak_b) - p.dip_db` and they do not lie in two different syllable runs (each
 /// within 2 frames of its run); the higher peak survives (the earlier one on a tie), and a
-/// surviving new peak is compared with the nucleus before that in turn. `strength_db` is the
-/// smoothed level at the nucleus minus the p10 dB.
+/// surviving new peak is compared with the nucleus before that in turn. A syllable run
+/// ([`tonekit_core::syllable_runs`], ruling R58) is one or more long runs, consecutive ones
+/// grouped when the pitch moves less than 3 semitones across the gap between them: a dropout
+/// inside one contour (a creaky tone 3) is not a join, so its two parts are one nucleus.
+/// `strength_db` is the smoothed level at the nucleus minus the p10 dB.
 ///
 /// The result is sorted by frame; a region that is empty or lies past the track gives no nuclei.
 pub fn nuclei(
@@ -66,9 +69,10 @@ pub fn nuclei(
     candidates.sort_unstable();
     candidates.dedup();
 
+    let syllables = syllable_runs(f0);
     let mut kept: Vec<usize> = Vec::new();
     for peak in candidates {
-        push_merging(&mut kept, peak, &level.s, &runs, p);
+        push_merging(&mut kept, peak, &level.s, &syllables, p);
     }
     kept.into_iter()
         .map(|i| Nucleus {

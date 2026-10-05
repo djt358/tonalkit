@@ -1,7 +1,7 @@
 use tonekit_core::{EnergyTrack, F0Track, FrameRange, Nucleus};
 
 use crate::region::speech_frames;
-use crate::runs::{long_runs, run_of, VOICING_RADIUS};
+use crate::runs::{dropouts, run_of, syllable_runs, VOICING_RADIUS};
 use crate::smooth::{argmin_middle, frame, local_extrema, shallow_valley, smoothed_db, Extremum};
 use crate::SegmentParams;
 
@@ -29,10 +29,11 @@ pub fn boundaries(
 ///
 /// 1. the region edges;
 /// 2. the frame of minimum smoothed dB between each pair of adjacent `nuclei` (the middle of a
-///    flat minimum); or, when the two lie in different long voiced runs and the level between
-///    them does not dip by more than `p.dip_db` (ruling R59: syllables run together with no dip,
-///    told apart only by the pitch break), the edges of that break instead: the frame after the
-///    first run's last voiced frame and the second run's first voiced frame. A minimum of a flat
+///    flat minimum); or, when the two lie in different syllable runs (long voiced runs the pitch
+///    breaks between by 3 semitones or more, ruling R58) and the level between them does not dip
+///    by more than `p.dip_db` (ruling R59: syllables run together with no dip, told apart only by
+///    the pitch break), the edges of that break instead: the frame after the first run's last
+///    voiced frame and the second run's first voiced frame. A minimum of a flat
 ///    level is noise, and as the edge of a nucleus's TBU (ruling R50) it would cut the syllable's
 ///    own voiced run short;
 /// 3. the edges of interior pauses (ruling R27): wherever frames turn from speech to non-speech
@@ -47,6 +48,12 @@ pub fn boundaries(
 ///    pYIN's `voiced_p` sags through fast falls and dips inside a syllable;
 /// 5. interior local minima of the smoothed dB inside any span longer than 35 frames between
 ///    consecutive boundaries found so far, deepest (most prominent) first.
+///
+/// Rules 4 and 5 add nothing inside a dropout of one syllable run (ruling R58: a gap between long
+/// voiced runs that the pitch moves less than 3 semitones across, such as a creaky tone 3's
+/// bottom) whose frames are all speech: from the first unvoiced frame up to and including the
+/// first voiced frame after it. The voice carries on and so does the contour, so the dropout is
+/// no syllable edge, and a TBU (ruling R50) cut there would hold only part of the tone or none.
 ///
 /// A boundary within 2 frames of a higher-priority one is dropped, and the list is capped at
 /// `4 * nuclei.len() + 2` by keeping the highest priorities first, so the edges and inter-nucleus
@@ -77,7 +84,7 @@ pub fn boundaries_with(
         .collect();
     frames.sort_unstable();
     frames.dedup();
-    let runs = long_runs(f0);
+    let runs = syllable_runs(f0);
     for pair in frames.windows(2) {
         let (a, b) = (pair[0], pair[1]);
         let joined = (
@@ -114,12 +121,19 @@ pub fn boundaries_with(
         try_add(&mut kept, at, cap);
     }
 
+    // Ruling R58: dropouts inside one contour that the voice carries on through.
+    let creaks: Vec<_> = dropouts(f0)
+        .into_iter()
+        .filter(|d| (d.before + 1..d.after).all(loud))
+        .collect();
+    let in_creak = |at: usize| creaks.iter().any(|d| d.before < at && at <= d.after);
+
     // 4. Voicing edges (R32: pitched or not), biggest voiced_p jump first (earliest first among
     // equals).
     let pitched = |i: usize| f0.frames.get(i).is_some_and(|f| f.hz.is_some());
     let voiced_p = |i: usize| f0.frames.get(i).map_or(0.0, |f| f.voiced_p);
     let mut crossings: Vec<(usize, f32)> = (start.saturating_add(1)..end.min(f0.frames.len()))
-        .filter(|&i| pitched(i - 1) != pitched(i))
+        .filter(|&i| pitched(i - 1) != pitched(i) && !in_creak(i))
         .map(|i| (i, (voiced_p(i) - voiced_p(i - 1)).abs()))
         .map(|(i, jump)| (i, if jump.is_finite() { jump } else { 0.0 }))
         .collect();
@@ -134,6 +148,7 @@ pub fn boundaries_with(
         .windows(2)
         .filter(|w| w[1] - w[0] > LONG_SPAN_FRAMES)
         .flat_map(|w| local_extrema(&s, w[0] + 1, w[1], Extremum::Min))
+        .filter(|&i| !in_creak(i))
         .map(|i| (i, prominence(&s, i)))
         .collect();
     minima.sort_by(|a, b| b.1.total_cmp(&a.1).then(a.0.cmp(&b.0)));

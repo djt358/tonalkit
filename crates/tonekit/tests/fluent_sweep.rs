@@ -218,7 +218,7 @@ fn sweep(pack: &LanguagePack, c: &Condition, speaker: &Speaker) -> Vec<Clip> {
             Clip {
                 reading: spoken.join("-"),
                 nuclei: a.nuclei.iter().map(|n| n.frame).collect(),
-                substitutions: substitutions(&a, pack, spoken),
+                substitutions: substitutions(&a, pack, &spoken),
             }
         })
         .collect()

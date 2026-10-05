@@ -95,7 +95,7 @@ fn sweep(c: Condition, speaker: (f32, f32)) -> Vec<Substitution> {
                 &AnalyzeOptions::default(),
             )
             .unwrap();
-            substitutions(&a, &pack, spoken)
+            substitutions(&a, &pack, &spoken)
         })
         .collect()
 }

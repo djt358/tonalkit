@@ -1,5 +1,6 @@
 //! What the substitution sweeps share: the readings, how tones are spoken (ruling R8), grading a
 //! reading, and every single full-tone substitution of a spoken reading.
+#![allow(dead_code)] // each test binary uses a different subset
 
 use tonekit::{
     assess, AccentId, Analysis, AssessRequest, Candidate, CandidateId, GradingTarget, LanguagePack,
@@ -92,6 +93,11 @@ impl Substitution {
         self.p_wrong >= self.p_correct
     }
 
+    /// The wrong tone's grade on the substituted syllable.
+    pub fn p_wrong(&self) -> f32 {
+        self.p_wrong
+    }
+
     pub fn describe(&self) -> String {
         format!(
             "spoken {} graded as {}: syllable {} p {:.3} (spoken tone {:.3})",
@@ -101,12 +107,12 @@ impl Substitution {
 }
 
 /// Every single full-tone substitution of `spoken`, graded on its analysis `a`.
-pub fn substitutions(a: &Analysis, pack: &LanguagePack, spoken: [&str; 3]) -> Vec<Substitution> {
-    let right = grade(a, pack, &spoken);
+pub fn substitutions(a: &Analysis, pack: &LanguagePack, spoken: &[&str]) -> Vec<Substitution> {
+    let right = grade(a, pack, spoken);
     let mut out = Vec::new();
     for position in 0..spoken.len() {
         for wrong in FULL_TONES.iter().filter(|&&t| t != spoken[position]) {
-            let mut intended = spoken;
+            let mut intended = spoken.to_vec();
             intended[position] = wrong;
             out.push(Substitution {
                 spoken: spoken.join("-"),

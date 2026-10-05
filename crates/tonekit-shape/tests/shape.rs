@@ -875,8 +875,12 @@ fn a_run_bridges_holes_of_up_to_two_frames() {
         let e = extract_nucleus(&two, &span(10, 50), nucleus, &reg, Joins::NONE).unwrap();
         assert_eq!(e, extract(&two, &span(10, 50), &reg).unwrap(), "{nucleus}");
     }
-    // A three-frame hole (20..30, 33..40) ends the run: each half is its own.
-    let three = track_where(|i| (20..30).contains(&i) || (33..40).contains(&i), hz);
+    // A three-frame hole (20..30, 33..40) with the pitch breaking across it (150 → 190 Hz, 4.1
+    // semitones) ends the run: each half is its own.
+    let three = track_where(
+        |i| (20..30).contains(&i) || (33..40).contains(&i),
+        |i| if i < 31 { 150.0 } else { 190.0 },
+    );
     let left = extract_nucleus(&three, &span(10, 50), 25, &reg, Joins::NONE).unwrap();
     let right = extract_nucleus(&three, &span(10, 50), 35, &reg, Joins::NONE).unwrap();
     assert_abs_diff_eq!(left.shape.voiced_fraction, 10.0 / 40.0, epsilon = 1e-6);
@@ -884,12 +888,42 @@ fn a_run_bridges_holes_of_up_to_two_frames() {
 }
 
 #[test]
+fn a_dropout_inside_one_contour_is_filled_not_cut() {
+    // Ruling R58: a creaky tone 3, falling from Chao 2 to 1 on 20..30, 6 unvoiced frames at the
+    // bottom, rising from Chao 1.2 to 4 on 36..50. The pitch moves under 3 semitones across the
+    // hole, so from either side the voiced part is the whole contour, hole filled and weighted.
+    let reg = register_for(100.0, 200.0);
+    let chao = |i: u32| match i {
+        0..=29 => 2.0 - (i as f32 - 20.0) / 10.0,
+        _ => 1.2 + (i as f32 - 36.0) * 2.8 / 13.0,
+    };
+    let creaky = track_where(
+        |i| (20..30).contains(&i) || (36..50).contains(&i),
+        |i| tonekit_testkit::chao_to_hz(chao(i), 100.0, 200.0),
+    );
+    let whole = extract(&creaky, &span(15, 55), &reg).unwrap();
+    for nucleus in [24, 32, 44] {
+        let e = extract_nucleus(&creaky, &span(15, 55), nucleus, &reg, Joins::NONE).unwrap();
+        assert_eq!(e, whole, "{nucleus}");
+    }
+    assert!(
+        whole.shape.onset > 1.8 && whole.shape.offset > 3.8,
+        "{whole:?}"
+    );
+    assert!(
+        whole.shape.voiced_weights.iter().any(|&w| w < 0.5),
+        "{whole:?}"
+    );
+}
+
+#[test]
 fn a_nucleus_between_runs_takes_the_nearest() {
-    // Runs at 10..20 and 30..45; a nucleus at 23 is 4 frames from the first and 7 from the second.
+    // Runs at 10..20 (150 Hz) and 30..45 (190 Hz, a pitch break); a nucleus at 23 is 4 frames
+    // from the first and 7 from the second.
     let reg = register_for(100.0, 200.0);
     let t = track_where(
         |i| (10..20).contains(&i) || (30..45).contains(&i),
-        |_| 150.0,
+        |i| if i < 25 { 150.0 } else { 190.0 },
     );
     let e = extract_nucleus(&t, &span(5, 50), 23, &reg, Joins::NONE).unwrap();
     assert_abs_diff_eq!(e.shape.voiced_fraction, 10.0 / 45.0, epsilon = 1e-6);
