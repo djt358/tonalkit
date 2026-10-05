@@ -3,10 +3,11 @@
 //!
 //! Each nucleus's shape is extracted once, on its tone-bearing unit (TBU): the span between the
 //! nearest boundary candidates on either side of it, with the voiced part restricted to the
-//! nucleus's own voiced run ([`tonekit_shape::extract_nucleus`]), less the frames beside an edge
-//! where it runs straight into a neighbouring syllable (ruling R61). Every candidate that puts a
-//! syllable on a nucleus is scored on that one shape, so no reading can choose the frames that
-//! suit it best, and the closed-set decode and the lattice see the same evidence.
+//! nucleus's own voiced run, or its syllable run where a dropout splits one contour (ruling R58;
+//! [`tonekit_shape::extract_nucleus`]), less the frames beside an edge where it runs straight
+//! into a neighbouring syllable (ruling R61). Every candidate that puts a syllable on a nucleus is
+//! scored on that one shape, so no reading can choose the frames that suit it best, and the
+//! closed-set decode and the lattice see the same evidence.
 
 use tonekit_core::{Analysis, EnergyTrack, MeasureIssue, TbuSpan};
 use tonekit_segment::{speech_frames, SegmentParams};

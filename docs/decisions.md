@@ -399,22 +399,37 @@ untrimmed run; fix round 1's binding instruction keeps the trimmed run, where th
 
 **Decision.** The CI fluent sweep (`fluent_sweep.rs`) asserts three conditions (5 syllables/s with
 no dip; 5/s with a 6 dB dip; 6/s with a 3 dB dip at 25 dB SNR) for four speakers and the six
-substitution-sweep readings, except six named gaps. At 0 dB, 1-2-3, 4-1-2 and 2-4-1 (every speaker)
-and 4-1-3 (the 110-260 Hz speaker) are reported, not asserted. At 6/s, that speaker's 2-3-4 and
-3-4-1 must segment and rank the spoken tone first, but a wrong tone may reach 0.5. A gap that starts
-passing is reported. A report-only matrix covers 4 to 6 syllables/s, 0 to 12 dB, 30 or 60 ms glides,
-a fricative onset and 20 dB SNR: with any dip it missegments 6 of 1,296 clips (all at 6 syllables/s
-with a fricative onset, for the 110-260 Hz speaker) and grades 43 of 11,664 substitutions too well,
-18 of them in those 6 clips; in every other clip the spoken tone still grades highest. With no dip
-it missegments 243 of 432 clips. **Why.** With no level dip and the pitch tracked straight through
-(a 2-Chao glide from tone 1 to tone 2, or tones 2 and 4 meeting at the ceiling), no energy or
-periodicity cue separates the syllables. Finding them needs a pitch-landmark cue, which the design
-(R27, R32, R33, R50) does not have and which is a design decision, not a fix. The 6/s gaps are a
-15-semitone fall in about 150 ms, faster than the measured human maximum speed of pitch change:
-pYIN loses its ends and the middle fits tone 3 too. **Cost if wrong.** A native speaker who runs a
-tone 1 into a tone 2, or a tone 2 into a tone 4, with no consonant and no dip at all is graded as
-missing a syllable (R33). Real speech nearly always has an initial consonant or glide, which gives
-a dip or a pitch break.
+substitution-sweep readings. Six named gaps are held to less, not to nothing. At 0 dB, 1-2-3, 4-1-2
+and 2-4-1 (every speaker) and 4-1-3 (the 110-260 Hz speaker) may missegment, but one that segments
+into three nuclei must pass in full. At 6/s, that speaker's 2-3-4 and 3-4-1 must segment and rank the
+spoken tone first, but a wrong tone may reach 0.5. In every gap clip no wrong tone may reach the
+pack's heard threshold (0.6) unless it is one of five named ones (`HEARD`, all in missegmented 0 dB
+clips). A gap or a named exception that stops happening is reported. A report-only matrix covers 4
+to 6 syllables/s, 0 to 12 dB, 30 or 60 ms glides, a fricative onset and 20 dB SNR. **Why.** With no
+level dip and the pitch tracked straight through (a 2-Chao glide from tone 1 to tone 2, or tones 2
+and 4 meeting at the ceiling), no energy or periodicity cue separates the syllables. Finding them
+needs a pitch-landmark cue, which the design (R27, R32, R33, R50) does not have and which is a design
+decision, not a fix. The 6/s gaps are a 15-semitone fall in about 150 ms, faster than the measured
+human maximum speed of pitch change: pYIN loses its ends and the middle fits tone 3 too (3-4-1's
+wrong tone 3 reaches 0.598, 0.002 under the heard threshold). **Cost if wrong.** A missegmented clip
+has two nuclei for three syllables. The closed-set decoder leaves one syllable without a nucleus, on
+the 0.047 floor (R33: `unvoiced_syllable_llr`, `Partial { [Unvoiced] }`), so the clip's `overall`
+is 0.047 for the spoken reading and for every wrong one alike: a native speaker who runs a tone 1
+into a tone 2, or a tone 2 into a tone 4, with no consonant and no dip fails the cast. The merged
+nucleus mostly shows one tone, and the decoder puts it on whichever syllable that tone suits, so a
+wrong tone there grades as heard: in the CI sweep five substitutions reach 0.65 to 0.75 (the
+180-330 Hz speaker's 4-1-2 graded as 4-1-1 at 0.754 against the spoken tone's 0.597, and 1-2-3 as
+1-1-3 at 0.739 against 0.626; 2-4-1 as 2-4-4 or 2-4-3 at 0.654 to 0.687). In the report-only matrix
+after fix round 1, with no dip 243 of 432 clips missegment and 1,174 of 3,888 substitutions grade too
+well, 1,145 of them above the spoken tone and 72 at or above 0.6. With any dip (3 to 12 dB) 6 of
+1,296 clips missegment (all the 110-260 Hz speaker's 3-4-1 at 6 syllables/s with a fricative onset)
+and 43 of 11,664 substitutions grade too well, 18 of them above the spoken tone (all in those 6
+clips) and none at 0.6. Most syllables start with a consonant, which gives a dip or a pitch break,
+but zero-initial syllables (爱, 安, 二, 饿), y and w syllables whose glide is just the vowel (一 yī,
+五 wǔ, 鱼 yú) and sonorant initials are common, and a glottal onset is optional in fluent speech.
+Synthetic 一 + measure word + noun phrases reach the floor exactly where such a voiced join has no
+dip and no pitch break (一条鱼, 一辆车 and 一个人 at 0 dB: 48 of 384 clips, the same on main;
+`fluent_phrases.rs`).
 
 ## Packs and calibration
 
