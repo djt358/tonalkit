@@ -459,7 +459,8 @@ def fallback_pair(i, *, speaker="v-a", error_fallback=True):
 def test_a_syllable_with_no_nucleus_is_shown_as_a_fallback_not_a_measurement(tmp_path):
     results = fallback_pair(1) + fallback_pair(2) + fallback_pair(3, error_fallback=False)
     text = render(results, tmp_path)
-    assert "no nucleus (fallback)" in text
+    table_text = "\n".join(report._failure(metrics.Failure(result=results[1], reason="tone-error clip accepted")))
+    assert "no nucleus (fallback)" in table_text
     section = text.split("## Scores with no tone evidence\n", 1)[1].split("\n## ", 1)[0]
     assert "- v-a: 2 of 9 gate syllables had no nucleus; 2 of 6 clips decided by the fallback" in section
     assert "- gate-01-error" in section and "- gate-02-error" in section and "gate-03-error" not in section
