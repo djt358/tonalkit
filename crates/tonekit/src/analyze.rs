@@ -5,8 +5,8 @@ use tonekit_core::{
     SAMPLE_RATE,
 };
 use tonekit_f0::{
-    clipping_ratio, energy, fit_length, repair_octaves, repair_subharmonics, snr_db, F0Provider,
-    Pyin,
+    clipping_ratio, energy, fit_length, repair_octaves, repair_subharmonics, snr_db, sonority,
+    F0Provider, Pyin,
 };
 use tonekit_segment::{boundaries_with, nuclei, speech_region, SegmentParams};
 use tonekit_shape::{cold_register, is_cold, voiced_semitones};
@@ -100,7 +100,9 @@ fn usable(r: &Register) -> bool {
 ///    lock onto half the pitch for a whole syllable. Subharmonic repair can change frames in a
 ///    run of any length (octave repair leaves runs under 5 frames alone). A voiced frame is one
 ///    with `hz.is_some()` everywhere.
-/// 2. **Energy** and the signal issues: `Clipped` if more than 1% of samples have `|x| >= 0.99`,
+/// 2. **Energy**, **sonority** (ruling R102: per frame, the share of the energy above 150 Hz that
+///    lies below 2 kHz, which tells a vowel whose pitch was lost from a consonant) and the signal
+///    issues: `Clipped` if more than 1% of samples have `|x| >= 0.99`,
 ///    `LowSnr` if the frame energies' `p95 - p10` is under 10 dB.
 /// 3. **Segmentation** under the default [`SegmentParams`], used for every step (the parameters
 ///    must never be mixed): speech region, then nuclei and candidate boundaries inside it. No
@@ -152,6 +154,7 @@ pub fn analyze(
     repair_subharmonics(&mut f0, pcm, Pyin::default().fmax);
     repair_octaves(&mut f0);
     let energy = energy(pcm);
+    let sonority = sonority(pcm);
 
     let mut issues = Vec::new();
     if clipping_ratio(pcm) > CLIPPED_ABOVE {
@@ -207,5 +210,6 @@ pub fn analyze(
         register_source,
         voiced_st,
         issues,
+        sonority,
     })
 }

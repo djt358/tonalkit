@@ -271,6 +271,7 @@ fn analysis_roundtrips() {
         register_source: RegisterSource::ColdStart,
         voiced_st: vec![16.0],
         issues: vec![MeasureIssue::LowSnr],
+        sonority: vec![0.5, 0.9],
     };
     roundtrip(&a);
 }

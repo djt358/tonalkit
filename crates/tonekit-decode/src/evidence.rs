@@ -8,9 +8,13 @@
 //! into a neighbouring syllable (ruling R61). Every candidate that puts a syllable on a nucleus is
 //! scored on that one shape, so no reading can choose the frames that suit it best, and the
 //! closed-set decode and the lattice see the same evidence.
+//!
+//! The count stage (ruling R102) has evidence of its own, shared the same way by every candidate
+//! that reaches it: the nuclei and the extra syllable candidates together
+//! ([`tonekit_segment::extra_candidates`]), over the analysis's boundaries and theirs.
 
 use tonekit_core::{Analysis, EnergyTrack, MeasureIssue, TbuSpan};
-use tonekit_segment::{speech_frames, SegmentParams};
+use tonekit_segment::{extra_candidates, speech_frames, SegmentParams};
 use tonekit_shape::{extract_nucleus, Extracted, Joins, JOIN_TRIM_FRAMES};
 
 use crate::count_u32;
@@ -25,31 +29,109 @@ pub(crate) struct Tbu {
     pub segment: Segment,
 }
 
+/// A pitch on a frame within this many frames of a candidate makes it a pitched syllable (as for
+/// nuclei, ruling R27).
+const VOICING_RADIUS: u32 = 2;
+
 /// The evidence of every distinct nucleus of `a`, in frame order: its TBU ([`tbu_spans`], falling
 /// back to the speech region's edges, or the track's without one) and the shape of its own voiced
 /// run there, normalised by the analysis's register, with the frames beside a coarticulated edge
 /// left out ([`joins`], ruling R61).
 pub(crate) fn tbus(a: &Analysis) -> Vec<Tbu> {
-    let voice_level = voice_level_frames(&a.energy);
-    let pitched: Vec<bool> = a.f0.frames.iter().map(|f| f.hz.is_some()).collect();
     let mut nuclei: Vec<u32> = a.nuclei.iter().map(|n| n.frame).collect();
     nuclei.sort_unstable();
     nuclei.dedup();
+    tbus_over(a, &nuclei, &a.boundaries, &[])
+}
+
+/// The count stage's syllable anchors, boundaries and evidence (ruling R102).
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct Extended {
+    /// The nuclei and the extra candidates, sorted and unique.
+    pub anchors: Vec<u32>,
+    /// The analysis's boundaries and the extra candidates', sorted and unique.
+    pub bounds: Vec<u32>,
+    /// One per anchor, in order.
+    pub tbus: Vec<Tbu>,
+}
+
+/// The count stage of `a` (ruling R102), or `None` when there is no extra candidate (then it would
+/// be the nuclei's own stage) or no speech region.
+///
+/// Every anchor's TBU is taken as for a nucleus, over the combined boundaries, so a nucleus
+/// sharing a voice stretch with a candidate is measured on its own part of it. A candidate with a
+/// pitch on a frame within 2 of it has a shape like a nucleus; one without is
+/// `Err(Unpitched)`: speech with a vowel's spectrum and no pitch.
+pub(crate) fn extended(a: &Analysis) -> Option<Extended> {
+    let region = a.speech.as_ref()?;
+    let extra = extra_candidates(
+        &a.energy,
+        &a.f0,
+        &a.sonority,
+        region,
+        &a.nuclei,
+        &SegmentParams::default(),
+    );
+    let mut nuclei: Vec<u32> = a.nuclei.iter().map(|n| n.frame).collect();
+    nuclei.sort_unstable();
+    nuclei.dedup();
+    let candidates: Vec<u32> = extra
+        .nuclei
+        .iter()
+        .map(|n| n.frame)
+        .filter(|f| nuclei.binary_search(f).is_err())
+        .collect();
+    if candidates.is_empty() {
+        return None;
+    }
+    let mut anchors: Vec<u32> = nuclei.iter().chain(&candidates).copied().collect();
+    anchors.sort_unstable();
+    anchors.dedup();
+    let mut bounds: Vec<u32> = a
+        .boundaries
+        .iter()
+        .chain(&extra.boundaries)
+        .copied()
+        .collect();
+    bounds.sort_unstable();
+    bounds.dedup();
+    let tbus = tbus_over(a, &anchors, &bounds, &candidates);
+    Some(Extended {
+        anchors,
+        bounds,
+        tbus,
+    })
+}
+
+/// The evidence of `anchors` (sorted, unique) over `bounds`: [`tbus`] for a nucleus, and for an
+/// anchor listed in `candidates` (sorted) that has no pitch within [`VOICING_RADIUS`] frames,
+/// `Err(Unpitched)`.
+fn tbus_over(a: &Analysis, anchors: &[u32], bounds: &[u32], candidates: &[u32]) -> Vec<Tbu> {
+    let voice_level = voice_level_frames(&a.energy);
+    let pitched: Vec<bool> = a.f0.frames.iter().map(|f| f.hz.is_some()).collect();
     let (lo_edge, hi_edge) = match &a.speech {
         Some(r) => (r.start, r.end),
         None => (0, count_u32(a.f0.frames.len())),
     };
-    tbu_spans(&nuclei, &a.boundaries, lo_edge, hi_edge)
+    let pitch_near = |f: u32| {
+        (f.saturating_sub(VOICING_RADIUS)..=f + VOICING_RADIUS)
+            .any(|i| pitched.get(i as usize).copied().unwrap_or(false))
+    };
+    tbu_spans(anchors, bounds, lo_edge, hi_edge)
         .into_iter()
-        .zip(nuclei)
-        .map(|(span, nucleus)| Tbu {
-            segment: extract_nucleus(
-                &a.f0,
-                &span,
-                nucleus,
-                &a.register,
-                joins(&voice_level, &pitched, &span),
-            ),
+        .zip(anchors)
+        .map(|(span, &anchor)| Tbu {
+            segment: if candidates.binary_search(&anchor).is_ok() && !pitch_near(anchor) {
+                Err(MeasureIssue::Unpitched)
+            } else {
+                extract_nucleus(
+                    &a.f0,
+                    &span,
+                    anchor,
+                    &a.register,
+                    joins(&voice_level, &pitched, &span),
+                )
+            },
             span,
         })
         .collect()

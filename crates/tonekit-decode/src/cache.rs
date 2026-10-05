@@ -63,14 +63,27 @@ pub(crate) fn unmeasured(target: &ToneTarget, issue: MeasureIssue, llr: f32) -> 
 
 /// The judgement of a target the utterance has no syllable for (ruling R33: a syllable without a
 /// nucleus, or a candidate with nowhere to put it): a likely miss at `llr`, reported
-/// `Partial { [Unvoiced] }` so that it counts towards `overall` rather than reading as "tone not
-/// checked".
+/// `Partial { [NoNucleus] }` (ruling R102) so that it counts towards `overall` rather than
+/// reading as "tone not checked".
 pub(crate) fn missed(target: &ToneTarget, llr: f32) -> ToneJudgement {
     shapeless(
         target,
         llr,
         Measured::Partial {
-            issues: vec![MeasureIssue::Unvoiced],
+            issues: vec![MeasureIssue::NoNucleus],
+        },
+    )
+}
+
+/// The judgement of a syllable with speech energy and a vowel's spectrum but no pitch (ruling
+/// R102) while the pack has no evidence for such syllables: the unvoiced fallback `llr`, reported
+/// `Partial { [Unpitched] }`.
+pub(crate) fn unpitched(target: &ToneTarget, llr: f32) -> ToneJudgement {
+    shapeless(
+        target,
+        llr,
+        Measured::Partial {
+            issues: vec![MeasureIssue::Unpitched],
         },
     )
 }
@@ -274,6 +287,7 @@ impl<'a> Scorer<'a> {
                     .judge(self.g, &ex.shape, target, ctx, &issues)
                     .map_err(pack_err)?
             }
+            Err(MeasureIssue::Unpitched) => unpitched(target, self.unvoiced_llr),
             Err(issue) => unmeasured(target, *issue, self.unvoiced_llr),
         };
         Ok(SyllableFit {

@@ -129,7 +129,7 @@ const C: &str = "6 syl/s, 3 dB dip, 30 ms glide, 25 dB SNR";
 /// (ruling R58); a 2-Chao glide (T1 → T2) or no glide at all (T2 → T4 meeting at the ceiling)
 /// leaves it tracking straight through. A missegmented clip has two nuclei for three syllables:
 /// the closed-set decoder leaves one syllable without a nucleus, on the 0.047 floor
-/// (`unvoiced_syllable_llr`, `Partial { [Unvoiced] }`), and the clip's `overall` is 0.047 for the
+/// (`unvoiced_syllable_llr`, `Partial { [NoNucleus] }`), and the clip's `overall` is 0.047 for the
 /// spoken reading and for every substitution alike.
 const GAPS: [Gap; 6] = [
     Gap {

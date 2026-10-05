@@ -21,6 +21,7 @@ mod energy;
 mod provider;
 mod pyin_provider;
 mod repair;
+mod sonority;
 mod subharmonic;
 
 pub use checks::{clipping_ratio, snr_db};
@@ -28,4 +29,5 @@ pub use energy::energy;
 pub use provider::{fit_length, F0Provider};
 pub use pyin_provider::Pyin;
 pub use repair::repair_octaves;
+pub use sonority::sonority;
 pub use subharmonic::repair_subharmonics;

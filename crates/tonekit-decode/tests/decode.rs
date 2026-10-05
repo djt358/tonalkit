@@ -82,6 +82,7 @@ fn analysis_of(spec: &SynthSpec) -> Analysis {
         register_source: RegisterSource::Given,
         voiced_st,
         issues: Vec::new(),
+        sonority: Vec::new(),
     }
 }
 
@@ -109,6 +110,7 @@ fn quiet(frames: usize) -> Analysis {
         register_source: RegisterSource::Given,
         voiced_st: Vec::new(),
         issues: Vec::new(),
+        sonority: Vec::new(),
     }
 }
 
@@ -293,7 +295,7 @@ fn too_few_boundaries_gives_missed_syllables_at_the_region_start() {
         assert_eq!(
             s.judgement.measured,
             Measured::Partial {
-                issues: vec![MeasureIssue::Unvoiced]
+                issues: vec![MeasureIssue::NoNucleus]
             }
         );
         assert_eq!(s.judgement.expected.0, "1");
@@ -641,7 +643,7 @@ fn a_wrong_final_tone_is_judged_on_the_whole_syllable() {
 fn a_dropped_syllable_is_a_likely_miss_not_unmeasured() {
     // Two voiced syllables (4, 3) against a three-target candidate (4-1-3): no strict path, so
     // the relaxed pass puts one target on a span without a nucleus. It scores the unvoiced LLR and
-    // is `Partial { [Unvoiced] }`, so it counts towards `overall` as a miss.
+    // is `Partial { [NoNucleus] }`, so it counts towards `overall` as a miss.
     let pack = cmn();
     let unvoiced = pack.calibration().decode.unvoiced_syllable_llr;
     let a = analysis_of(&three(vec![vec![5., 1.], vec![2., 1., 4.]]));
@@ -650,7 +652,7 @@ fn a_dropped_syllable_is_a_likely_miss_not_unmeasured() {
     let s = &r.candidates[0].syllables;
     assert_eq!(s.len(), 3);
     let missed = Measured::Partial {
-        issues: vec![MeasureIssue::Unvoiced],
+        issues: vec![MeasureIssue::NoNucleus],
     };
     assert!(
         s.iter()

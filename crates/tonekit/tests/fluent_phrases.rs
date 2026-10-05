@@ -1,11 +1,11 @@
 //! Report only (fix round 1, item 6): how often fluent synthetic phrases land on the floor that
-//! decided the first volunteer bundles, a syllable `Partial { [Unvoiced] }` with no shape distance
+//! decided the first volunteer bundles, a syllable `Partial { [NoNucleus] }` with no shape distance
 //! and `p_correct` 0.047.
 //!
 //! That floor is the closed-set decoder's "likely miss" (ruling R33): when the analysis has fewer
 //! usable nuclei than the reading has syllables, the relaxed pass (or, with no path at all, the
 //! no-path fallback) leaves a syllable without a nucleus, scores it `unvoiced_syllable_llr`
-//! (−3.0 in `cmn.calib.json`) and reports it `Partial { [Unvoiced] }` with no shape; fusion keeps
+//! (−3.0 in `cmn.calib.json`) and reports it `Partial { [NoNucleus] }` with no shape; fusion keeps
 //! the acoustic term for a `Partial` syllable, so `p_correct = sigmoid(β0 + β_ac · −3.0)` =
 //! `sigmoid(−3.0)` = 0.0474 at the seed β0 = 0, β_ac = 1, and `overall` (the minimum over counted
 //! syllables) is 0.047 too.
@@ -142,7 +142,7 @@ fn fluent_phrases_on_the_missing_syllable_floor_report() {
                             match &s.measured {
                                 Measured::Partial { issues }
                                     if s.distance.is_none()
-                                        && issues == &[MeasureIssue::Unvoiced] =>
+                                        && issues == &[MeasureIssue::NoNucleus] =>
                                 {
                                     floors += 1
                                 }
