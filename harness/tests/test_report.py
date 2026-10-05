@@ -53,6 +53,7 @@ def render(results, tmp_path, **kw) -> str:
     theta = gate.median_threshold
     out = tmp_path / "gate.md"
     kw.setdefault("clearance", Clearance("gate"))
+    kw.setdefault("results", results)
     report.write(
         out,
         gate,
@@ -117,10 +118,7 @@ def bound_results(wrong_accepted: int):
 def result_cells(text: str) -> dict[str, str]:
     """Metric name to its Result cell (the last column of the metrics table)."""
     rows = [line for line in text.splitlines() if line.startswith("| ")]
-    return {
-        cells[0]: cells[-1]
-        for cells in ([c.strip() for c in line.strip("| ").split(" | ")] for line in rows)
-    }
+    return {cells[0]: cells[-1] for cells in ([c.strip() for c in line.strip("| ").split(" | ")] for line in rows)}
 
 
 def test_a_gate_exactly_on_both_bounds_passes_and_the_report_agrees(tmp_path):
@@ -305,9 +303,7 @@ def eval_args(corpus: Path, tmp_path: Path, *extra: str) -> list[str]:
     ]  # fmt: skip
 
 
-def test_tkh_eval_writes_the_report_and_exits_zero_whatever_the_gate_says(
-    recorded, tmp_path, capsys
-):
+def test_tkh_eval_writes_the_report_and_exits_zero_whatever_the_gate_says(recorded, tmp_path, capsys):
     code = cli.main(eval_args(recorded, tmp_path))
     assert code == 0
     text = (tmp_path / "reports" / "p0-gate.md").read_text(encoding="utf-8")
@@ -436,10 +432,39 @@ def test_tkh_eval_with_fewer_than_two_gate_pairs_is_an_error(corpus, tmp_path, c
     assert "at least 2 gate pairs" in capsys.readouterr().err
 
 
-def test_clip_paths_are_relative_to_the_manifest_directory(
-    corpus, tmp_path, monkeypatch
-):
+def test_clip_paths_are_relative_to_the_manifest_directory(corpus, tmp_path, monkeypatch):
     elsewhere = tmp_path / "elsewhere"
     elsewhere.mkdir()
     monkeypatch.chdir(elsewhere)  # the clips are not below the working directory
     assert cli.main(eval_args(corpus, tmp_path)) == 0
+
+
+def fallback_pair(i, *, speaker="v-a", error_fallback=True):
+    """A gate pair whose error clip's lowest syllable had no nucleus (Partial, no distance)."""
+    pair = f"gate-{i:02d}"
+    measured = Syllable("4", "4", 0.9, 0.4, "Full", [])
+    missed = Syllable("3", None, 0.047, None, "Partial", [])
+    correct = res(f"{pair}-correct", 0.9, pair=pair, label="correct", syllables=[measured])
+    error = res(
+        f"{pair}-error",
+        0.047 if error_fallback else 0.001,
+        pair=pair,
+        label="tone_error",
+        syllables=[measured, missed if error_fallback else Syllable("3", "2", 0.001, 3.0, "Full", [])],
+    )
+    correct.speaker = error.speaker = speaker
+    return [correct, error]
+
+
+def test_a_syllable_with_no_nucleus_is_shown_as_a_fallback_not_a_measurement(tmp_path):
+    results = fallback_pair(1) + fallback_pair(2) + fallback_pair(3, error_fallback=False)
+    text = render(results, tmp_path)
+    assert "no nucleus (fallback)" in text
+    section = text.split("## Scores with no tone evidence\n", 1)[1].split("\n## ", 1)[0]
+    assert "- v-a: 2 of 9 gate syllables had no nucleus; 2 of 6 clips decided by the fallback" in section
+    assert "- gate-01-error" in section and "- gate-02-error" in section and "gate-03-error" not in section
+
+
+def test_no_fallback_no_section(tmp_path):
+    results = fallback_pair(1, error_fallback=False) + fallback_pair(2, error_fallback=False)
+    assert "Scores with no tone evidence" not in render(results, tmp_path)

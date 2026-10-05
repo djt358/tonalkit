@@ -125,6 +125,31 @@ def _pair_table(gate: GateMetrics) -> list[str]:
     return table(header, rows)
 
 
+def _fallback_section(results: Sequence[Result]) -> list[str]:
+    """The gate clips whose score is a fallback prior rather than a measured tone, per speaker."""
+    gate = [r for r in results if r.set == "gate"]
+    decided = [r for r in gate if r.decided_by_fallback]
+    if not decided:
+        return []
+    lines = [
+        "## Scores with no tone evidence",
+        "",
+        "A syllable with no nucleus (the segmenter found fewer syllables than the card has) gets a fixed "
+        "fallback p_correct, not a measurement, and a clip's overall is its lowest syllable. These gate "
+        "clips were decided by that fallback, so their accept or reject says nothing about the tone.",
+        "",
+    ]
+    for speaker in dict.fromkeys(r.speaker for r in gate):
+        mine = [r for r in gate if r.speaker == speaker]
+        syllables = [s for r in mine for s in r.syllables]
+        missed = sum(s.fallback for s in syllables)
+        clips = sum(r.decided_by_fallback for r in mine)
+        lines.append(
+            f"- {speaker}: {missed} of {len(syllables)} gate syllables had no nucleus; {clips} of {len(mine)} clips decided by the fallback"
+        )
+    return lines + [""] + [f"- {r.id}" for r in decided] + [""]
+
+
 def _failure(f: Failure) -> list[str]:
     r: Result = f.result
     lines = [
@@ -132,8 +157,7 @@ def _failure(f: Failure) -> list[str]:
         "",
         f"- {f.reason}",
         f"- set {r.set}, pair {r.pair or 'none'}, label {r.label}, speaker {r.speaker}",
-        f"- overall {num(r.overall)}, intended rank {r.intended_rank}, "
-        f"margin_llr {num(r.margin_llr)}",
+        f"- overall {num(r.overall)}, intended rank {r.intended_rank}, margin_llr {num(r.margin_llr)}",
         f"- register {r.register_source}; signal issues: {', '.join(r.issues) or 'none'}",
         "",
     ]
@@ -145,7 +169,7 @@ def _failure(f: Failure) -> list[str]:
                 s.heard or "-",
                 num(s.p_correct),
                 num(s.distance),
-                s.measured,
+                "no nucleus (fallback)" if s.fallback else s.measured,
                 _deltas(s.deltas),
             ]
             for i, s in enumerate(r.syllables, start=1)
@@ -166,6 +190,7 @@ def write(
     n_minimal: int | None = None,
     n_count: int | None = None,
     context: Mapping[str, str] | None = None,
+    results: Sequence[Result] = (),
 ) -> None:
     """Write the gate report to `path` (parent directories are created).
 
@@ -184,6 +209,7 @@ def write(
     lines += ["", "## Gate pairs", ""]
     lines += ["Each pair is judged at the threshold fitted on the other pairs.", ""]
     lines += _pair_table(gate) + [""]
+    lines += _fallback_section(results)
     if gate.rejected_none:
         lines += ["## Clips with no score", ""]
         lines += ["Tone not checked (no syllable measured); each counts as a reject.", ""]
