@@ -14,7 +14,7 @@
 //! when no strict path exists (fewer nuclei than targets, or boundaries that do not allow it) and
 //! the analysis has a nucleus, the count stage (ruling R102) adds the extra syllable candidates as
 //! anchors; failing that too, a relaxed pass allows syllables with no anchor: each is a likely
-//! miss, scored `unvoiced_syllable_llr` and reported `Partial { [NoNucleus] }`.
+//! miss whose path scores `unvoiced_syllable_llr`, reported `NotMeasured { NoNucleus }` (R104).
 //!
 //! A syllable's tone evidence is its nucleus's shape, the same for every edge that holds the
 //! nucleus and for every candidate (ruling R50): the boundary pair only sets the duration prior and
@@ -418,7 +418,7 @@ impl<'a> Decoder<'a> {
     /// TBU, where that evidence was measured (the lattice's span for a nucleus, whatever boundary
     /// pair the path took); one without (relaxed pass only) is a likely miss at its path's span,
     /// clipped to the gap its neighbours' spans leave ([`clip_unanchored`]):
-    /// `unvoiced_syllable_llr`, `Partial { [NoNucleus] }`.
+    /// path scored at `unvoiced_syllable_llr`, `NotMeasured { NoNucleus }` (rulings R102, R104).
     pub(crate) fn score(
         &mut self,
         cand: &Candidate,
@@ -490,7 +490,7 @@ impl<'a> Decoder<'a> {
     /// Without a nucleus in the analysis (silence, whisper) nothing could be measured: every
     /// syllable is `NotMeasured { Unvoiced }` ("tone not checked"). With nuclei the candidate
     /// just does not fit the syllables that were spoken (too many targets for the boundaries), so
-    /// every syllable is a likely miss, `Partial { [NoNucleus] }` (rulings R33, R102).
+    /// every syllable is a likely miss, `NotMeasured { NoNucleus }` (rulings R33, R102, R104).
     fn no_path(&self, cand: &Candidate) -> CandidateScore {
         let at = self.speech_start.unwrap_or(0);
         let unvoiced = self.scorer.unvoiced_llr();
@@ -919,8 +919,8 @@ mod tests {
         assert_eq!(spans, [(10, 35), (35, 35), (35, 66)], "{s:#?}");
         assert_eq!(
             s[1].judgement.measured,
-            Measured::Partial {
-                issues: vec![MeasureIssue::NoNucleus]
+            Measured::NotMeasured {
+                issue: MeasureIssue::NoNucleus
             }
         );
         assert!(matches!(s[0].judgement.measured, Measured::Full));

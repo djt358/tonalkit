@@ -1,14 +1,13 @@
 //! Report only (fix round 1, item 6): how often fluent synthetic phrases land on the floor that
-//! decided the first volunteer bundles, a syllable `Partial { [NoNucleus] }` with no shape distance
-//! and `p_correct` 0.047.
+//! decided the first volunteer bundles, a syllable no nucleus could hold.
 //!
 //! That floor is the closed-set decoder's "likely miss" (ruling R33): when the analysis has fewer
-//! usable nuclei than the reading has syllables, the relaxed pass (or, with no path at all, the
-//! no-path fallback) leaves a syllable without a nucleus, scores it `unvoiced_syllable_llr`
-//! (−3.0 in `cmn.calib.json`) and reports it `Partial { [NoNucleus] }` with no shape; fusion keeps
-//! the acoustic term for a `Partial` syllable, so `p_correct = sigmoid(β0 + β_ac · −3.0)` =
-//! `sigmoid(−3.0)` = 0.0474 at the seed β0 = 0, β_ac = 1, and `overall` (the minimum over counted
-//! syllables) is 0.047 too.
+//! usable syllable anchors than the reading has syllables (nuclei, and since ruling R102 the count
+//! stage's unpitched and joined-syllable candidates), the relaxed pass (or, with no path at all,
+//! the no-path fallback) leaves a syllable without one. Its path scores `unvoiced_syllable_llr`
+//! (−3.0 in `cmn.calib.json`); it used to be reported `Partial { [Unvoiced] }` and counted in
+//! `overall` at `sigmoid(−3.0)` = 0.047, and is now `NotMeasured { NoNucleus }`, which leaves the
+//! clip unscored (ruling R104).
 //!
 //! The phrases are 一 + measure word + noun as native speakers run them together: 一 short (0.75 of
 //! a syllable) with a reduced fall (yì, Chao 5 → 2) or rise (yí, 3 → 4.5), the measure word full,
@@ -140,12 +139,9 @@ fn fluent_phrases_on_the_missing_syllable_floor_report() {
                         let mut floors = 0;
                         for s in &u.syllables {
                             match &s.measured {
-                                Measured::Partial { issues }
-                                    if s.distance.is_none()
-                                        && issues == &[MeasureIssue::NoNucleus] =>
-                                {
-                                    floors += 1
-                                }
+                                Measured::NotMeasured {
+                                    issue: MeasureIssue::NoNucleus,
+                                } => floors += 1,
                                 Measured::Partial { .. } if s.distance.is_none() => {
                                     t.other_partial_without_distance += 1
                                 }

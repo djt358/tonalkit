@@ -173,4 +173,6 @@ fn noise_without_a_vowel_spectrum_is_no_syllable() {
         .syllables
         .iter()
         .all(|s| !issues(&s.measured).contains(&MeasureIssue::Unpitched)));
+    // A syllable nothing could hold leaves the reading unscored (ruling R104).
+    assert_eq!(u.overall, None);
 }

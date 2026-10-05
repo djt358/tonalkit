@@ -61,16 +61,16 @@ pub(crate) fn unmeasured(target: &ToneTarget, issue: MeasureIssue, llr: f32) -> 
     shapeless(target, llr, Measured::NotMeasured { issue })
 }
 
-/// The judgement of a target the utterance has no syllable for (ruling R33: a syllable without a
-/// nucleus, or a candidate with nowhere to put it): a likely miss at `llr`, reported
-/// `Partial { [NoNucleus] }` (ruling R102) so that it counts towards `overall` rather than
-/// reading as "tone not checked".
+/// The judgement of a target the utterance has no syllable for (ruling R33: a syllable without an
+/// anchor, or a candidate with nowhere to put it): a likely miss whose path scored `llr`, reported
+/// `NotMeasured { NoNucleus }` (rulings R102, R104): nothing about its tone was measured, and the
+/// assessment's `overall` is then `None`, the clip not scored, never accepted at a prior.
 pub(crate) fn missed(target: &ToneTarget, llr: f32) -> ToneJudgement {
     shapeless(
         target,
         llr,
-        Measured::Partial {
-            issues: vec![MeasureIssue::NoNucleus],
+        Measured::NotMeasured {
+            issue: MeasureIssue::NoNucleus,
         },
     )
 }

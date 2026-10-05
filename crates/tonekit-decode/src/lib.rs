@@ -41,12 +41,12 @@ const LOG_CLAMP: f64 = 1.0e6;
 /// syllable covers. A syllable's `span` is its nucleus's TBU, as in the lattice: the frames its
 /// judgement was measured on, not the boundary pair its path took. Each syllable holds exactly
 /// one nucleus; only if that places no path does a relaxed pass allow syllables without one,
-/// which score `unvoiced_syllable_llr` and are reported `Partial { [NoNucleus] }` (likely misses,
-/// ruling R33) at the span of their path, clipped to the gap between their neighbours' spans
+/// which score `unvoiced_syllable_llr` and are reported `NotMeasured { NoNucleus }` (likely misses,
+/// rulings R33, R104) at the span of their path, clipped to the gap between their neighbours' spans
 /// (possibly empty), so the reported spans of a candidate never overlap. A candidate whose
 /// targets cannot all be placed scores `K × unvoiced_syllable_llr` with every syllable at an empty
 /// span where the speech region starts: `NotMeasured { Unvoiced }` when the analysis has no
-/// nucleus (no speech, whisper), `Partial { [NoNucleus] }` otherwise. Posteriors are a softmax over
+/// nucleus (no speech, whisper), `NotMeasured { NoNucleus }` otherwise. Posteriors are a softmax over
 /// the candidates' llrs and the null competitor's `null_llr + null_bias`; candidates come back
 /// sorted by llr, highest first (ties keep the caller's order).
 ///

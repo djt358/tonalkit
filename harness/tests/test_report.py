@@ -439,15 +439,18 @@ def test_clip_paths_are_relative_to_the_manifest_directory(corpus, tmp_path, mon
     assert cli.main(eval_args(corpus, tmp_path)) == 0
 
 
-def fallback_pair(i, *, speaker="v-a", error_fallback=True):
-    """A gate pair whose error clip's lowest syllable had no nucleus (Partial, no distance)."""
+def fallback_pair(i, *, speaker="v-a", error_fallback=True, scored=False):
+    """A gate pair whose error clip had a syllable with no nucleus: unscored (R104), or with
+    `scored` its overall the fallback prior (results from before R104)."""
     pair = f"gate-{i:02d}"
     measured = Syllable("4", "4", 0.9, 0.4, "Full", [])
-    missed = Syllable("3", None, 0.047, None, "Partial", [], ["NoNucleus"])
+    missed = Syllable("3", None, 0.5, None, "NotMeasured", [], ["NoNucleus"])
+    if scored:
+        missed = Syllable("3", None, 0.047, None, "Partial", [], ["Unvoiced"])
     correct = res(f"{pair}-correct", 0.9, pair=pair, label="correct", syllables=[measured])
     error = res(
         f"{pair}-error",
-        0.047 if error_fallback else 0.001,
+        (0.047 if scored else None) if error_fallback else 0.001,
         pair=pair,
         label="tone_error",
         syllables=[measured, missed if error_fallback else Syllable("3", "2", 0.001, 3.0, "Full", [])],
@@ -456,14 +459,22 @@ def fallback_pair(i, *, speaker="v-a", error_fallback=True):
     return [correct, error]
 
 
-def test_a_syllable_with_no_nucleus_is_shown_as_a_fallback_not_a_measurement(tmp_path):
+def test_a_syllable_with_no_nucleus_leaves_its_clip_unscored(tmp_path):
     results = fallback_pair(1) + fallback_pair(2) + fallback_pair(3, error_fallback=False)
     text = render(results, tmp_path)
-    table_text = "\n".join(report._failure(metrics.Failure(result=results[1], reason="tone-error clip accepted")))
+    table_text = "\n".join(report._failure(metrics.Failure(result=results[1], reason="x")))
     assert "no nucleus (fallback)" in table_text
-    section = text.split("## Scores with no tone evidence\n", 1)[1].split("\n## ", 1)[0]
-    assert "- v-a: 2 of 9 gate syllables had no nucleus; 2 of 6 clips decided by the fallback" in section
+    section = text.split("## Syllables with no nucleus\n", 1)[1].split("\n## ", 1)[0]
+    assert "- v-a: 2 of 9 gate syllables had no nucleus; 2 of 6 clips rest on one" in section
     assert "- gate-01-error" in section and "- gate-02-error" in section and "gate-03-error" not in section
+    assert "- gate-01-error" in text.split("## Clips with no score\n", 1)[1]
+
+
+def test_results_from_before_r104_still_show_the_fallback(tmp_path):
+    results = fallback_pair(1, scored=True) + fallback_pair(2, scored=True)
+    assert results[1].decided_by_fallback and results[1].missing
+    section = render(results, tmp_path).split("## Syllables with no nucleus\n", 1)[1]
+    assert "- gate-01-error" in section and "- gate-02-error" in section
 
 
 def test_an_unpitched_syllable_is_evidence_not_a_fallback(tmp_path):
@@ -473,7 +484,7 @@ def test_an_unpitched_syllable_is_evidence_not_a_fallback(tmp_path):
     creaky = Syllable("3", "3", 0.7, None, "Partial", [], ["Unpitched"])
     results[1].syllables[1] = creaky
     assert not creaky.fallback and creaky.unpitched
-    assert "Scores with no tone evidence" not in render(results, tmp_path)
+    assert "Syllables with no nucleus" not in render(results, tmp_path)
     table_text = "\n".join(report._failure(metrics.Failure(result=results[1], reason="x")))
     assert "unpitched (creak evidence)" in table_text
     # The name a miss had before R102 still reads as one.
@@ -482,7 +493,7 @@ def test_an_unpitched_syllable_is_evidence_not_a_fallback(tmp_path):
 
 def test_no_fallback_no_section(tmp_path):
     results = fallback_pair(1, error_fallback=False) + fallback_pair(2, error_fallback=False)
-    assert "Scores with no tone evidence" not in render(results, tmp_path)
+    assert "Syllables with no nucleus" not in render(results, tmp_path)
 
 
 def test_tkh_eval_grades_only_the_speakers_asked_for(corpus, tmp_path, capsys):

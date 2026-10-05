@@ -92,6 +92,12 @@ class Result:
     issues: list[str] = field(default_factory=list)  # the analysis's signal issues, e.g. "LowSnr"
 
     @property
+    def missing(self) -> bool:
+        """A syllable of the card had no nucleus, pitched or unpitched (ruling R102): since ruling
+        R104 tonekit leaves such a clip unscored (`overall` None), a reject at every threshold."""
+        return any(s.fallback for s in self.syllables)
+
+    @property
     def decided_by_fallback(self) -> bool:
         """The overall (the lowest syllable) is a fallback syllable's fixed prior: the clip's accept
         or reject says nothing about its tones."""

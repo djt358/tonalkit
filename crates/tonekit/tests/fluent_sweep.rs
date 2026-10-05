@@ -128,9 +128,10 @@ const C: &str = "6 syl/s, 3 dB dip, 30 ms glide, 25 dB SNR";
 /// told apart only where pYIN loses the pitch between them and the pitch breaks across the loss
 /// (ruling R58); a 2-Chao glide (T1 → T2) or no glide at all (T2 → T4 meeting at the ceiling)
 /// leaves it tracking straight through. A missegmented clip has two nuclei for three syllables:
-/// the closed-set decoder leaves one syllable without a nucleus, on the 0.047 floor
-/// (`unvoiced_syllable_llr`, `Partial { [NoNucleus] }`), and the clip's `overall` is 0.047 for the
-/// spoken reading and for every substitution alike.
+/// the closed-set decoder leaves one syllable without a nucleus (`NotMeasured { NoNucleus }`, its
+/// path scored at `unvoiced_syllable_llr`), and the clip is not scored (`overall` is `None`) for the
+/// spoken reading and for every substitution alike (ruling R104; before it, both sat on the 0.047
+/// floor).
 const GAPS: [Gap; 6] = [
     Gap {
         condition: A,
