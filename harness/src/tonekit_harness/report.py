@@ -150,6 +150,15 @@ def _fallback_section(results: Sequence[Result]) -> list[str]:
     return lines + [""] + [f"- {r.id}" for r in decided] + [""]
 
 
+def _measured_label(s) -> str:
+    """How a syllable was measured, for the failure tables."""
+    if s.fallback:
+        return "no nucleus (fallback)"
+    if s.unpitched:
+        return "unpitched (creak evidence)"
+    return s.measured
+
+
 def _failure(f: Failure) -> list[str]:
     r: Result = f.result
     lines = [
@@ -169,7 +178,7 @@ def _failure(f: Failure) -> list[str]:
                 s.heard or "-",
                 num(s.p_correct),
                 num(s.distance),
-                "no nucleus (fallback)" if s.fallback else s.measured,
+                _measured_label(s),
                 _deltas(s.deltas),
             ]
             for i, s in enumerate(r.syllables, start=1)

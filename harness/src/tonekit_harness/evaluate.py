@@ -57,13 +57,22 @@ class Syllable:
     distance: float | None
     measured: str  # "Full", "Partial" or "NotMeasured"
     deltas: list[Delta] = field(default_factory=list)
+    issues: list[str] = field(default_factory=list)  # tonekit `MeasureIssue` names, e.g. "TooShort"
 
     @property
     def fallback(self) -> bool:
-        """No nucleus was found for it (the segmenter heard fewer syllables than the card has):
-        tonekit reports it `Partial` with no distance, and its p_correct is the calibration's fixed
-        prior (`unvoiced_syllable_llr`, 0.047 as shipped), not a measurement of its tone."""
-        return self.measured == "Partial" and self.distance is None
+        """No syllable of the utterance could hold it (ruling R102: no nucleus and no unpitched
+        candidate; tonekit says `NoNucleus`, before R102 `Partial [Unvoiced]` with no distance):
+        its p_correct is the calibration's fixed prior (`unvoiced_syllable_llr`, 0.047 as
+        shipped), not a measurement of its tone."""
+        legacy = self.measured == "Partial" and self.distance is None and "Unvoiced" in self.issues
+        return "NoNucleus" in self.issues or legacy
+
+    @property
+    def unpitched(self) -> bool:
+        """Speech with a vowel's spectrum but no pitch (a creaky vowel), scored on the
+        calibration's unpitched evidence (ruling R103) rather than on a contour."""
+        return "Unpitched" in self.issues
 
 
 @dataclass
@@ -194,6 +203,15 @@ def _measured_kind(measured: str | dict) -> str:
     return measured if isinstance(measured, str) else next(iter(measured))
 
 
+def _measured_issues(measured: str | dict) -> list[str]:
+    """The `MeasureIssue` names of tonekit's serde form: a `Partial`'s issues, a `NotMeasured`'s
+    one issue, none for `Full`."""
+    if isinstance(measured, str):
+        return []
+    (kind, body), = measured.items()
+    return list(body.get("issues", [])) if kind == "Partial" else [body["issue"]]
+
+
 def analyze_pcm(name: str, pcm: np.ndarray, register_json: str | None = None, f0: str | None = None) -> str:
     """`tonekit_py.analyze` of 16 kHz samples, with the f0 track of the provider `f0` (None:
     tonekit's own pYIN). A tonekit or provider failure is an `EvalError` naming `name`."""
@@ -278,6 +296,7 @@ class Grader:
                     distance=s["distance"],
                     measured=_measured_kind(s["measured"]),
                     deltas=[(d["kind"], d["amount"]) for d in s["deltas"]],
+                    issues=_measured_issues(s["measured"]),
                 )
                 for s in assessment["syllables"]
             ],
@@ -365,6 +384,10 @@ def _run(args: argparse.Namespace) -> int:
     try:
         data_register = clearance.read_register(args.register)
         clips = manifest.load(manifest_path, register=data_register)
+        if args.speaker:
+            clips = [c for c in clips if c.speaker in args.speaker]
+            if not clips:
+                raise EvalError(f"no clips for speaker(s) {', '.join(args.speaker)}")
         cleared = clearance.assess(clips, data_register, allow_synthetic=args.allow_synthetic)
         files = calibration.load(args.pack, args.calib)
         results = run(
@@ -443,4 +466,9 @@ def register(subparsers) -> None:
         "NOT A GATE; it never issues a PASS or FAIL",
     )
     p.add_argument("--no-cache", action="store_true", help="neither read nor write the analysis cache")
+    p.add_argument(
+        "--speaker",
+        action="append",
+        help="grade only this speaker's clips (repeatable), e.g. to score a fit on the speakers it was not fitted on",
+    )
     p.set_defaults(func=_run)

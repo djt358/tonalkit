@@ -1,5 +1,7 @@
 //! Calibration parameters: the small, fitted part of a pack (`cmn.calib.json`).
 
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 use tonekit_core::FusionWeights;
 
@@ -24,6 +26,19 @@ pub struct DecodeParams {
     pub default_rate_s: f32,
 }
 
+/// What a syllable with speech energy and a vowel's spectrum but no pitch (a creaky vowel, ruling
+/// R103) says about its tone: per tone id, `ln P(unpitched | tone)` at the end of a phrase and
+/// elsewhere, fitted on calibration speakers. Creak is a strong cue for tone 3 in Mandarin (and the
+/// end of a full tone 4 often creaks), so these are evidence, not absence.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct UnpitchedEvidence {
+    /// The phrase's last syllable (an isolated syllable included).
+    pub phrase_final: BTreeMap<String, f32>,
+    /// Every other syllable.
+    pub other: BTreeMap<String, f32>,
+}
+
 /// Per-pack calibration. The `Default` is the seed shipped with `cmn` (published tone letters;
 /// not fitted).
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -32,6 +47,9 @@ pub struct Calibration {
     pub temperature: f32,
     pub fusion: FusionWeights,
     pub decode: DecodeParams,
+    /// Evidence for unpitched syllables (ruling R103); without it such a syllable scores
+    /// `decode.unvoiced_syllable_llr`, as a missed one does.
+    pub unpitched: Option<UnpitchedEvidence>,
 }
 
 impl Default for Calibration {
@@ -53,6 +71,7 @@ impl Default for Calibration {
                 dur_sigma: 0.4,
                 default_rate_s: 0.22,
             },
+            unpitched: None,
         }
     }
 }
@@ -74,11 +93,14 @@ struct CalibFile {
     temperature: f32,
     fusion: FusionFile,
     decode: DecodeParams,
+    #[serde(default)]
+    unpitched: Option<UnpitchedEvidence>,
 }
 
 impl Calibration {
-    /// Parse and validate a calibration file. Every field is required and unknown fields are
-    /// rejected.
+    /// Parse and validate a calibration file. Every field is required except `unpitched`, and
+    /// unknown fields are rejected. The unpitched tone ids are checked against the pack's
+    /// inventory when the pack loads.
     pub(crate) fn from_json(json: &str) -> Result<Self, PackError> {
         let f: CalibFile = serde_json::from_str(json)
             .map_err(|e| PackError::Parse(format!("calibration: {e}")))?;
@@ -92,6 +114,7 @@ impl Calibration {
                 veto_cap: f.fusion.veto_cap,
             },
             decode: f.decode,
+            unpitched: f.unpitched,
         };
         c.validate()?;
         Ok(c)
@@ -149,6 +172,36 @@ impl Calibration {
                 "calibration fusion.veto_cap must be in [0, 1], got {}",
                 fu.veto_cap
             ));
+        }
+        if let Some(u) = &self.unpitched {
+            for (place, table) in [("phrase_final", &u.phrase_final), ("other", &u.other)] {
+                for (tone, v) in table {
+                    if !(v.is_finite() && *v <= 0.0) {
+                        return invalid(format!(
+                            "calibration unpitched.{place}.{tone} must be a log-probability \
+                             (finite, <= 0), got {v}"
+                        ));
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Checks that the unpitched evidence names every tone of `inventory` and nothing else.
+    pub(crate) fn check_tones(&self, inventory: &[tonekit_core::ToneId]) -> Result<(), PackError> {
+        let Some(u) = &self.unpitched else {
+            return Ok(());
+        };
+        for (place, table) in [("phrase_final", &u.phrase_final), ("other", &u.other)] {
+            let named: Vec<&str> = table.keys().map(String::as_str).collect();
+            let mut want: Vec<&str> = inventory.iter().map(|t| t.0.as_str()).collect();
+            want.sort_unstable();
+            if named != want {
+                return invalid(format!(
+                    "calibration unpitched.{place} names tones {named:?}; the pack's are {want:?}"
+                ));
+            }
         }
         Ok(())
     }

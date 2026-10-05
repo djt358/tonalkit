@@ -126,6 +126,7 @@ fn seed_calibration() -> Calibration {
             dur_sigma: 0.4,
             default_rate_s: 0.22,
         },
+        unpitched: None,
     }
 }
 

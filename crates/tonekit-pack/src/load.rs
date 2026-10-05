@@ -55,6 +55,7 @@ impl LanguagePack {
         }
 
         let (inventory, citations) = build_inventory(&file)?;
+        calibration.check_tones(&inventory)?;
         let prior = build_prior(&file, &inventory)?;
         let pack_tolerance = tolerance_from(&file.tolerance)?;
         let unvoiced_ok = build_unvoiced_ok(&file.unvoiced_ok, &inventory)?;

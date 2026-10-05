@@ -18,10 +18,11 @@ import sys
 from collections.abc import Callable
 
 from . import bakeoff, deck_cli, evaluate, ingest, provenance, schema
+from .fit import cli as fit_cli
 from .intake import cli as intake_cli
 from .intake import purge_cli
 
-MODULES = [ingest, provenance, evaluate, bakeoff, schema, deck_cli, intake_cli, purge_cli]
+MODULES = [ingest, provenance, evaluate, bakeoff, schema, deck_cli, intake_cli, purge_cli, fit_cli]
 OPTIONAL_MODULES = ["synth", "adversary"]  # tonekit_harness.<name>; both need pyworld
 
 

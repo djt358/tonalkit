@@ -443,7 +443,7 @@ def fallback_pair(i, *, speaker="v-a", error_fallback=True):
     """A gate pair whose error clip's lowest syllable had no nucleus (Partial, no distance)."""
     pair = f"gate-{i:02d}"
     measured = Syllable("4", "4", 0.9, 0.4, "Full", [])
-    missed = Syllable("3", None, 0.047, None, "Partial", [])
+    missed = Syllable("3", None, 0.047, None, "Partial", [], ["NoNucleus"])
     correct = res(f"{pair}-correct", 0.9, pair=pair, label="correct", syllables=[measured])
     error = res(
         f"{pair}-error",
@@ -466,6 +466,28 @@ def test_a_syllable_with_no_nucleus_is_shown_as_a_fallback_not_a_measurement(tmp
     assert "- gate-01-error" in section and "- gate-02-error" in section and "gate-03-error" not in section
 
 
+def test_an_unpitched_syllable_is_evidence_not_a_fallback(tmp_path):
+    # R103: a creaky vowel is scored on the calibration's unpitched evidence: it has no distance,
+    # but it is a measurement, and the report says which.
+    results = fallback_pair(1, error_fallback=False) + fallback_pair(2, error_fallback=False)
+    creaky = Syllable("3", "3", 0.7, None, "Partial", [], ["Unpitched"])
+    results[1].syllables[1] = creaky
+    assert not creaky.fallback and creaky.unpitched
+    assert "Scores with no tone evidence" not in render(results, tmp_path)
+    table_text = "\n".join(report._failure(metrics.Failure(result=results[1], reason="x")))
+    assert "unpitched (creak evidence)" in table_text
+    # The name a miss had before R102 still reads as one.
+    assert Syllable("3", None, 0.047, None, "Partial", [], ["Unvoiced"]).fallback
+
+
 def test_no_fallback_no_section(tmp_path):
     results = fallback_pair(1, error_fallback=False) + fallback_pair(2, error_fallback=False)
     assert "Scores with no tone evidence" not in render(results, tmp_path)
+
+
+def test_tkh_eval_grades_only_the_speakers_asked_for(corpus, tmp_path, capsys):
+    # A fit is scored on the speakers it was not fitted on (ruling R106).
+    assert cli.main(eval_args(corpus, tmp_path, "--speaker", "dj")) == 0
+    capsys.readouterr()
+    assert cli.main(eval_args(corpus, tmp_path, "--speaker", "nobody")) == 1
+    assert "no clips for speaker(s) nobody" in capsys.readouterr().err
