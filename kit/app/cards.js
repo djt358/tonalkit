@@ -158,6 +158,7 @@ export function cardScreen(app) {
   });
   $("card-skip").addEventListener("click", async () => {
     cardState(app.session, currentId()).skipped = true;
+    notice = "";
     update();
     await app.save();
   });

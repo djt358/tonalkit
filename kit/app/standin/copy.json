@@ -46,7 +46,7 @@
   "card.isolated_hint": "Say it on its own.",
   "card.phrase_hint": "",
   "card.saved": "Saved.",
-  "card.no_sound": "We didn't hear anything. Tap Record and try again. If it keeps happening, reload the page.",
+  "card.no_sound": "We didn't hear anything. Please record it again. If it keeps happening, reload the page.",
   "card.finish_early": "Finish and send what I have",
   "card.finish_early_confirm": "Finish now? The cards you haven't read will be skipped.",
   "pause.title": "Paused",

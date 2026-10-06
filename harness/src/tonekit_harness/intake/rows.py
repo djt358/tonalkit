@@ -9,11 +9,13 @@ only whole.
 `needs_listen` stays false. harness/corpus/PROTOCOL.md keeps it for gate failures and adversarial
 finds; a deliberate error read as the correct word is exactly a "tone-error clip accepted" failure
 in the `tkh eval` report, which is the list to listen to. Flagging every error card would flag a
-third of each session and say nothing."""
+third of each session and say nothing.
+
+A silent take (see `silence`) gets no row either, and its pair twin is then a half pair."""
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Collection
 from dataclasses import dataclass
 
 from ..contracts.bundle import Session
@@ -29,7 +31,8 @@ from .errors import IntakeError
 @dataclass(frozen=True)
 class Joined:
     rows: list[Clip]  # in deck order
-    kept_out: dict[str, str]  # card id -> why it has no row although it was recorded
+    kept_out: dict[str, str]  # card id -> why it has no row although it was recorded (silent ones: `silent`)
+    silent: list[str]  # card ids of silent takes, in deck order
 
 
 def _twin(card: Card, cards: dict[str, Card]) -> Card | None:
@@ -53,20 +56,31 @@ def _checked_cards(session: Session, deck: Deck) -> dict[str, Card]:
     return cards
 
 
-def join_session(session: Session, deck: Deck, *, source: str, path_of: Callable[[str], str]) -> Joined:
+def join_session(
+    session: Session,
+    deck: Deck,
+    *,
+    source: str,
+    path_of: Callable[[str], str],
+    silent: Collection[str] = (),
+) -> Joined:
     """The rows of `session`'s kept clips. `source` is the corpus's (R80); `path_of(card)` is the
-    clip's path relative to the manifest."""
+    clip's path relative to the manifest; `silent` are the cards whose take has no sound."""
     cards = _checked_cards(session, deck)
     recorded = {c.card: c for c in session.clips}
     code = session.session
-    rows, kept_out = [], {}
+    rows, kept_out, silent_out = [], {}, []
     for card in deck.card:
         clip = recorded.get(card.id)
         if clip is None:
             continue
+        if card.id in silent:
+            silent_out.append(card.id)
+            continue
         twin = _twin(card, cards)
-        if twin is not None and twin.id not in recorded:
-            kept_out[card.id] = f"its {card.set} twin {twin.id} was not recorded"
+        if twin is not None and (twin.id not in recorded or twin.id in silent):
+            why = "is a silent take" if twin.id in silent else "was not recorded"
+            kept_out[card.id] = f"its {card.set} twin {twin.id} {why}"
             continue
         rows.append(
             Clip(
@@ -88,4 +102,4 @@ def join_session(session: Session, deck: Deck, *, source: str, path_of: Callable
                 context=card.context,
             )
         )
-    return Joined(rows=rows, kept_out=kept_out)
+    return Joined(rows=rows, kept_out=kept_out, silent=silent_out)

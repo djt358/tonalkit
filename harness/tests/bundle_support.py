@@ -6,6 +6,7 @@ from __future__ import annotations
 import copy
 import io
 import json
+import struct
 import wave
 import zipfile
 from pathlib import Path
@@ -40,9 +41,10 @@ def session_dict(**overrides) -> dict:
     return base
 
 
-def wav_bytes(frames: int = 1600, rate: int = 16000, channels: int = 1, width: int = 2) -> bytes:
-    """A WAV of `frames` frames of a constant tiny level (not a recording of anything)."""
-    sample = b"\x01\x00" if width == 2 else b"\x80" * width
+def wav_bytes(frames: int = 1600, rate: int = 16000, channels: int = 1, width: int = 2, level: int = 1) -> bytes:
+    """A WAV of `frames` frames of a constant level (not a recording of anything): `level` is the
+    16-bit sample value, 1 by default (-90 dBFS); other widths are a fixed byte."""
+    sample = struct.pack("<h", level) if width == 2 else b"\x80" * width
     buf = io.BytesIO()
     with wave.open(buf, "wb") as w:
         w.setnchannels(channels)

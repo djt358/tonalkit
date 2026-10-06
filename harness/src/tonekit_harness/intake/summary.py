@@ -45,6 +45,7 @@ def bundle_lines(r: IntakeResult, register: Mapping[str, str]) -> list[str]:
         f"  clips kept: {kept} ({sets})",
         f"  skipped by the speaker: {len(r.skipped)}" + (f" ({', '.join(r.skipped)})" if r.skipped else ""),
     ]
+    lines += [f"  silent take: {card} (no row, no audio)" for card in r.silent]
     if r.kept_out:
         lines.append(f"  kept out: {_plural(len(r.kept_out), 'recorded card')}, no row and no audio")
         lines += [f"    {card}: {why}" for card, why in r.kept_out.items()]

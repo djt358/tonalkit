@@ -140,7 +140,7 @@ def test_a_quiet_microphone_check_says_how_far_to_hold_the_phone():
 def test_a_take_with_no_sound_is_not_kept_and_the_volunteer_is_told_what_to_do():
     # The kit refuses a silent take (kit/app/silence.js): the card stays unrecorded.
     assert copy()["card.no_sound"] == (
-        "We didn't hear anything. Tap Record and try again. If it keeps happening, reload the page."
+        "We didn't hear anything. Please record it again. If it keeps happening, reload the page."
     )
 
 
