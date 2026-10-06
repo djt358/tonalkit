@@ -162,6 +162,8 @@ def _measured_label(s) -> str:
         return "no nucleus (fallback)"
     if s.unpitched:
         return "unpitched (creak evidence)"
+    if "CreakyTail" in s.issues:
+        return f"{s.measured} (creaky tail)"
     return s.measured
 
 

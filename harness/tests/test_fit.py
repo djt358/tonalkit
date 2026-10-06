@@ -1,4 +1,4 @@
-"""`tkh fit` (rulings R103, R106): what it may fit on, what it fits and what it writes. Synthetic
+"""`tkh fit` (rulings R103, R108, R109): what it may fit on, what it fits and what it writes. Synthetic
 speech only (tests/support.py)."""
 
 from __future__ import annotations
@@ -14,6 +14,7 @@ from tonekit_harness import cli
 from tonekit_harness.evaluate import Grader
 from tonekit_harness.fit.observe import SHAPE, UNPITCHED, Observation, observe_clip
 from tonekit_harness.fit.select import FitError, calib_speakers, fit_clips
+from tonekit_harness.fit.tail import fit_creaky_tail, tail_rates
 from tonekit_harness.fit.unpitched import MIN_RATE, SMOOTHING, fit_unpitched, rates
 
 from support import gate_corpus, write_manifest
@@ -81,18 +82,41 @@ def test_tkh_fit_writes_a_calibration_tonekit_loads(corpus, tmp_path):
     assert cli.main(fit_args(root, out)) == 0
     fitted = json.loads(out.read_text(encoding="utf-8"))
     seed = json.loads((PACKS / "cmn.calib.json").read_text(encoding="utf-8"))
-    assert {k: v for k, v in fitted.items() if k != "unpitched"} == seed
-    for place in ("phrase_final", "other"):
-        assert sorted(fitted["unpitched"][place]) == TONES
-        assert all(v <= 0 for v in fitted["unpitched"][place].values())
+    evidence = ("unpitched", "creaky_tail")
+    assert {k: v for k, v in fitted.items() if k not in evidence} == {
+        k: v for k, v in seed.items() if k not in evidence
+    }
+    for section in evidence:
+        for place in ("phrase_final", "other"):
+            assert sorted(fitted[section][place]) == TONES
+            assert all(v <= 0 for v in fitted[section][place].values())
     # tonekit accepts it: a lattice of silence loads the pack with it.
     analysis = tonekit_py.analyze([0.0] * 1600, 16000)
     grading = json.dumps({"accent": "cmn-standard", "style": None, "style_weight": 0.0})
     tonekit_py.lattice(analysis, (PACKS / "cmn.toml").read_text(encoding="utf-8"), out.read_text(encoding="utf-8"), grading)
 
 
-def obs(tone: str, kind: str, final: bool = True) -> Observation:
-    return Observation("c", "s", tone, 0, 1, None, final, kind, None)
+def obs(tone: str, kind: str, final: bool = True, creaky: bool = False) -> Observation:
+    return Observation("c", "s", "correct", True, tone, 0, 1, None, final, kind, None, creaky)
+
+
+def test_creaky_tail_rates_count_only_syllables_with_a_shape():
+    # Tone 4 at the phrase's end: 3 of 4 shapes end in creak; tone 1: none of 4; an unpitched
+    # tone 4 and an error card's creaky tone 1 are not counted.
+    error = Observation("e", "s", "tone_error", True, "1", 0, 1, None, True, SHAPE, None, True)
+    observations = (
+        [obs("4", SHAPE, creaky=True)] * 3
+        + [obs("4", SHAPE), obs("4", UNPITCHED)]
+        + [obs("1", SHAPE)] * 4
+        + [error]
+    )
+    r = tail_rates(observations, TONES, final=True)
+    pooled = (3 + 1) / (8 + 2)
+    assert r["4"] == pytest.approx((3 + SMOOTHING * pooled) / (4 + SMOOTHING))
+    assert r["1"] == pytest.approx((0 + SMOOTHING * pooled) / (4 + SMOOTHING))
+    fitted = fit_creaky_tail(observations, TONES)
+    assert fitted["phrase_final"]["4"] == round(math.log(r["4"]), 4)
+    assert fitted["other"]["4"] == round(math.log(0.5), 4)  # nothing there: Laplace's 1/2
 
 
 def test_unpitched_rates_are_smoothed_towards_the_pooled_rate():

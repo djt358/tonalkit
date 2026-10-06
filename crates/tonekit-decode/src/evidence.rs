@@ -14,7 +14,7 @@
 //! ([`tonekit_segment::extra_candidates`]), over the analysis's boundaries and theirs.
 
 use tonekit_core::{Analysis, EnergyTrack, MeasureIssue, TbuSpan};
-use tonekit_segment::{extra_candidates, speech_frames, SegmentParams};
+use tonekit_segment::{extra_candidates, speech_frames, SegmentParams, SONORANT_SHARE};
 use tonekit_shape::{extract_nucleus, Extracted, Joins, JOIN_TRIM_FRAMES};
 
 use crate::count_u32;
@@ -32,6 +32,9 @@ pub(crate) struct Tbu {
 /// A pitch on a frame within this many frames of a candidate makes it a pitched syllable (as for
 /// nuclei, ruling R27).
 const VOICING_RADIUS: u32 = 2;
+/// A creaky tail is at least this many frames (30 ms) of speech with a vowel's spectrum and no
+/// pitch right after a syllable's pitch (ruling R108).
+const MIN_TAIL_FRAMES: usize = 3;
 
 /// The evidence of every distinct nucleus of `a`, in frame order: its TBU ([`tbu_spans`], falling
 /// back to the speech region's edges, or the track's without one) and the shape of its own voiced
@@ -106,10 +109,16 @@ pub(crate) fn extended(a: &Analysis) -> Option<Extended> {
 
 /// The evidence of `anchors` (sorted, unique) over `bounds`: [`tbus`] for a nucleus, and for an
 /// anchor listed in `candidates` (sorted) that has no pitch within [`VOICING_RADIUS`] frames, or
-/// too few voiced frames for a shape, `Err(Unpitched)`.
+/// too few voiced frames for a shape, `Err(Unpitched)`. A shape whose syllable ends in creak
+/// ([`creaky_tail`], before the next anchor) carries `CreakyTail` (ruling R108).
 fn tbus_over(a: &Analysis, anchors: &[u32], bounds: &[u32], candidates: &[u32]) -> Vec<Tbu> {
     let voice_level = voice_level_frames(&a.energy);
     let pitched: Vec<bool> = a.f0.frames.iter().map(|f| f.hz.is_some()).collect();
+    let vowel_speech: Vec<bool> = speech_frames(&a.energy, &SegmentParams::default())
+        .into_iter()
+        .zip(&a.sonority)
+        .map(|(speech, &s)| speech && s >= SONORANT_SHARE)
+        .collect();
     let (lo_edge, hi_edge) = match &a.speech {
         Some(r) => (r.start, r.end),
         None => (0, count_u32(a.f0.frames.len())),
@@ -121,7 +130,8 @@ fn tbus_over(a: &Analysis, anchors: &[u32], bounds: &[u32], candidates: &[u32]) 
     tbu_spans(anchors, bounds, lo_edge, hi_edge)
         .into_iter()
         .zip(anchors)
-        .map(|(span, &anchor)| Tbu {
+        .enumerate()
+        .map(|(q, (span, &anchor))| Tbu {
             segment: {
                 let candidate = candidates.binary_search(&anchor).is_ok();
                 let shape = if candidate && !pitch_near(anchor) {
@@ -139,12 +149,37 @@ fn tbus_over(a: &Analysis, anchors: &[u32], bounds: &[u32], candidates: &[u32]) 
                 // shape it is still an unpitched syllable, not a whisper.
                 match shape {
                     Err(MeasureIssue::Unvoiced) if candidate => Err(MeasureIssue::Unpitched),
+                    Ok(mut ex) => {
+                        let stop = anchors.get(q + 1).map_or(pitched.len(), |&f| f as usize);
+                        if creaky_tail(&span, stop, &pitched, &vowel_speech)
+                            && !ex.issues.contains(&MeasureIssue::CreakyTail)
+                        {
+                            ex.issues.push(MeasureIssue::CreakyTail);
+                        }
+                        Ok(ex)
+                    }
                     other => other,
                 }
             },
             span,
         })
         .collect()
+}
+
+/// Whether the syllable on `span` ends in creak (ruling R108): its last pitched frame inside the
+/// span is followed by at least [`MIN_TAIL_FRAMES`] frames that are speech with a vowel's spectrum
+/// (`vowel_speech[i]`) and no pitch (`pitched[i]` false), all before `stop` (the next syllable's
+/// anchor). A span with no pitched frame has no tail; frames past the end of either track are
+/// not tail.
+fn creaky_tail(span: &TbuSpan, stop: usize, pitched: &[bool], vowel_speech: &[bool]) -> bool {
+    let end = (span.end_frame as usize).min(pitched.len());
+    let Some(last) = (span.start_frame as usize..end).rev().find(|&i| pitched[i]) else {
+        return false;
+    };
+    (last + 1..stop.min(pitched.len()))
+        .take_while(|&i| !pitched[i] && vowel_speech.get(i).copied().unwrap_or(false))
+        .count()
+        >= MIN_TAIL_FRAMES
 }
 
 /// Which frames are loud enough to be a voice rather than the room (ruling R61): above the quiet
@@ -300,6 +335,27 @@ mod tests {
         assert!(joins(&speech, &onset, &span(30, 45)).start);
         // The ends of the track are never joins.
         assert_eq!(joins(&[true; 5], &[true; 5], &span(1, 4)), Joins::NONE);
+    }
+
+    #[test]
+    fn a_creaky_tail_is_vowel_like_speech_with_no_pitch_right_after_the_pitch() {
+        // Pitch on 10..20; vowel-like speech on 10..30.
+        let pitched: Vec<bool> = (0..40).map(|i| (10..20).contains(&i)).collect();
+        let vowel: Vec<bool> = (0..40).map(|i| (10..30).contains(&i)).collect();
+        assert!(creaky_tail(&span(5, 25), 40, &pitched, &vowel));
+        // The next syllable's anchor stops the tail: 20..22 is two frames, 20..23 three.
+        assert!(!creaky_tail(&span(5, 25), 22, &pitched, &vowel));
+        assert!(creaky_tail(&span(5, 25), 23, &pitched, &vowel));
+        // A consonant (not vowel-like) right after the pitch: no tail, whatever follows it.
+        let mut consonant = vowel.clone();
+        consonant[21] = false;
+        assert!(!creaky_tail(&span(5, 25), 40, &pitched, &consonant));
+        // No pitch in the span, or vowel frames missing from a short sonority track: no tail.
+        assert!(!creaky_tail(&span(25, 35), 40, &pitched, &vowel));
+        assert!(!creaky_tail(&span(5, 25), 40, &pitched, &vowel[..21]));
+        // The tail starts right after the span's last pitched frame: pitch going on past the
+        // span is no tail.
+        assert!(!creaky_tail(&span(5, 15), 40, &pitched, &vowel));
     }
 
     #[test]

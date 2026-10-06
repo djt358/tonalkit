@@ -21,6 +21,8 @@ class Observation:
 
     clip: str
     speaker: str
+    label: str  # the clip's label: "correct" or "tone_error"
+    clean: bool  # the analysis has exactly one nucleus per syllable of the reading
     tone: str  # the tone the card asked for (`produced_tones`, else the intended reading's)
     index: int
     count: int
@@ -28,6 +30,7 @@ class Observation:
     final: bool  # the phrase's last syllable
     kind: str  # SHAPE, UNPITCHED or MISSED
     shape: dict | None  # the ToneShape JSON when `kind` is SHAPE and it sits on a nucleus
+    creaky: bool = False  # a shape whose pitch gives way to creak (`CreakyTail`, ruling R108)
 
     @property
     def context(self) -> tuple[str | None, bool]:
@@ -46,11 +49,18 @@ def _candidate(clip: Clip, tones: list[str]) -> dict:
     }
 
 
+def _issues(measured: str | dict) -> list[str]:
+    if isinstance(measured, str):
+        return []
+    ((key, value),) = measured.items()
+    return value.get("issues", []) if key == "Partial" else [value.get("issue")]
+
+
 def _kind(measured: str | dict) -> str:
     if isinstance(measured, str):
         return SHAPE
-    (key, value), = measured.items()
-    issues = value.get("issues", []) if key == "Partial" else [value.get("issue")]
+    key = next(iter(measured))
+    issues = _issues(measured)
     if "Unpitched" in issues:
         return UNPITCHED
     if key == "NotMeasured" or "NoNucleus" in issues:
@@ -61,7 +71,9 @@ def _kind(measured: str | dict) -> str:
 def observe_clip(clip: Clip, grader: Grader, register_json: str | None) -> list[Observation]:
     """The observations of one clip: its produced reading decoded alone, each syllable's shape
     taken from the lattice's TBU at the same span (a syllable on an extra candidate of the count
-    stage has none in the lattice and is left without a shape)."""
+    stage has none in the lattice and is left without a shape). A clip is `clean` when its
+    analysis has exactly one nucleus per syllable: then the syllables sit on the nuclei in order,
+    whatever the templates being fitted say."""
     analysis = grader.analysis(clip, register_json)
     tones = produced(clip)
     grading = json.dumps(grading_target(grader.accent))
@@ -72,6 +84,7 @@ def observe_clip(clip: Clip, grader: Grader, register_json: str | None) -> list[
     )
     lattice = json.loads(tonekit_py.lattice(analysis, grader.pack_toml, grader.calib_json, grading))
     shapes = {(t["span"]["start_frame"], t["span"]["end_frame"]): t["shape"] for t in lattice["tbus"]}
+    clean = len(json.loads(analysis)["nuclei"]) == len(tones)
     out = []
     for k, fit in enumerate(decoded["candidates"][0]["syllables"]):
         kind = _kind(fit["judgement"]["measured"])
@@ -80,6 +93,8 @@ def observe_clip(clip: Clip, grader: Grader, register_json: str | None) -> list[
             Observation(
                 clip=clip.id,
                 speaker=clip.speaker,
+                label=clip.label,
+                clean=clean,
                 tone=tones[k],
                 index=k,
                 count=len(tones),
@@ -87,6 +102,7 @@ def observe_clip(clip: Clip, grader: Grader, register_json: str | None) -> list[
                 final=k + 1 == len(tones),
                 kind=kind,
                 shape=shapes.get(span) if kind == SHAPE else None,
+                creaky=kind == SHAPE and "CreakyTail" in _issues(fit["judgement"]["measured"]),
             )
         )
     return out

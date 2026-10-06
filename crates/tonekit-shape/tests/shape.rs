@@ -239,6 +239,24 @@ fn voiced_semitones_region_is_half_open_and_clamped() {
     assert_eq!(voiced_semitones(&t, None).len(), 10);
 }
 
+#[test]
+fn speech_semitones_keep_only_voiced_frames_that_are_speech() {
+    // R106: a pitch on a near-silent frame (a tracker at its floor between syllables) is not
+    // the voice's, and frames past the end of the speech mask are not speech.
+    let t = track(vec![
+        frame(Some(110.0), 1.0), // speech: kept
+        frame(Some(55.0), 0.3),  // not speech: left out
+        frame(None, 1.0),        // speech, unvoiced: nothing
+        frame(Some(220.0), 0.6), // speech: kept
+        frame(Some(440.0), 1.0), // past the mask
+    ]);
+    let st = speech_semitones(&t, &[true, false, true, true]);
+    assert_eq!(st.len(), 2);
+    assert_abs_diff_eq!(st[0], 12.0, epsilon = 1e-5);
+    assert_abs_diff_eq!(st[1], 24.0, epsilon = 1e-5);
+    assert!(speech_semitones(&t, &[]).is_empty());
+}
+
 // ---------------------------------------------------------------------------------------------
 // Register
 // ---------------------------------------------------------------------------------------------

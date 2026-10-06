@@ -18,9 +18,10 @@ mod expect;
 mod load;
 mod schema;
 mod score;
+mod tail;
 mod unpitched;
 
-pub use calib::{Calibration, DecodeParams, UnpitchedEvidence};
+pub use calib::{Calibration, DecodeParams, PlaceEvidence};
 pub use error::PackError;
 pub use expect::{Component, Expectation, TargetContext, Tolerance};
 pub use score::{logsumexp, widen_for};

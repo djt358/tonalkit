@@ -487,6 +487,14 @@ def test_an_unpitched_syllable_is_evidence_not_a_fallback(tmp_path):
     assert "Syllables with no nucleus" not in render(results, tmp_path)
     table_text = "\n".join(report._failure(metrics.Failure(result=results[1], reason="x")))
     assert "unpitched (creak evidence)" in table_text
+
+
+def test_a_creaky_tail_is_named_in_the_failure_table():
+    # R108: a shape whose pitch gives way to creak is measured, and its tail is evidence.
+    results = fallback_pair(1, error_fallback=False) + fallback_pair(2, error_fallback=False)
+    results[1].syllables[1] = Syllable("4", "4", 0.6, 1.2, "Partial", [], ["CreakyTail"])
+    table_text = "\n".join(report._failure(metrics.Failure(result=results[1], reason="x")))
+    assert "Partial (creaky tail)" in table_text
     # The name a miss had before R102 still reads as one.
     assert Syllable("3", None, 0.047, None, "Partial", [], ["Unvoiced"]).fallback
 
@@ -497,7 +505,7 @@ def test_no_fallback_no_section(tmp_path):
 
 
 def test_tkh_eval_grades_only_the_speakers_asked_for(corpus, tmp_path, capsys):
-    # A fit is scored on the speakers it was not fitted on (ruling R106).
+    # A fit is scored on the speakers it was not fitted on (ruling R109).
     assert cli.main(eval_args(corpus, tmp_path, "--speaker", "dj")) == 0
     capsys.readouterr()
     assert cli.main(eval_args(corpus, tmp_path, "--speaker", "nobody")) == 1

@@ -28,7 +28,7 @@ import numpy as np
 import tonekit_py
 from scipy.io import wavfile
 
-from . import calibration, clearance, manifest, metrics, pitch_tracks, provenance, report
+from . import calibration, clearance, manifest, metrics, pitch_tracks, provenance, report, speaker_register
 from .ingest import TARGET_SR, to_float32
 from .manifest import Clip, ManifestError, to_candidate_json
 
@@ -338,6 +338,29 @@ def speaker_registers(clips: list[Clip], grader: Grader) -> dict[str, str | None
     return _chain_registers(clips, grader)[0]
 
 
+REGISTER_FROM = ("drill", "speaker")
+REGISTER_HELP = {
+    "drill": "each speaker's register drill clips (R46)",
+    "speaker": "each clip's speaker's other clips, pooled (R107)",
+}
+
+
+def clip_registers(
+    clips: list[Clip], grader: Grader, register_from: str
+) -> tuple[dict[str, str | None], dict[str, Result]]:
+    """Clip id -> the register JSON its clip is graded with, and the results already graded on
+    the way. `drill` (R46): each speaker's register after their `register` clips, which are
+    graded on the way. `speaker` (ruling R107): each clip's from the same speaker's other clips,
+    pooled (`speaker_register.leave_one_out_registers`)."""
+    if register_from == "speaker":
+        registers = speaker_register.leave_one_out_registers(
+            clips, lambda c: json.loads(grader.analysis(c, None))
+        )
+        return registers, {}
+    registers, by_id = _chain_registers(clips, grader)
+    return {c.id: registers[c.speaker] for c in clips}, by_id
+
+
 def run(
     clips: list[Clip],
     pack_toml: str,
@@ -348,15 +371,20 @@ def run(
     cache_dir: str | Path | None = None,
     use_cache: bool = True,
     f0: str | None = None,
+    register_from: str = "drill",
 ) -> list[Result]:
     """Grade `clips`, returning one `Result` per clip in the same order.
 
     `accent` defaults to the pack's `base_accent`. Each clip's `path` is relative to `root`.
     Analyses are cached under `cache_dir` (default `DEFAULT_CACHE_DIR`) unless `use_cache` is
     false. `f0` names the pitch provider whose track tonekit analyses (one of
-    `pitch_tracks.EXTERNAL_PROVIDERS`); None is tonekit's own pYIN. Raises `EvalError` (naming
-    the clip) if a clip cannot be read or graded, or if `f0` is not a known provider.
+    `pitch_tracks.EXTERNAL_PROVIDERS`); None is tonekit's own pYIN. `register_from` says where a
+    clip's register comes from (`clip_registers`). Raises `EvalError` (naming the clip) if a clip
+    cannot be read or graded, or if `f0` or `register_from` is unknown.
     """
+    if register_from not in REGISTER_FROM:
+        known = ", ".join(REGISTER_FROM)
+        raise EvalError(f"unknown register source {register_from!r} (known: {known})")
     if f0 is not None and f0 not in pitch_tracks.EXTERNAL_PROVIDERS:
         known = ", ".join(pitch_tracks.EXTERNAL_PROVIDERS)
         raise EvalError(f"unknown f0 provider {f0!r} (known: {known})")
@@ -375,10 +403,10 @@ def run(
         f0=f0,
     )
 
-    registers, by_id = _chain_registers(clips, grader)
+    registers, by_id = clip_registers(clips, grader, register_from)
     for clip in clips:
         if clip.id not in by_id:
-            by_id[clip.id] = grader.grade(clip, registers[clip.speaker])[0]
+            by_id[clip.id] = grader.grade(clip, registers[clip.id])[0]
     return [by_id[c.id] for c in clips]
 
 
@@ -403,6 +431,7 @@ def _run(args: argparse.Namespace) -> int:
             args.accent,
             root=manifest_path.parent,  # clip paths are relative to the manifest's directory
             use_cache=not args.no_cache,
+            register_from=args.register_from,
         )
         gate = metrics.loo_gate(results)
         theta = gate.median_threshold
@@ -423,6 +452,7 @@ def _run(args: argparse.Namespace) -> int:
                 "data register": str(args.register or clearance.default_register()),
                 **files.context(),
                 "accent": args.accent or "the pack's base accent",
+                "register": REGISTER_HELP[args.register_from],
                 "clips": ", ".join(f"{name} {n}" for name, n in per_set.items()),
                 "tonekit-py": tonekit_py_fingerprint(),
             },
@@ -472,6 +502,13 @@ def register(subparsers) -> None:
         "NOT A GATE; it never issues a PASS or FAIL",
     )
     p.add_argument("--no-cache", action="store_true", help="neither read nor write the analysis cache")
+    p.add_argument(
+        "--register-from",
+        choices=REGISTER_FROM,
+        default="drill",
+        help="where a clip's register comes from: the speaker's register drill clips (drill, R46, "
+        "the default) or all of the speaker's other clips, pooled (speaker, R107)",
+    )
     p.add_argument(
         "--speaker",
         action="append",

@@ -123,7 +123,9 @@ fn lexical_variants_mix_by_weight() {
 
 #[test]
 fn without_evidence_there_is_no_judgement() {
-    let p = LanguagePack::from_toml(CMN_TOML, Some(CMN_CALIB)).unwrap();
+    let mut calib: serde_json::Value = serde_json::from_str(CMN_CALIB).unwrap();
+    calib.as_object_mut().unwrap().remove("unpitched");
+    let p = LanguagePack::from_toml(CMN_TOML, Some(&calib.to_string())).unwrap();
     assert!(p.calibration().unpitched.is_none());
     assert_eq!(p.judge_unpitched(&target("3"), &ctx(true), &[]), Ok(None));
 }

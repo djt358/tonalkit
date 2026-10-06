@@ -127,6 +127,7 @@ fn seed_calibration() -> Calibration {
             default_rate_s: 0.22,
         },
         unpitched: None,
+        creaky_tail: None,
     }
 }
 

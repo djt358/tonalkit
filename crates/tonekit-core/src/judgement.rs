@@ -25,6 +25,10 @@ pub enum MeasureIssue {
     /// vowel (ruling R102): its tone is scored on the pack's calibrated evidence for unpitched
     /// syllables (ruling R103), not on a contour.
     Unpitched,
+    /// The syllable's pitch gives way to creak: right after its last pitched frame come at least
+    /// 3 frames of speech with a vowel's spectrum and no pitch (ruling R108). Its shape is
+    /// measured on the pitched part, and the tail is evidence for tones that often end in creak.
+    CreakyTail,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

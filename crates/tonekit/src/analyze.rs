@@ -6,12 +6,12 @@ use tonekit_core::{
 };
 use tonekit_f0::{
     clipping_ratio, energy, fit_length, recover_pitch, repair_octaves, repair_subharmonics, snr_db,
-    sonority, F0Provider, Pyin,
+    sonority, unpitch_creak, F0Provider, Pyin,
 };
 use tonekit_segment::{
     boundaries_with, nuclei, speech_frames, speech_region, SegmentParams, SONORANT_SHARE,
 };
-use tonekit_shape::{cold_register, is_cold, voiced_semitones};
+use tonekit_shape::{cold_register, is_cold, speech_semitones};
 
 /// `Clipped` fires when more than this fraction of samples has `|x| >= 0.99`.
 const CLIPPED_ABOVE: f32 = 0.01;
@@ -95,9 +95,11 @@ fn usable(r: &Register) -> bool {
 /// Analyses one utterance of 16 kHz mono `pcm`, once, for any number of `decode`, `lattice` and
 /// `assess` calls.
 ///
-/// 1. **f0**: pYIN, with a pitch recovered where it left loud, vowel-like, clearly periodic
-///    speech unvoiced (ruling R105: `recover_pitch`, on the speech frames and the frames whose
-///    sonority is at least `SONORANT_SHARE`), or the sanitised external track; then subharmonic repair (ruling R60: a frame
+/// 1. **f0**: pYIN, less any pitch under 70 Hz the signal does not repeat at (creak or noise
+///    tracked at pYIN's floor, ruling R105: `unpitch_creak`), with a pitch recovered where it left
+///    loud, vowel-like, clearly periodic speech unvoiced (ruling R105: `recover_pitch`, on the
+///    speech frames and the frames whose sonority is at least `SONORANT_SHARE`), or the sanitised
+///    external track; then subharmonic repair (ruling R60: a frame
 ///    whose signal repeats at half its tracked period is doubled, up to pYIN's 600 Hz ceiling)
 ///    and octave repair (run-local, ruling R32). Both repairs apply to an external track as they
 ///    do to pYIN's: subharmonic repair reads the signal, not the tracker, and any tracker can
@@ -113,8 +115,10 @@ fn usable(r: &Register) -> bool {
 ///    region means no nuclei and no boundaries.
 /// 4. **Register**: `register` if given (`Given`), flagged `ColdStartRegister` while it is
 ///    [cold](is_cold); otherwise the utterance's own cold-start register over its voiced
-///    semitones (those in the speech region, or the whole track's when there is none), counting
-///    the nuclei as its syllables (`ColdStart`, always flagged `ColdStartRegister`). A given
+///    semitones (ruling R106: those of the voiced frames that are speech, above the speech
+///    threshold; none without speech, which gives the fixed fallback register; they are also what
+///    `register_update` merges), counting the nuclei as its syllables (`ColdStart`, always
+///    flagged `ColdStartRegister`). A given
 ///    register that is not usable (a level that is not finite or outside -24 to 72 semitones, a
 ///    median outside the floor-to-ceiling range, a ceiling not above the floor, more than ten
 ///    million syllables) is replaced by that cold start and flagged `InvalidRegister` too: a
@@ -150,11 +154,13 @@ pub fn analyze(
     let energy = energy(pcm);
     let sonority = sonority(pcm);
     let params = SegmentParams::default();
+    let speech_mask = speech_frames(&energy, &params);
     let mut f0 = match &opts.f0 {
         F0Choice::Pyin => {
             let mut track = Pyin::default().track(pcm);
+            unpitch_creak(&mut track, pcm);
             let vowel: Vec<bool> = sonority.iter().map(|&s| s >= SONORANT_SHARE).collect();
-            recover_pitch(&mut track, pcm, &speech_frames(&energy, &params), &vowel);
+            recover_pitch(&mut track, pcm, &speech_mask, &vowel);
             track
         }
         F0Choice::External(track) => {
@@ -183,7 +189,7 @@ pub fn analyze(
         }
         None => (Vec::new(), Vec::new()),
     };
-    let voiced_st = voiced_semitones(&f0, speech.as_ref());
+    let voiced_st = speech_semitones(&f0, &speech_mask);
 
     let register = match register {
         Some(given) if !usable(given) => {
