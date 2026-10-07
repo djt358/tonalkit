@@ -228,6 +228,14 @@ pub enum MeasureIssue {
     InvalidRegister,
     /// Evidence that is not a number (a non-finite shape or neural probability) was ignored.
     InvalidEvidence,
+    /// No anchor, pitched or unpitched, could hold the syllable (R102; it was `Unvoiced` before).
+    NoNucleus,
+    /// Speech energy and a vowel's spectrum but no pitch: scored on the calibration's unpitched
+    /// evidence (R103).
+    Unpitched,
+    /// The pitch gives way to ≥ 50 ms of creak (unpitched vowel-like speech): the calibration's
+    /// creaky-tail evidence is added to every tone's likelihood (R108).
+    CreakyTail,
 }
 pub enum Measured { Full, Partial { issues: Vec<MeasureIssue> }, NotMeasured { issue: MeasureIssue } }
 /// Advice direction ("start higher"). `amount` is in Chao units, or ms for Turn*.
@@ -279,7 +287,8 @@ pub struct UtteranceAssessment { pub schema: String, pub intended: CandidateId, 
 pub enum RegisterSource { Given, ColdStart }
 pub struct Analysis { pub f0: F0Track, pub energy: EnergyTrack, pub nuclei: Vec<Nucleus>,
     pub boundaries: Vec<u32>, pub speech: Option<FrameRange>, pub register: Register,
-    pub register_source: RegisterSource, pub voiced_st: Vec<f32>, pub issues: Vec<MeasureIssue> }
+    pub register_source: RegisterSource, pub voiced_st: Vec<f32>, pub issues: Vec<MeasureIssue>,
+    pub sonority: Vec<f32> }  // per frame, share of the energy in 150 Hz–2 kHz (R102)
 
 // error.rs
 pub enum AssessError {
@@ -511,13 +520,19 @@ Inputs: boundary candidates B (sorted frames), speech region, candidates of any 
   - Paths start at any boundary with leading speech frames and nuclei charged like a gap edge,
     and end the same way.
   - An unmeasurable syllable scores `unvoiced_syllable_llr`.
+  - **Count stage (R102):** when the nuclei admit no strict path, the strict and then the relaxed
+    pass run again over the nuclei plus extra syllable candidates (unpitched vowel-like energy
+    peaks, and a second syllable where a voiced run's spectrum changes), with their boundaries.
+    An extra candidate no syllable covers costs no insertion. A syllable on an unpitched
+    candidate is scored on the calibration's `unpitched` evidence (R103), or
+    `unvoiced_syllable_llr` without it.
   - **Relaxed pass:** only if no such path exists and the analysis has ≥ 1 nucleus, syllables may
     hold at most one nucleus. A syllable without one (a missing syllable) scores
-    `unvoiced_syllable_llr` and is `Partial(Unvoiced)`, so it counts toward `overall` as a likely
-    miss.
+    `unvoiced_syllable_llr` and is `NotMeasured(NoNucleus)`: the assessment's `overall` is then
+    `None` (not scored, a reject at every threshold), never a prior (R104).
   - **No path:** the candidate's K syllables sit at an empty span at the speech-region start and
-    score `K × unvoiced_syllable_llr`. They're `NotMeasured(Unvoiced)` ("tone not checked",
-    `overall = None`) only if the analysis has no nuclei; otherwise they're `Partial(Unvoiced)`.
+    score `K × unvoiced_syllable_llr`. They're `NotMeasured(Unvoiced)` if the analysis has no
+    nuclei and `NotMeasured(NoNucleus)` otherwise; either way `overall = None`.
 - `dur(d) = −(ln(d/r))² / (2·dur_sigma²)`: 0 at d = r and symmetric in log-duration, where
   r = median inter-nucleus interval (default 220 ms) and `dur_sigma` = 0.4.
 - **Null hypothesis ("something else was said"):**
@@ -525,7 +540,9 @@ Inputs: boundary candidates B (sorted frames), speech region, candidates of any 
   (§7.3). That is the best free choice of tone per nucleus, which is always ≥ 0. Candidate
   posteriors are a softmax over `{llr_c} ∪ {null_llr + null_bias}`.
 - Seeds live in `cmn.calib.json`: `filler_per_frame = 0.03`, `unvoiced_syllable_llr = −3.0`,
-  `insertion_llr = −2.0`, `null_bias = −2.0`.
+  `insertion_llr = −2.0`, `null_bias = −2.0`. It also carries the optional `unpitched` and
+  `creaky_tail` tables (ln P(observation | tone) at the end of a phrase and elsewhere), fitted by
+  `tkh fit` (R103, R108, R110).
 - Cost is O(|B|²·K) per candidate. With |B| ≤ 4·nuclei + 2 and up to 64 candidates, this is
   microseconds to milliseconds.
 
