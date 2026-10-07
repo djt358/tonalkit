@@ -33,6 +33,7 @@ def test_it_ends_with_the_eval_command_writing_the_report_under_the_data_root(tm
         "--manifest": str(data / "corpora" / "volunteers-s05-v1" / "manifest.jsonl"),
         "--pack": str(repo_root() / "packs" / "cmn" / "cmn.toml"),
         "--report": str(data / "reports" / "volunteers-s05-v1.md"),
+        "--results": str(data / "reports" / "volunteers-s05-v1.results.json"),
     }
 
 

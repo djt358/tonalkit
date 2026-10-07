@@ -125,6 +125,23 @@ def _pair_table(gate: GateMetrics) -> list[str]:
     return table(header, rows)
 
 
+def _unpaired_section(gate: GateMetrics) -> list[str]:
+    """The gate clips `tkh relabel` took out of their pair (R112)."""
+    if not gate.unpaired:
+        return []
+    lines = [
+        "## Gate clips outside the pairs",
+        "",
+        (
+            "A listener's relabel left these clips' pairs without one correct and one tone-error "
+            "reading (`tkh relabel`, ruling R112). They stay in the corpus for fitting and are not "
+            "counted in correct-accept or wrong-accept."
+        ),
+        "",
+    ]
+    return lines + [f"- {cid}" for cid in gate.unpaired] + [""]
+
+
 def _fallback_section(results: Sequence[Result]) -> list[str]:
     """The gate clips with a syllable no nucleus could hold, per speaker: unscored since ruling
     R104 (a reject at every threshold), or, in results from before it, decided by a fallback
@@ -226,6 +243,7 @@ def write(
     lines += ["", "## Gate pairs", ""]
     lines += ["Each pair is judged at the threshold fitted on the other pairs.", ""]
     lines += _pair_table(gate) + [""]
+    lines += _unpaired_section(gate)
     lines += _fallback_section(results)
     if gate.rejected_none:
         lines += ["## Clips with no score", ""]

@@ -28,7 +28,7 @@ import numpy as np
 import tonekit_py
 from scipy.io import wavfile
 
-from . import calibration, clearance, manifest, metrics, pitch_tracks, provenance, report, speaker_register
+from . import calibration, clearance, eval_results, manifest, metrics, pitch_tracks, provenance, report, speaker_register
 from .ingest import TARGET_SR, to_float32
 from .manifest import Clip, ManifestError, to_candidate_json
 
@@ -457,6 +457,11 @@ def _run(args: argparse.Namespace) -> int:
                 "tonekit-py": tonekit_py_fingerprint(),
             },
         )
+        if args.results:
+            document = eval_results.results_document(
+                results, register_from=args.register_from, tonekit_py=tonekit_py_fingerprint()
+            )
+            eval_results.write_results(args.results, document)
     except (
         ManifestError,
         EvalError,
@@ -472,6 +477,8 @@ def _run(args: argparse.Namespace) -> int:
         print(f"S1: {verdict} ({numbers}); report written to {args.report}")
     else:  # not a verdict: the label says so, and the numbers are only numbers
         print(f"S1: {cleared.label}; {numbers}; report written to {args.report}")
+    if args.results:
+        print(f"per-clip results written to {args.results}")
     return 0
 
 
@@ -500,6 +507,12 @@ def register(subparsers) -> None:
         action="store_true",
         help="smoke run: grade synthetic clips and label the report SMOKE (synthetic) instead of "
         "NOT A GATE; it never issues a PASS or FAIL",
+    )
+    p.add_argument(
+        "--results",
+        metavar="PATH",
+        help="also write every clip's grading as JSON (tonekit.eval-results.v1), e.g. for tkh review; "
+        "it lists clips by id, so keep it under the data root like the report",
     )
     p.add_argument("--no-cache", action="store_true", help="neither read nor write the analysis cache")
     p.add_argument(
