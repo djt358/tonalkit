@@ -5,7 +5,7 @@
 
 export const MIC_CHECK_S = 3;
 export const NOISY_FLOOR_DB = -45; // room level above this: "a bit noisy"
-export const LOW_SPEECH_DB = -40; // voice level below this: "a bit quiet"
+export const LOW_SPEECH_DB = -38; // voice level below this: "a bit quiet"
 const FLOOR_P = 0.1;
 const SPEECH_P = 0.9;
 // iOS can deliver digital silence for the first frames while the microphone warms up: those

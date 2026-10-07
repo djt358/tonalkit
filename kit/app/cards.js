@@ -5,6 +5,7 @@ import { $, setText, currentScreen } from "./ui.js";
 import { cardState, hasKeptTake, skipRemaining } from "./session.js";
 import { cardFace, cardNote } from "./deck.js";
 import { processTake } from "./take.js";
+import { isSilentTake } from "./silence.js";
 
 const MAX_TAKE_S = 30; // a forgotten Stop ends the take here (it is kept, not thrown away)
 const LONG_TEXT = 6; // characters; longer cards get a smaller font
@@ -19,6 +20,7 @@ export function cardScreen(app) {
   let recordingId = null;
   let busy = false;
   let maxTimer = null;
+  let notice = ""; // why the last take was not kept; gone at the next Record or card
   let clip = { id: null, url: null, wav: null }; // the kept take of the card on screen, ready to play
 
   const currentId = () => app.session.order[app.session.index];
@@ -54,8 +56,8 @@ export function cardScreen(app) {
     $("card-next").disabled = busy || recording || !(kept || state?.skipped);
     $("card-finish").hidden = recording || !hasKeptTake(app.session);
     $("card-finish").disabled = busy;
-    let status = "";
-    if (kept && !recording) status = app.t("card.saved") + (state.quiet ? ` ${app.t("mic.level_low")}` : "");
+    let status = notice;
+    if (!status && kept && !recording) status = app.t("card.saved") + (state.quiet ? ` ${app.t("mic.level_low")}` : "");
     $("card-status").textContent = status;
   }
 
@@ -64,6 +66,7 @@ export function cardScreen(app) {
     const card = byId.get(id);
     stopPlayback();
     setClip(id, null);
+    notice = "";
     window.scrollTo(0, 0);
     $("card-progress").textContent = app.t("card.progress", { n: app.session.index + 1, total: app.session.order.length });
     const face = cardFace(card, app.session.speaker.script);
@@ -89,6 +92,7 @@ export function cardScreen(app) {
     app.capture.resume(); // inside the tap (iOS)
     if (!app.capture.live) return app.pause();
     stopPlayback();
+    notice = "";
     recordingId = currentId();
     app.capture.start();
     maxTimer = setTimeout(stop, MAX_TAKE_S * 1000);
@@ -103,20 +107,23 @@ export function cardScreen(app) {
     update();
     try {
       const samples = await app.capture.stop();
-      if (samples.length && recordingId === id) {
-        const take = processTake(samples, app.capture.rate);
-        const state = cardState(app.session, id);
-        Object.assign(state, {
-          takes: state.takes + 1,
-          kept: true,
-          skipped: false,
-          duration_s: take.duration_s,
-          peak: take.peak,
-          quiet: take.quiet,
-        });
-        await app.save({ id, wav: take.wav });
-        if (currentId() === id) setClip(id, take.wav);
+      if (!samples.length || recordingId !== id) return;
+      if (isSilentTake(samples, app.capture.rate)) {
+        notice = app.t("card.no_sound"); // not kept; an earlier kept take of this card stays
+        return;
       }
+      const take = processTake(samples, app.capture.rate);
+      const state = cardState(app.session, id);
+      Object.assign(state, {
+        takes: state.takes + 1,
+        kept: true,
+        skipped: false,
+        duration_s: take.duration_s,
+        peak: take.peak,
+        quiet: take.quiet,
+      });
+      await app.save({ id, wav: take.wav });
+      if (currentId() === id) setClip(id, take.wav);
     } finally {
       recordingId = null;
       busy = false;
@@ -151,6 +158,7 @@ export function cardScreen(app) {
   });
   $("card-skip").addEventListener("click", async () => {
     cardState(app.session, currentId()).skipped = true;
+    notice = "";
     update();
     await app.save();
   });
