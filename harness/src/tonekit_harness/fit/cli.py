@@ -47,9 +47,10 @@ class Fitted:
 
 
 HEADER = """cmn pack, fitted by `tkh fit` (ruling R109) on calibration speakers' recordings: the base
-accent's full-tone realisations by place in the phrase (t<tone>-medial, t<tone>-final) and the
-tolerance's contour, onset and offset σ. Citations, the neutral tone's rules and the other
-accents are the seed's. Provenance: PROVENANCE.toml."""
+accent's full-tone realisations by place in the phrase (t<tone>-medial, t<tone>-final), fitted
+templates alone (then with the tolerance's contour, onset and offset σ) or beside the seed's as
+mixture components. Citations, the neutral tone's rules and the other accents are the seed's.
+Provenance: PROVENANCE.toml."""
 
 
 def fit(
@@ -61,12 +62,14 @@ def fit(
     templates: bool,
     register_from: str = "drill",
     shrink: float = 0.0,
+    component: float | None = None,
 ) -> Fitted:
     """Fits `rounds` times on `clips`: with `templates`, the pack's templates and spreads (on the
     observations of the files fitted so far), then the calibration's unpitched and creaky-tail
     evidence (on the observations of the newly fitted pack). Each round observes with the previous round's files,
     which moves where the decoder puts syllables. Templates are shrunk towards the seed pack's
-    expectations with strength `shrink` (`fit_templates`)."""
+    expectations with strength `shrink` (`fit_templates`), and with `component` they are added to
+    the seed's realisations as mixture components of that weight (`fitted_pack`)."""
     pack_toml, calib = seed_pack, json.loads(seed_calib)
     prior = seed_expectations(seed_pack)
     with tempfile.TemporaryDirectory() as cache:
@@ -74,7 +77,8 @@ def fit(
             if templates:
                 obs = observations(clips, pack_toml, json.dumps(calib), root, Path(cache), register_from)
                 fitted = fit_templates(obs, prior, shrink)
-                pack_toml = render(fitted_pack(seed_pack, fitted, fit_spread(obs, fitted)), HEADER)
+                pack = fitted_pack(seed_pack, fitted, fit_spread(obs, fitted), component)
+                pack_toml = render(pack, HEADER)
             obs = observations(clips, pack_toml, json.dumps(calib), root, Path(cache), register_from)
             calib["unpitched"] = fit_unpitched(obs, pack_tones(pack_toml))
             calib["creaky_tail"] = fit_creaky_tail(obs, pack_tones(pack_toml))
@@ -86,6 +90,8 @@ def _run(args: argparse.Namespace) -> int:
     corpus_toml = Path(args.corpus) if args.corpus else manifest_path.parent / "corpus.toml"
     try:
         clips = manifest.load(manifest_path, register=clearance.read_register(args.register))
+        if args.as_component is not None and not 0.0 < args.as_component < 1.0:
+            raise FitError(f"--as-component must be between 0 and 1, got {args.as_component}")
         chosen = fit_clips(clips, calib_speakers(corpus_toml, args.pack), args.speaker)
         files = calibration.load(args.pack, args.calib)
         result = fit(
@@ -97,6 +103,7 @@ def _run(args: argparse.Namespace) -> int:
             templates=args.out_pack is not None,
             register_from=args.register_from,
             shrink=args.shrink,
+            component=args.as_component,
         )
     except (FitError, EvalError, manifest.ManifestError, OSError, ValueError) as e:
         print(f"error: {e}", file=sys.stderr)
@@ -153,6 +160,13 @@ def register(subparsers) -> None:
         default=0.0,
         help="shrink fitted templates towards the seed pack's as if this many syllables had shown "
         "the seed's contour (default 0: the medians alone)",
+    )
+    p.add_argument(
+        "--as-component",
+        type=float,
+        metavar="W",
+        help="add each fitted template to the seed's realisation of its tone and place as a mixture "
+        "component of weight W (0 < W < 1), keeping the seed's tolerance, instead of replacing them",
     )
     p.add_argument(
         "--register-from",

@@ -25,6 +25,13 @@ fn with_evidence() -> String {
     calib.to_string()
 }
 
+/// The shipped calibration without unpitched evidence.
+fn without_evidence() -> String {
+    let mut calib: serde_json::Value = serde_json::from_str(CMN_CALIB).unwrap();
+    calib.as_object_mut().unwrap().remove("unpitched");
+    calib.to_string()
+}
+
 /// Two voiced syllables (4, 1) and then 250 ms of seeded noise, low-passed twice at about 600 Hz
 /// when `vowel_like`, at the voiced syllables' RMS.
 fn clip(vowel_like: bool) -> Vec<f32> {
@@ -88,13 +95,15 @@ fn reading(tones: &[&str]) -> Candidate {
     }
 }
 
+/// `pcm` graded with `calib`, or with the shipped calibration less its unpitched evidence.
 fn graded(
     pcm: &[f32],
     calib: Option<&str>,
     intended: &[&str],
     other: &[&str],
 ) -> UtteranceAssessment {
-    let pack = LanguagePack::from_toml(CMN_TOML, calib.or(Some(CMN_CALIB))).unwrap();
+    let calib = calib.map_or_else(without_evidence, str::to_owned);
+    let pack = LanguagePack::from_toml(CMN_TOML, Some(&calib)).unwrap();
     let register = register_for(SPEAKER.0, SPEAKER.1);
     let a = analyze(pcm, 16_000, Some(&register), &AnalyzeOptions::default()).unwrap();
     assert_eq!(a.nuclei.len(), 2, "{:?}", a.nuclei);

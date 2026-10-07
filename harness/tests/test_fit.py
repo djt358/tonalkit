@@ -96,6 +96,21 @@ def test_tkh_fit_writes_a_calibration_tonekit_loads(corpus, tmp_path):
     tonekit_py.lattice(analysis, (PACKS / "cmn.toml").read_text(encoding="utf-8"), out.read_text(encoding="utf-8"), grading)
 
 
+def test_tkh_fit_writes_a_fitted_pack_and_refuses_a_component_weight_out_of_range(corpus, tmp_path, capsys):
+    root, _ = corpus
+    corpus_toml(root / "corpus.toml", {"dj": "calib"})
+    out, pack = tmp_path / "fitted.calib.json", tmp_path / "fitted.toml"
+    assert cli.main(fit_args(root, out, "--out-pack", str(pack), "--as-component", "1.5")) == 1
+    assert "--as-component must be between 0 and 1" in capsys.readouterr().err
+    assert not out.exists() and not pack.exists()
+    args = fit_args(root, out, "--out-pack", str(pack), "--as-component", "0.5", "--shrink", "5")
+    assert cli.main(args) == 0
+    text = pack.read_text(encoding="utf-8")
+    assert text.startswith("# cmn pack, fitted by `tkh fit` (ruling R109)")
+    grading = json.dumps({"accent": "cmn-standard", "style": None, "style_weight": 0.0})
+    tonekit_py.lattice(tonekit_py.analyze([0.0] * 1600, 16000), text, out.read_text(encoding="utf-8"), grading)
+
+
 def obs(tone: str, kind: str, final: bool = True, creaky: bool = False) -> Observation:
     return Observation("c", "s", "correct", True, tone, 0, 1, None, final, kind, None, creaky)
 

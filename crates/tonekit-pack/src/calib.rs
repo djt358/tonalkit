@@ -39,8 +39,9 @@ pub struct PlaceEvidence {
     pub other: BTreeMap<String, f32>,
 }
 
-/// Per-pack calibration. The `Default` is the seed shipped with `cmn` (published tone letters;
-/// not fitted).
+/// Per-pack calibration. The `Default` is the seed (published tone letters; not fitted): `cmn`'s
+/// shipped file is the seed plus unpitched and creaky-tail evidence fitted by `tkh fit` (rulings
+/// R103, R108).
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct Calibration {
     /// Divides every log-likelihood before it is used.

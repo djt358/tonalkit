@@ -143,3 +143,20 @@ def test_shrinkage_pulls_the_median_towards_the_prior_by_strength():
     assert alone.knots[-1] == 3.0
     assert half.knots[-1] == 2.0  # κ = n: halfway between the median (3) and the prior (1)
     assert fit_templates(falls, prior, 0.0) == fit_templates(falls)
+
+
+def test_as_a_component_a_template_joins_the_seeds_realisation_and_the_tolerance_stays():
+    templates = [Template("4", False, (5.0, 4.5, 4.0, 3.5, 3.0), 10), Template("3", False, (2.0,) * 5, 8)]
+    pack = fitted_pack(SEED, templates, Spread(0.6, 0.5, 0.45, 18), component=0.4)
+    standard = next(a for a in pack["accent"] if a["id"] == "cmn-standard")
+    rules = {r["label"]: r for r in standard["realize"]}
+    # Tone 4 had no medial rule: the citation (5, 1) keeps 0.6 beside the fitted 0.4.
+    assert rules["t4-medial"]["mixture"] == [
+        {"chao": [5, 1], "weight": 0.6},
+        {"chao": [5.0, 4.5, 4.0, 3.5, 3.0], "weight": 0.4},
+    ]
+    # Tone 3's half-third mixture (0.75 / 0.25) shares 0.6.
+    assert [m["weight"] for m in rules["t3-medial"]["mixture"]] == [0.45, 0.15, 0.4]
+    assert pack["tolerance"] == tomllib.loads(SEED)["tolerance"]
+    grading = '{"accent": "cmn-standard", "style": null, "style_weight": 0.0}'
+    tonekit_py.lattice(tonekit_py.analyze([0.0] * 1600, 16000), render(pack, "test"), None, grading)
