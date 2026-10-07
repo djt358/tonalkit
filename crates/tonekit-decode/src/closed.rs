@@ -12,8 +12,9 @@
 //! Syllables are anchored on nuclei (ruling R33). The strict pass puts exactly one nucleus in
 //! every syllable, so a target can neither hide on a sliver of a syllable nor straddle two. Only
 //! when no strict path exists (fewer nuclei than targets, or boundaries that do not allow it) and
-//! the analysis has a nucleus, a relaxed pass allows syllables with no nucleus: each is a likely
-//! miss, scored `unvoiced_syllable_llr` and reported `Partial { [Unvoiced] }`.
+//! the analysis has a nucleus, the count stage (ruling R102) adds the extra syllable candidates as
+//! anchors; failing that too, a relaxed pass allows syllables with no anchor: each is a likely
+//! miss whose path scores `unvoiced_syllable_llr`, reported `NotMeasured { NoNucleus }` (R104).
 //!
 //! A syllable's tone evidence is its nucleus's shape, the same for every edge that holds the
 //! nucleus and for every candidate (ruling R50): the boundary pair only sets the duration prior and
@@ -28,7 +29,7 @@ use tonekit_segment::{speech_frames, SegmentParams};
 
 use crate::cache::{missed, unmeasured, Scorer, TargetKey};
 use crate::duration::{log_prior, rate_s, FRAME_S};
-use crate::evidence::Tbu;
+use crate::evidence::{Extended, Tbu};
 use crate::{clamp_log, count_u32};
 
 /// Shortest syllable edge, in frames (60 ms).
@@ -56,29 +57,54 @@ fn prefix_counts(marked: impl Iterator<Item = bool>) -> Vec<u32> {
 
 /// What frames cost when no syllable covers them: `per_frame` for every speech frame (silence is
 /// free) and `−insertion_llr` for every nucleus, an inserted syllable (ruling R33). Also counts
-/// the nuclei in a span, for the nucleus rule on syllable edges.
+/// the anchors in a span (the nuclei, and in the count stage the extra candidates too, ruling
+/// R102), for the anchor rule on syllable edges.
 pub(crate) struct Filler {
     /// Prefix counts of speech frames.
     speech: Vec<u32>,
-    /// Prefix counts of nucleus frames (each distinct frame once).
+    /// Prefix counts of anchor frames (each distinct frame once).
     nuclei: Vec<u32>,
+    /// Prefix counts of the frames an uncovered anchor costs an insertion at: the nuclei.
+    inserted: Vec<u32>,
     per_frame: f64,
     insertion_llr: f64,
 }
 
+/// `marked[f]` for every frame of `frames` on a track of `len` frames (repeats count once, frames
+/// past the track are ignored).
+fn marks(len: usize, frames: &[u32]) -> Vec<bool> {
+    let mut marked = vec![false; len];
+    for &f in frames {
+        if let Some(slot) = marked.get_mut(f as usize) {
+            *slot = true;
+        }
+    }
+    marked
+}
+
 impl Filler {
     /// `speech` marks the speech frames; `nuclei` are nucleus frames in any order (repeats count
-    /// once, frames past the track are ignored).
+    /// once, frames past the track are ignored), each an anchor that costs an insertion when no
+    /// syllable covers it.
+    #[cfg(test)]
     pub(crate) fn new(speech: &[bool], nuclei: &[u32], per_frame: f64, insertion_llr: f64) -> Self {
-        let mut is_nucleus = vec![false; speech.len()];
-        for &f in nuclei {
-            if let Some(slot) = is_nucleus.get_mut(f as usize) {
-                *slot = true;
-            }
-        }
+        Self::with_anchors(speech, nuclei, nuclei, per_frame, insertion_llr)
+    }
+
+    /// As [`Filler::new`], with `anchors` for the anchor rule and only those of `inserted` costing
+    /// an insertion when left uncovered (ruling R102: an extra candidate the reading does not use
+    /// is no inserted syllable, only its speech frames are filler).
+    pub(crate) fn with_anchors(
+        speech: &[bool],
+        anchors: &[u32],
+        inserted: &[u32],
+        per_frame: f64,
+        insertion_llr: f64,
+    ) -> Self {
         Filler {
             speech: prefix_counts(speech.iter().copied()),
-            nuclei: prefix_counts(is_nucleus.into_iter()),
+            nuclei: prefix_counts(marks(speech.len(), anchors).into_iter()),
+            inserted: prefix_counts(marks(speech.len(), inserted).into_iter()),
             per_frame,
             insertion_llr,
         }
@@ -111,7 +137,8 @@ impl Filler {
     /// it are silent): `per_frame × speech frames − insertion_llr × nuclei`.
     pub(crate) fn cost(&self, from: u32, to: u32) -> f64 {
         let speech = Self::count(&self.speech, from, to);
-        self.per_frame * f64::from(speech) - self.insertion_llr * f64::from(self.nuclei(from, to))
+        let inserted = Self::count(&self.inserted, from, to);
+        self.per_frame * f64::from(speech) - self.insertion_llr * f64::from(inserted)
     }
 }
 
@@ -269,48 +296,99 @@ pub(crate) fn contexts(targets: &[ToneTarget]) -> Vec<TargetContext> {
         .collect()
 }
 
+/// One segmentation the DP searches: its boundaries, filler, speaking rate and where its anchors'
+/// evidence starts in the scorer's table.
+struct Stage {
+    /// Boundary candidates, sorted and unique.
+    bounds: Vec<u32>,
+    filler: Filler,
+    /// The speaking rate `r` in seconds per syllable.
+    rate_s: f64,
+    /// The index of the stage's first anchor in the scorer's evidence table.
+    offset: usize,
+}
+
+impl Stage {
+    /// The stage over `anchors` (sorted, unique) and `bounds`, where only `inserted` cost an
+    /// insertion when uncovered and the anchors' evidence starts at `offset`.
+    fn new(
+        a: &Analysis,
+        pack: &LanguagePack,
+        anchors: &[u32],
+        inserted: &[u32],
+        bounds: &[u32],
+        offset: usize,
+    ) -> Stage {
+        let d = &pack.calibration().decode;
+        let mut bounds = bounds.to_vec();
+        bounds.sort_unstable();
+        bounds.dedup();
+        let filler = Filler::with_anchors(
+            &speech_mask(&a.energy),
+            anchors,
+            inserted,
+            f64::from(d.filler_per_frame),
+            f64::from(d.insertion_llr),
+        );
+        Stage {
+            bounds,
+            filler,
+            rate_s: rate_s(anchors, f64::from(d.default_rate_s)),
+            offset,
+        }
+    }
+}
+
+/// Which stage a path was found in.
+#[derive(Clone, Copy)]
+enum Which {
+    Nuclei,
+    Count,
+}
+
 /// Decodes candidates against one analysis, sharing the nuclei's evidence and LLR caches between
 /// them.
+///
+/// Two stages (ruling R102). The nuclei's: the analysis's nuclei and boundaries, as R33 and R50
+/// define them. The count stage, for a candidate the nuclei cannot place: the nuclei and the extra
+/// syllable candidates ([`crate::evidence::extended`]) together as anchors, over both sets of
+/// boundaries, an uncovered candidate costing no insertion. The relaxed pass (syllables with no
+/// anchor) runs in the count stage when there is one.
 pub(crate) struct Decoder<'a> {
     /// Where the speech region starts, if there is one.
     speech_start: Option<u32>,
-    /// The analysis's boundary candidates, sorted and unique.
-    bounds: Vec<u32>,
-    filler: Filler,
+    nuclei: Stage,
+    count: Option<Stage>,
     /// Whether the analysis has a nucleus on the track.
     has_nuclei: bool,
-    /// The speaking rate `r` in seconds per syllable.
-    rate_s: f64,
     dur_sigma: f64,
     scorer: Scorer<'a>,
 }
 
 impl<'a> Decoder<'a> {
-    /// `tbus` is the analysis's evidence, [`crate::evidence::tbus`].
+    /// `tbus` is the evidence table: the nuclei's ([`crate::evidence::tbus`]) followed, when
+    /// `extended` is given, by the count stage's (`extended.tbus`, one per anchor).
     pub(crate) fn new(
         a: &'a Analysis,
         pack: &'a LanguagePack,
         g: &'a GradingTarget,
         tbus: &'a [Tbu],
+        extended: Option<&Extended>,
     ) -> Self {
-        let d = &pack.calibration().decode;
-        let mut bounds = a.boundaries.clone();
-        bounds.sort_unstable();
-        bounds.dedup();
-        let nuclei: Vec<u32> = a.nuclei.iter().map(|n| n.frame).collect();
-        let filler = Filler::new(
-            &speech_mask(&a.energy),
-            &nuclei,
-            f64::from(d.filler_per_frame),
-            f64::from(d.insertion_llr),
-        );
+        let mut nuclei: Vec<u32> = a.nuclei.iter().map(|n| n.frame).collect();
+        nuclei.sort_unstable();
+        nuclei.dedup();
+        let first = Stage::new(a, pack, &nuclei, &nuclei, &a.boundaries, 0);
+        let count = extended.map(|x| {
+            let offset = tbus.len() - x.tbus.len();
+            Stage::new(a, pack, &x.anchors, &nuclei, &x.bounds, offset)
+        });
         Decoder {
             speech_start: a.speech.as_ref().map(|r| r.start),
-            bounds,
-            has_nuclei: filler.nuclei(0, filler.frames()) > 0,
-            filler,
-            rate_s: rate_s(&a.nuclei, f64::from(d.default_rate_s)),
-            dur_sigma: f64::from(d.dur_sigma),
+            has_nuclei: first.filler.nuclei(0, first.filler.frames()) > 0,
+            nuclei: first,
+            count,
+            dur_sigma: f64::from(pack.calibration().decode.dur_sigma),
             scorer: Scorer::new(a, pack, g, tbus),
         }
     }
@@ -326,20 +404,27 @@ impl<'a> Decoder<'a> {
             .collect()
     }
 
+    fn stage(&self, which: Which) -> &Stage {
+        match (which, &self.count) {
+            (Which::Count, Some(count)) => count,
+            _ => &self.nuclei,
+        }
+    }
+
     /// The candidate's best path, its LLR (the path score) and its syllables, each judged in its
     /// context; `keys` is its [`Decoder::plan`]. `posterior` is left at 0 for the caller to fill.
     ///
-    /// A syllable with a nucleus is judged on the nucleus's shape and reported at the nucleus's
-    /// TBU, where that shape was measured (the lattice's span for it, whatever boundary pair the
-    /// path took); one without (relaxed pass only) is a likely miss at its path's span, clipped
-    /// to the gap its neighbours' spans leave ([`clip_unanchored`]): `unvoiced_syllable_llr`,
-    /// `Partial { [Unvoiced] }`.
+    /// A syllable with an anchor is judged on the anchor's evidence and reported at the anchor's
+    /// TBU, where that evidence was measured (the lattice's span for a nucleus, whatever boundary
+    /// pair the path took); one without (relaxed pass only) is a likely miss at its path's span,
+    /// clipped to the gap its neighbours' spans leave ([`clip_unanchored`]):
+    /// path scored at `unvoiced_syllable_llr`, `NotMeasured { NoNucleus }` (rulings R102, R104).
     pub(crate) fn score(
         &mut self,
         cand: &Candidate,
         keys: &[TargetKey],
     ) -> Result<CandidateScore, AssessError> {
-        let Some(path) = self.search(keys)? else {
+        let Some((path, which)) = self.search(keys)? else {
             return Ok(self.no_path(cand));
         };
 
@@ -348,10 +433,11 @@ impl<'a> Decoder<'a> {
         let mut syllables = Vec::with_capacity(path.syllables.len());
         let mut anchored = Vec::with_capacity(path.syllables.len());
         for ((&(i, j), target), ctx) in path.syllables.iter().zip(&cand.targets).zip(&ctxs) {
-            let (from, to) = (self.bounds[i], self.bounds[j]);
-            let nucleus = self.filler.nucleus_in(from, to);
-            anchored.push(nucleus.is_some());
-            let fit = match nucleus {
+            let stage = self.stage(which);
+            let (from, to) = (stage.bounds[i], stage.bounds[j]);
+            let anchor = stage.filler.nucleus_in(from, to).map(|n| stage.offset + n);
+            anchored.push(anchor.is_some());
+            let fit = match anchor {
                 Some(n) => self.scorer.fit(n, target, ctx)?,
                 None => SyllableFit {
                     span: TbuSpan {
@@ -372,37 +458,30 @@ impl<'a> Decoder<'a> {
         })
     }
 
-    /// The best strict path; failing that, the best relaxed one. `None` without a speech region
-    /// or a nucleus (no syllable can be anchored), or when neither pass places every target.
-    fn search(&mut self, keys: &[TargetKey]) -> Result<Option<Path>, AssessError> {
+    /// The best strict path in the nuclei's stage; failing that, the best strict one in the count
+    /// stage (ruling R102); failing that, the best relaxed one in the count stage (the nuclei's
+    /// without one). `None` without a speech region or a nucleus (no syllable can be anchored), or
+    /// when no pass places every target.
+    fn search(&mut self, keys: &[TargetKey]) -> Result<Option<(Path, Which)>, AssessError> {
         if self.speech_start.is_none() || !self.has_nuclei {
             return Ok(None);
         }
-        for pass in [Pass::Strict, Pass::Relaxed] {
-            let path = self.best(keys, pass)?;
-            if path.is_some() {
-                return Ok(path);
+        let mut tries = vec![(Which::Nuclei, Pass::Strict)];
+        if self.count.is_some() {
+            tries.extend([(Which::Count, Pass::Strict), (Which::Count, Pass::Relaxed)]);
+        } else {
+            tries.push((Which::Nuclei, Pass::Relaxed));
+        }
+        for (which, pass) in tries {
+            let stage = match (which, &self.count) {
+                (Which::Count, Some(count)) => count,
+                _ => &self.nuclei,
+            };
+            if let Some(path) = best(stage, &mut self.scorer, self.dur_sigma, keys, pass)? {
+                return Ok(Some((path, which)));
             }
         }
         Ok(None)
-    }
-
-    /// [`best_path`] for the targets behind `keys` under `pass`: a syllable with a nucleus scores
-    /// its target's LLR on the nucleus's shape, one without scores `unvoiced_syllable_llr`, each
-    /// plus the duration prior of its span.
-    fn best(&mut self, keys: &[TargetKey], pass: Pass) -> Result<Option<Path>, AssessError> {
-        let (bounds, filler, scorer) = (&self.bounds, &self.filler, &mut self.scorer);
-        let (rate, sigma) = (self.rate_s, self.dur_sigma);
-        let unvoiced = f64::from(scorer.unvoiced_llr());
-        best_path(bounds, filler, keys.len(), pass, |i, j, s| {
-            let (from, to) = (bounds[i], bounds[j]);
-            let d_s = f64::from(to - from) * FRAME_S;
-            let llr = match filler.nucleus_in(from, to) {
-                Some(n) => f64::from(scorer.llr(n, keys[s])?),
-                None => unvoiced,
-            };
-            Ok(llr + log_prior(d_s, rate, sigma))
-        })
     }
 
     /// No complete path: every syllable sits at an empty span where the speech region starts
@@ -411,7 +490,7 @@ impl<'a> Decoder<'a> {
     /// Without a nucleus in the analysis (silence, whisper) nothing could be measured: every
     /// syllable is `NotMeasured { Unvoiced }` ("tone not checked"). With nuclei the candidate
     /// just does not fit the syllables that were spoken (too many targets for the boundaries), so
-    /// every syllable is a likely miss, `Partial { [Unvoiced] }` (ruling R33).
+    /// every syllable is a likely miss, `NotMeasured { NoNucleus }` (rulings R33, R102, R104).
     fn no_path(&self, cand: &Candidate) -> CandidateScore {
         let at = self.speech_start.unwrap_or(0);
         let unvoiced = self.scorer.unvoiced_llr();
@@ -437,6 +516,28 @@ impl<'a> Decoder<'a> {
             syllables,
         }
     }
+}
+
+/// [`best_path`] in `stage` for the targets behind `keys` under `pass`: a syllable with an anchor
+/// scores its target's LLR on the anchor's evidence, one without scores `unvoiced_syllable_llr`,
+/// each plus the duration prior of its span.
+fn best(
+    stage: &Stage,
+    scorer: &mut Scorer<'_>,
+    dur_sigma: f64,
+    keys: &[TargetKey],
+    pass: Pass,
+) -> Result<Option<Path>, AssessError> {
+    let unvoiced = f64::from(scorer.unvoiced_llr());
+    best_path(&stage.bounds, &stage.filler, keys.len(), pass, |i, j, s| {
+        let (from, to) = (stage.bounds[i], stage.bounds[j]);
+        let d_s = f64::from(to - from) * FRAME_S;
+        let llr = match stage.filler.nucleus_in(from, to) {
+            Some(n) => f64::from(scorer.llr(stage.offset + n, keys[s])?),
+            None => unvoiced,
+        };
+        Ok(llr + log_prior(d_s, stage.rate_s, dur_sigma))
+    })
 }
 
 /// Clips the span of every syllable that holds no nucleus (`anchored[s]` false: relaxed pass
@@ -818,8 +919,8 @@ mod tests {
         assert_eq!(spans, [(10, 35), (35, 35), (35, 66)], "{s:#?}");
         assert_eq!(
             s[1].judgement.measured,
-            Measured::Partial {
-                issues: vec![MeasureIssue::Unvoiced]
+            Measured::NotMeasured {
+                issue: MeasureIssue::NoNucleus
             }
         );
         assert!(matches!(s[0].judgement.measured, Measured::Full));

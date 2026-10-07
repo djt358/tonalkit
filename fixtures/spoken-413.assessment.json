@@ -2,18 +2,18 @@
   "schema": "tonekit.assessment.v1",
   "intended": "intended",
   "intended_rank": 1,
-  "margin_llr": 1.9830225,
+  "margin_llr": 1.9831667,
   "syllables": [
     {
       "expected": "4",
-      "p_correct": 0.73032373,
-      "distance": 0.6191196,
+      "p_correct": 0.7302967,
+      "distance": 0.61951053,
       "heard": "4",
       "heard_as": null,
       "deltas": [
         {
           "kind": "WiderRange",
-          "amount": 1.2305684
+          "amount": 1.2314727
         }
       ],
       "component": "cmn-standard/citation",
@@ -30,8 +30,8 @@
     },
     {
       "expected": "1",
-      "p_correct": 0.7338126,
-      "distance": 0.6612639,
+      "p_correct": 0.73383504,
+      "distance": 0.6610479,
       "heard": "1",
       "heard_as": null,
       "deltas": [],
@@ -49,8 +49,8 @@
     },
     {
       "expected": "3",
-      "p_correct": 0.77021223,
-      "distance": 0.42448077,
+      "p_correct": 0.77015877,
+      "distance": 0.42454213,
       "heard": null,
       "heard_as": null,
       "deltas": [],
@@ -67,10 +67,10 @@
       ]
     }
   ],
-  "overall": 0.73032373,
+  "overall": 0.7302967,
   "accent_fit": [],
   "register_update": {
-    "floor_st": 9.039957,
+    "floor_st": 9.034957,
     "median_st": 17.549957,
     "ceil_st": 24.349958,
     "n_syllables": 3

@@ -1,2 +1,5 @@
 artifacts = ["packs/cmn/cmn.toml", "packs/cmn/cmn.calib.json"]
-note = "cmn.toml: seed pack (citation tone letters and accent realisations from the literature); not fitted. cmn.calib.json: seed values from published tone letters; not fitted."
+note = "cmn.toml: seed pack (citation tone letters and accent realisations from the literature); not fitted (tkh fit --out-pack can fit its templates, ruling R109, but fitted on one calibration speaker they did not carry over to the other, so the seed's stay). cmn.calib.json: temperature, fusion and decode are the seed values from published tone letters, not fitted; its unpitched (ruling R103) and creaky_tail (ruling R108) evidence is fitted by `tkh fit --register-from speaker` (2 rounds, from the seed) on the calib-split speakers of corpus volunteers-s05-v1."
+
+[[source]]
+id = "volunteer-corpus"

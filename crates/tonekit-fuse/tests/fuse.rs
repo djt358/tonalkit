@@ -891,3 +891,67 @@ fn overall_min_spans_measured_and_vetoed_unmeasured_syllables() {
     let out = run(&r, "a", &external).unwrap();
     assert_abs_diff_eq!(out.overall.unwrap(), 0.01, epsilon = 1e-5);
 }
+
+// ---------------------------------------------------------------------------------------------
+// A syllable no nucleus could hold leaves the reading unscored (ruling R104).
+// ---------------------------------------------------------------------------------------------
+
+fn no_nucleus() -> Measured {
+    Measured::NotMeasured {
+        issue: MeasureIssue::NoNucleus,
+    }
+}
+
+#[test]
+fn a_syllable_with_no_nucleus_leaves_the_reading_unscored() {
+    // Two confident syllables and one the utterance shows nothing for: never accepted at a prior.
+    let r = decoded(
+        vec![cand(
+            "a",
+            1.0,
+            vec![
+                fit(logit(0.9), Measured::Full),
+                fit(-3.0, no_nucleus()),
+                fit(logit(0.8), Measured::Full),
+            ],
+        )],
+        0.0,
+    );
+    let out = run(&r, "a", &[]).unwrap();
+    assert_eq!(out.overall, None);
+    // The measured syllables keep their grades, and the missing one reads as not checked.
+    assert_abs_diff_eq!(out.syllables[0].p_correct, 0.9, epsilon = 1e-5);
+    assert_abs_diff_eq!(out.syllables[1].p_correct, 0.5, epsilon = 1e-6);
+    assert_eq!(out.syllables[1].measured, no_nucleus());
+}
+
+#[test]
+fn a_confusion_hit_on_a_missing_syllable_still_counts() {
+    // A hit is a specific miss (R19): the reading is graded, and fails.
+    let r = decoded(
+        vec![cand(
+            "a",
+            1.0,
+            vec![fit(logit(0.9), Measured::Full), fit(-3.0, no_nucleus())],
+        )],
+        0.0,
+    );
+    let external = vec![vec![], vec![confusion("2", "谁")]];
+    let out = run(&r, "a", &external).unwrap();
+    assert_abs_diff_eq!(out.overall.unwrap(), 0.05, epsilon = 1e-7);
+}
+
+#[test]
+fn an_unvoiced_syllable_is_still_only_not_checked() {
+    // A whispered syllable (no voice at all) is not a missing one: the others still grade it.
+    let r = decoded(
+        vec![cand(
+            "a",
+            1.0,
+            vec![fit(logit(0.9), Measured::Full), fit(-3.0, unmeasured())],
+        )],
+        0.0,
+    );
+    let out = run(&r, "a", &[]).unwrap();
+    assert_abs_diff_eq!(out.overall.unwrap(), 0.9, epsilon = 1e-5);
+}

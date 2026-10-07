@@ -28,7 +28,7 @@ import numpy as np
 import tonekit_py
 from scipy.io import wavfile
 
-from . import calibration, clearance, manifest, metrics, pitch_tracks, provenance, report
+from . import calibration, clearance, manifest, metrics, pitch_tracks, provenance, report, speaker_register
 from .ingest import TARGET_SR, to_float32
 from .manifest import Clip, ManifestError, to_candidate_json
 
@@ -57,13 +57,22 @@ class Syllable:
     distance: float | None
     measured: str  # "Full", "Partial" or "NotMeasured"
     deltas: list[Delta] = field(default_factory=list)
+    issues: list[str] = field(default_factory=list)  # tonekit `MeasureIssue` names, e.g. "TooShort"
 
     @property
     def fallback(self) -> bool:
-        """No nucleus was found for it (the segmenter heard fewer syllables than the card has):
-        tonekit reports it `Partial` with no distance, and its p_correct is the calibration's fixed
-        prior (`unvoiced_syllable_llr`, 0.047 as shipped), not a measurement of its tone."""
-        return self.measured == "Partial" and self.distance is None
+        """No syllable of the utterance could hold it (ruling R102: no nucleus and no unpitched
+        candidate; tonekit says `NoNucleus`, before R102 `Partial [Unvoiced]` with no distance):
+        its p_correct is the calibration's fixed prior (`unvoiced_syllable_llr`, 0.047 as
+        shipped), not a measurement of its tone."""
+        legacy = self.measured == "Partial" and self.distance is None and "Unvoiced" in self.issues
+        return "NoNucleus" in self.issues or legacy
+
+    @property
+    def unpitched(self) -> bool:
+        """Speech with a vowel's spectrum but no pitch (a creaky vowel), scored on the
+        calibration's unpitched evidence (ruling R103) rather than on a contour."""
+        return "Unpitched" in self.issues
 
 
 @dataclass
@@ -81,6 +90,12 @@ class Result:
     syllables: list[Syllable]
     register_source: str  # "cold" (estimated from this clip alone) or "given" (from register clips)
     issues: list[str] = field(default_factory=list)  # the analysis's signal issues, e.g. "LowSnr"
+
+    @property
+    def missing(self) -> bool:
+        """A syllable of the card had no nucleus, pitched or unpitched (ruling R102): since ruling
+        R104 tonekit leaves such a clip unscored (`overall` None), a reject at every threshold."""
+        return any(s.fallback for s in self.syllables)
 
     @property
     def decided_by_fallback(self) -> bool:
@@ -194,6 +209,15 @@ def _measured_kind(measured: str | dict) -> str:
     return measured if isinstance(measured, str) else next(iter(measured))
 
 
+def _measured_issues(measured: str | dict) -> list[str]:
+    """The `MeasureIssue` names of tonekit's serde form: a `Partial`'s issues, a `NotMeasured`'s
+    one issue, none for `Full`."""
+    if isinstance(measured, str):
+        return []
+    (kind, body), = measured.items()
+    return list(body.get("issues", [])) if kind == "Partial" else [body["issue"]]
+
+
 def analyze_pcm(name: str, pcm: np.ndarray, register_json: str | None = None, f0: str | None = None) -> str:
     """`tonekit_py.analyze` of 16 kHz samples, with the f0 track of the provider `f0` (None:
     tonekit's own pYIN). A tonekit or provider failure is an `EvalError` naming `name`."""
@@ -278,6 +302,7 @@ class Grader:
                     distance=s["distance"],
                     measured=_measured_kind(s["measured"]),
                     deltas=[(d["kind"], d["amount"]) for d in s["deltas"]],
+                    issues=_measured_issues(s["measured"]),
                 )
                 for s in assessment["syllables"]
             ],
@@ -313,6 +338,29 @@ def speaker_registers(clips: list[Clip], grader: Grader) -> dict[str, str | None
     return _chain_registers(clips, grader)[0]
 
 
+REGISTER_FROM = ("drill", "speaker")
+REGISTER_HELP = {
+    "drill": "each speaker's register drill clips (R46)",
+    "speaker": "each clip's speaker's other clips, pooled (R107)",
+}
+
+
+def clip_registers(
+    clips: list[Clip], grader: Grader, register_from: str
+) -> tuple[dict[str, str | None], dict[str, Result]]:
+    """Clip id -> the register JSON its clip is graded with, and the results already graded on
+    the way. `drill` (R46): each speaker's register after their `register` clips, which are
+    graded on the way. `speaker` (ruling R107): each clip's from the same speaker's other clips,
+    pooled (`speaker_register.leave_one_out_registers`)."""
+    if register_from == "speaker":
+        registers = speaker_register.leave_one_out_registers(
+            clips, lambda c: json.loads(grader.analysis(c, None))
+        )
+        return registers, {}
+    registers, by_id = _chain_registers(clips, grader)
+    return {c.id: registers[c.speaker] for c in clips}, by_id
+
+
 def run(
     clips: list[Clip],
     pack_toml: str,
@@ -323,15 +371,20 @@ def run(
     cache_dir: str | Path | None = None,
     use_cache: bool = True,
     f0: str | None = None,
+    register_from: str = "drill",
 ) -> list[Result]:
     """Grade `clips`, returning one `Result` per clip in the same order.
 
     `accent` defaults to the pack's `base_accent`. Each clip's `path` is relative to `root`.
     Analyses are cached under `cache_dir` (default `DEFAULT_CACHE_DIR`) unless `use_cache` is
     false. `f0` names the pitch provider whose track tonekit analyses (one of
-    `pitch_tracks.EXTERNAL_PROVIDERS`); None is tonekit's own pYIN. Raises `EvalError` (naming
-    the clip) if a clip cannot be read or graded, or if `f0` is not a known provider.
+    `pitch_tracks.EXTERNAL_PROVIDERS`); None is tonekit's own pYIN. `register_from` says where a
+    clip's register comes from (`clip_registers`). Raises `EvalError` (naming the clip) if a clip
+    cannot be read or graded, or if `f0` or `register_from` is unknown.
     """
+    if register_from not in REGISTER_FROM:
+        known = ", ".join(REGISTER_FROM)
+        raise EvalError(f"unknown register source {register_from!r} (known: {known})")
     if f0 is not None and f0 not in pitch_tracks.EXTERNAL_PROVIDERS:
         known = ", ".join(pitch_tracks.EXTERNAL_PROVIDERS)
         raise EvalError(f"unknown f0 provider {f0!r} (known: {known})")
@@ -350,10 +403,10 @@ def run(
         f0=f0,
     )
 
-    registers, by_id = _chain_registers(clips, grader)
+    registers, by_id = clip_registers(clips, grader, register_from)
     for clip in clips:
         if clip.id not in by_id:
-            by_id[clip.id] = grader.grade(clip, registers[clip.speaker])[0]
+            by_id[clip.id] = grader.grade(clip, registers[clip.id])[0]
     return [by_id[c.id] for c in clips]
 
 
@@ -365,6 +418,10 @@ def _run(args: argparse.Namespace) -> int:
     try:
         data_register = clearance.read_register(args.register)
         clips = manifest.load(manifest_path, register=data_register)
+        if args.speaker:
+            clips = [c for c in clips if c.speaker in args.speaker]
+            if not clips:
+                raise EvalError(f"no clips for speaker(s) {', '.join(args.speaker)}")
         cleared = clearance.assess(clips, data_register, allow_synthetic=args.allow_synthetic)
         files = calibration.load(args.pack, args.calib)
         results = run(
@@ -374,6 +431,7 @@ def _run(args: argparse.Namespace) -> int:
             args.accent,
             root=manifest_path.parent,  # clip paths are relative to the manifest's directory
             use_cache=not args.no_cache,
+            register_from=args.register_from,
         )
         gate = metrics.loo_gate(results)
         theta = gate.median_threshold
@@ -394,6 +452,7 @@ def _run(args: argparse.Namespace) -> int:
                 "data register": str(args.register or clearance.default_register()),
                 **files.context(),
                 "accent": args.accent or "the pack's base accent",
+                "register": REGISTER_HELP[args.register_from],
                 "clips": ", ".join(f"{name} {n}" for name, n in per_set.items()),
                 "tonekit-py": tonekit_py_fingerprint(),
             },
@@ -443,4 +502,16 @@ def register(subparsers) -> None:
         "NOT A GATE; it never issues a PASS or FAIL",
     )
     p.add_argument("--no-cache", action="store_true", help="neither read nor write the analysis cache")
+    p.add_argument(
+        "--register-from",
+        choices=REGISTER_FROM,
+        default="drill",
+        help="where a clip's register comes from: the speaker's register drill clips (drill, R46, "
+        "the default) or all of the speaker's other clips, pooled (speaker, R107)",
+    )
+    p.add_argument(
+        "--speaker",
+        action="append",
+        help="grade only this speaker's clips (repeatable), e.g. to score a fit on the speakers it was not fitted on",
+    )
     p.set_defaults(func=_run)

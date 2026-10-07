@@ -1,5 +1,7 @@
 //! Calibration parameters: the small, fitted part of a pack (`cmn.calib.json`).
 
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 use tonekit_core::FusionWeights;
 
@@ -24,14 +26,35 @@ pub struct DecodeParams {
     pub default_rate_s: f32,
 }
 
-/// Per-pack calibration. The `Default` is the seed shipped with `cmn` (published tone letters;
-/// not fitted).
+/// What an observation about a syllable says about its tone: per tone id, `ln P(observation |
+/// tone)` at the end of a phrase and elsewhere, fitted on calibration speakers. Used for unpitched
+/// syllables (ruling R103) and creaky tails (ruling R108): creak is a strong cue for tone 3 in
+/// Mandarin, and the end of a full tone 4 often creaks, so these are evidence, not absence.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PlaceEvidence {
+    /// The phrase's last syllable (an isolated syllable included).
+    pub phrase_final: BTreeMap<String, f32>,
+    /// Every other syllable.
+    pub other: BTreeMap<String, f32>,
+}
+
+/// Per-pack calibration. The `Default` is the seed (published tone letters; not fitted): `cmn`'s
+/// shipped file is the seed plus unpitched and creaky-tail evidence fitted by `tkh fit` (rulings
+/// R103, R108).
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct Calibration {
     /// Divides every log-likelihood before it is used.
     pub temperature: f32,
     pub fusion: FusionWeights,
     pub decode: DecodeParams,
+    /// Evidence for unpitched syllables (ruling R103): `ln P(unpitched | tone)`. Without it such
+    /// a syllable scores `decode.unvoiced_syllable_llr`, as a missed one does.
+    pub unpitched: Option<PlaceEvidence>,
+    /// Evidence for creaky tails (ruling R108): `ln P(creaky tail | tone)` for a pitched syllable
+    /// whose pitch gives way to creak (`MeasureIssue::CreakyTail`), added to every tone's
+    /// log-likelihood of its shape. Without it a creaky tail says nothing.
+    pub creaky_tail: Option<PlaceEvidence>,
 }
 
 impl Default for Calibration {
@@ -53,6 +76,8 @@ impl Default for Calibration {
                 dur_sigma: 0.4,
                 default_rate_s: 0.22,
             },
+            unpitched: None,
+            creaky_tail: None,
         }
     }
 }
@@ -74,11 +99,16 @@ struct CalibFile {
     temperature: f32,
     fusion: FusionFile,
     decode: DecodeParams,
+    #[serde(default)]
+    unpitched: Option<PlaceEvidence>,
+    #[serde(default)]
+    creaky_tail: Option<PlaceEvidence>,
 }
 
 impl Calibration {
-    /// Parse and validate a calibration file. Every field is required and unknown fields are
-    /// rejected.
+    /// Parse and validate a calibration file. Every field is required except `unpitched` and
+    /// `creaky_tail`, and unknown fields are rejected. Their tone ids are checked against the
+    /// pack's inventory when the pack loads.
     pub(crate) fn from_json(json: &str) -> Result<Self, PackError> {
         let f: CalibFile = serde_json::from_str(json)
             .map_err(|e| PackError::Parse(format!("calibration: {e}")))?;
@@ -92,6 +122,8 @@ impl Calibration {
                 veto_cap: f.fusion.veto_cap,
             },
             decode: f.decode,
+            unpitched: f.unpitched,
+            creaky_tail: f.creaky_tail,
         };
         c.validate()?;
         Ok(c)
@@ -149,6 +181,49 @@ impl Calibration {
                 "calibration fusion.veto_cap must be in [0, 1], got {}",
                 fu.veto_cap
             ));
+        }
+        for (section, place, table) in self.place_tables() {
+            for (tone, v) in table {
+                if !(v.is_finite() && *v <= 0.0) {
+                    return invalid(format!(
+                        "calibration {section}.{place}.{tone} must be a log-probability \
+                         (finite, <= 0), got {v}"
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Every table of the per-place evidence sections present, as (section, place, table).
+    fn place_tables(&self) -> Vec<(&'static str, &'static str, &BTreeMap<String, f32>)> {
+        [
+            ("unpitched", &self.unpitched),
+            ("creaky_tail", &self.creaky_tail),
+        ]
+        .into_iter()
+        .filter_map(|(section, e)| e.as_ref().map(|e| (section, e)))
+        .flat_map(|(section, e)| {
+            [
+                (section, "phrase_final", &e.phrase_final),
+                (section, "other", &e.other),
+            ]
+        })
+        .collect()
+    }
+
+    /// Checks that each per-place evidence table names every tone of `inventory` and nothing
+    /// else.
+    pub(crate) fn check_tones(&self, inventory: &[tonekit_core::ToneId]) -> Result<(), PackError> {
+        let mut want: Vec<&str> = inventory.iter().map(|t| t.0.as_str()).collect();
+        want.sort_unstable();
+        for (section, place, table) in self.place_tables() {
+            let named: Vec<&str> = table.keys().map(String::as_str).collect();
+            if named != want {
+                return invalid(format!(
+                    "calibration {section}.{place} names tones {named:?}; the pack's are {want:?}"
+                ));
+            }
         }
         Ok(())
     }

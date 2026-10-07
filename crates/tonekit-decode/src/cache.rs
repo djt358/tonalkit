@@ -61,16 +61,29 @@ pub(crate) fn unmeasured(target: &ToneTarget, issue: MeasureIssue, llr: f32) -> 
     shapeless(target, llr, Measured::NotMeasured { issue })
 }
 
-/// The judgement of a target the utterance has no syllable for (ruling R33: a syllable without a
-/// nucleus, or a candidate with nowhere to put it): a likely miss at `llr`, reported
-/// `Partial { [Unvoiced] }` so that it counts towards `overall` rather than reading as "tone not
-/// checked".
+/// The judgement of a target the utterance has no syllable for (ruling R33: a syllable without an
+/// anchor, or a candidate with nowhere to put it): a likely miss whose path scored `llr`, reported
+/// `NotMeasured { NoNucleus }` (rulings R102, R104): nothing about its tone was measured, and the
+/// assessment's `overall` is then `None`, the clip not scored, never accepted at a prior.
 pub(crate) fn missed(target: &ToneTarget, llr: f32) -> ToneJudgement {
     shapeless(
         target,
         llr,
+        Measured::NotMeasured {
+            issue: MeasureIssue::NoNucleus,
+        },
+    )
+}
+
+/// The judgement of a syllable with speech energy and a vowel's spectrum but no pitch (ruling
+/// R102) while the calibration has no evidence for such syllables (ruling R103): the unvoiced
+/// fallback `llr`, reported `Partial { [Unpitched] }`.
+pub(crate) fn unpitched(target: &ToneTarget, llr: f32) -> ToneJudgement {
+    shapeless(
+        target,
+        llr,
         Measured::Partial {
-            issues: vec![MeasureIssue::Unvoiced],
+            issues: vec![MeasureIssue::Unpitched],
         },
     )
 }
@@ -213,7 +226,12 @@ impl<'a> Scorer<'a> {
             .map(|tone| self.pack.expect_tone(self.g, tone, ctx))
             .collect::<Result<Vec<_>, _>>()
             .map_err(pack_err)?;
-        let class = match self.classes.iter().position(|(e, _)| *e == expectations) {
+        // A class also keeps the phrase's end apart: unpitched evidence (ruling R103) reads it.
+        let class = match self
+            .classes
+            .iter()
+            .position(|(e, c)| *e == expectations && c.phrase_final == ctx.phrase_final)
+        {
             Some(class) => class,
             None => {
                 self.classes.push((expectations, ctx.clone()));
@@ -228,8 +246,10 @@ impl<'a> Scorer<'a> {
     /// index into the evidence), or `unvoiced_syllable_llr` if it has no shape.
     pub(crate) fn llr(&mut self, nucleus: usize, key: TargetKey) -> Result<f32, AssessError> {
         let (a, pack, g) = (self.a, self.pack, self.g);
-        let Ok(ex) = &self.tbus[nucleus].segment else {
-            return Ok(self.unvoiced_llr);
+        let ex = match &self.tbus[nucleus].segment {
+            Ok(ex) => ex,
+            Err(MeasureIssue::Unpitched) => return self.unpitched_llr(key),
+            Err(_) => return Ok(self.unvoiced_llr),
         };
         match key {
             TargetKey::Tone { class, tone } => {
@@ -257,6 +277,35 @@ impl<'a> Scorer<'a> {
         }
     }
 
+    /// The target behind `key` and its context.
+    fn target_of(&self, key: TargetKey) -> (ToneTarget, &TargetContext) {
+        match key {
+            TargetKey::Tone { class, tone } => (
+                ToneTarget {
+                    tone: self.pack.inventory()[tone].clone(),
+                    lexical_variants: Vec::new(),
+                    label: None,
+                },
+                &self.classes[class].1,
+            ),
+            TargetKey::Mixed { id } => {
+                let (target, ctx) = &self.mixed[id];
+                (target.clone(), ctx)
+            }
+        }
+    }
+
+    /// The LLR of the target behind `key` on an unpitched syllable (ruling R103): the pack's
+    /// unpitched evidence, or `unvoiced_syllable_llr` without any.
+    fn unpitched_llr(&self, key: TargetKey) -> Result<f32, AssessError> {
+        let (target, ctx) = self.target_of(key);
+        Ok(self
+            .pack
+            .judge_unpitched(&target, ctx, &self.a.issues)
+            .map_err(pack_err)?
+            .map_or(self.unvoiced_llr, |j| j.llr_target))
+    }
+
     /// The syllable holding nucleus `nucleus`, judged as `target` in `ctx`: `judge` on the
     /// nucleus's shape, or [`unmeasured`] if it has none. Its span is the nucleus's TBU, the frames
     /// that shape was measured on (whichever boundary pair the path gave the syllable).
@@ -274,6 +323,11 @@ impl<'a> Scorer<'a> {
                     .judge(self.g, &ex.shape, target, ctx, &issues)
                     .map_err(pack_err)?
             }
+            Err(MeasureIssue::Unpitched) => self
+                .pack
+                .judge_unpitched(target, ctx, &self.a.issues)
+                .map_err(pack_err)?
+                .unwrap_or_else(|| unpitched(target, self.unvoiced_llr)),
             Err(issue) => unmeasured(target, *issue, self.unvoiced_llr),
         };
         Ok(SyllableFit {

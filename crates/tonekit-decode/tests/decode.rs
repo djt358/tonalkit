@@ -82,6 +82,7 @@ fn analysis_of(spec: &SynthSpec) -> Analysis {
         register_source: RegisterSource::Given,
         voiced_st,
         issues: Vec::new(),
+        sonority: Vec::new(),
     }
 }
 
@@ -109,6 +110,7 @@ fn quiet(frames: usize) -> Analysis {
         register_source: RegisterSource::Given,
         voiced_st: Vec::new(),
         issues: Vec::new(),
+        sonority: Vec::new(),
     }
 }
 
@@ -272,7 +274,8 @@ fn no_speech_gives_unmeasured_candidates() {
 #[test]
 fn too_few_boundaries_gives_missed_syllables_at_the_region_start() {
     // One spoken syllable cannot hold eight: that candidate has no complete path, even relaxed.
-    // The utterance has a nucleus, so its syllables are likely misses (R33), not "not checked".
+    // The utterance has a nucleus, so its syllables are likely misses (R33): `NoNucleus`, not the
+    // `Unvoiced` of an utterance with no voice at all (R104).
     let pack = cmn();
     let unvoiced = pack.calibration().decode.unvoiced_syllable_llr;
     let a = analysis_of(&three(vec![vec![5., 5.]]));
@@ -292,8 +295,8 @@ fn too_few_boundaries_gives_missed_syllables_at_the_region_start() {
         assert_eq!((s.span.start_frame, s.span.end_frame), (start, start));
         assert_eq!(
             s.judgement.measured,
-            Measured::Partial {
-                issues: vec![MeasureIssue::Unvoiced]
+            Measured::NotMeasured {
+                issue: MeasureIssue::NoNucleus
             }
         );
         assert_eq!(s.judgement.expected.0, "1");
@@ -638,10 +641,11 @@ fn a_wrong_final_tone_is_judged_on_the_whole_syllable() {
 }
 
 #[test]
-fn a_dropped_syllable_is_a_likely_miss_not_unmeasured() {
+fn a_dropped_syllable_is_a_likely_miss_with_no_evidence() {
     // Two voiced syllables (4, 3) against a three-target candidate (4-1-3): no strict path, so
-    // the relaxed pass puts one target on a span without a nucleus. It scores the unvoiced LLR and
-    // is `Partial { [Unvoiced] }`, so it counts towards `overall` as a miss.
+    // the relaxed pass puts one target on a span without a nucleus. Its path scores the unvoiced
+    // LLR and it is `NotMeasured { NoNucleus }` (R104): the reading is not scored, never accepted
+    // at a prior.
     let pack = cmn();
     let unvoiced = pack.calibration().decode.unvoiced_syllable_llr;
     let a = analysis_of(&three(vec![vec![5., 1.], vec![2., 1., 4.]]));
@@ -649,14 +653,9 @@ fn a_dropped_syllable_is_a_likely_miss_not_unmeasured() {
     let r = decode(&a, &pack, &std_g(), &[c("spell", &["4", "1", "3"])]).unwrap();
     let s = &r.candidates[0].syllables;
     assert_eq!(s.len(), 3);
-    let missed = Measured::Partial {
-        issues: vec![MeasureIssue::Unvoiced],
+    let missed = Measured::NotMeasured {
+        issue: MeasureIssue::NoNucleus,
     };
-    assert!(
-        s.iter()
-            .all(|f| !matches!(f.judgement.measured, Measured::NotMeasured { .. })),
-        "{s:#?}"
-    );
     let misses: Vec<&str> = s
         .iter()
         .filter(|f| f.judgement.measured == missed)

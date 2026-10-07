@@ -1,8 +1,8 @@
 //! Utterance assembly (spec §7.4).
 
 use tonekit_core::{
-    AccentFit, AssessError, CandidateId, DecodeResult, Evidence, FusionWeights, Measured, Register,
-    UtteranceAssessment,
+    AccentFit, AssessError, CandidateId, DecodeResult, Evidence, FusionWeights, MeasureIssue,
+    Measured, Register, UtteranceAssessment,
 };
 
 use crate::syllable::fuse_syllable;
@@ -28,9 +28,11 @@ fn as_u32(n: usize) -> u32 {
 /// - `overall` is the minimum `p_correct` over the syllables that count: those that were measured
 ///   (`Full` or `Partial`) and those that carry a confusion hit (`heard_as` is `Some`), even if
 ///   unmeasured, because a hit is a specific miss and the veto has already capped its `p_correct`.
-///   It is `None` only when no syllable is measured and none has a hit ("tone not checked"). A
-///   counted `p_correct` that is not a number counts as 0: a syllable that cannot be graded fails
-///   the cast rather than dropping out of it.
+///   It is `None` when no syllable is measured and none has a hit ("tone not checked"), and when
+///   any syllable is `NotMeasured { NoNucleus }` without a hit (ruling R104): the card has a
+///   syllable the utterance shows nothing for, so the reading is not scored rather than accepted
+///   at a prior. A counted `p_correct` that is not a number counts as 0: a syllable that cannot be
+///   graded fails the cast rather than dropping out of it.
 pub fn assemble(
     r: &DecodeResult,
     intended: &CandidateId,
@@ -71,6 +73,19 @@ pub fn assemble(
         .map(|(_, c)| c.llr)
         .fold(r.null_llr + null_bias, f32::max);
 
+    // Ruling R104: a syllable the card has and the utterance shows nothing for (no nucleus,
+    // pitched or unpitched) has no tone evidence, so the reading cannot be said to be right: the
+    // clip is not scored rather than accepted at a prior. A confusion hit on it is evidence, and
+    // counts as R19 says.
+    let missing = syllables.iter().any(|s| {
+        s.heard_as.is_none()
+            && matches!(
+                s.measured,
+                Measured::NotMeasured {
+                    issue: MeasureIssue::NoNucleus
+                }
+            )
+    });
     let overall = syllables
         .iter()
         .filter(|s| !matches!(s.measured, Measured::NotMeasured { .. }) || s.heard_as.is_some())
@@ -81,7 +96,8 @@ pub fn assemble(
                 s.p_correct
             }
         })
-        .reduce(f32::min);
+        .reduce(f32::min)
+        .filter(|_| !missing);
 
     Ok(UtteranceAssessment {
         schema: SCHEMA.into(),

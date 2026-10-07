@@ -126,15 +126,36 @@ fn seed_calibration() -> Calibration {
             dur_sigma: 0.4,
             default_rate_s: 0.22,
         },
+        unpitched: None,
+        creaky_tail: None,
     }
 }
 
 #[test]
-fn default_calibration_is_the_seed_and_matches_the_shipped_file() {
+fn default_calibration_is_the_seed_and_the_shipped_file_adds_fitted_evidence() {
     let none = LanguagePack::from_toml(CMN_TOML, None).unwrap();
     assert_eq!(none.calibration(), &seed_calibration());
-    assert_eq!(cmn().calibration(), &seed_calibration());
     assert_eq!(Calibration::default(), seed_calibration());
+    // The shipped file keeps the seed's temperature, fusion and decode parameters and adds the
+    // evidence fitted by `tkh fit` (rulings R103, R108), naming every tone.
+    let shipped = cmn().calibration().clone();
+    let tones = ["1", "2", "3", "4", "5"];
+    for evidence in [&shipped.unpitched, &shipped.creaky_tail] {
+        let e = evidence
+            .as_ref()
+            .expect("fitted evidence in the shipped calibration");
+        for table in [&e.phrase_final, &e.other] {
+            assert_eq!(table.keys().map(String::as_str).collect::<Vec<_>>(), tones);
+        }
+    }
+    assert_eq!(
+        Calibration {
+            unpitched: None,
+            creaky_tail: None,
+            ..shipped
+        },
+        seed_calibration()
+    );
 }
 
 #[test]
@@ -240,7 +261,7 @@ fn insertion_llr_must_not_be_positive() {
 }
 
 #[test]
-fn provenance_declares_the_pack_and_its_calib_file_and_no_sources() {
+fn provenance_declares_the_pack_its_calib_file_and_the_volunteer_source() {
     let v: toml::Table = toml::from_str(CMN_PROVENANCE).unwrap();
     // Every data file of the pack is attested (`tkh provenance` checks the list is complete).
     let artifacts: Vec<&str> = v["artifacts"]
@@ -253,11 +274,17 @@ fn provenance_declares_the_pack_and_its_calib_file_and_no_sources() {
         artifacts,
         ["packs/cmn/cmn.toml", "packs/cmn/cmn.calib.json"]
     );
-    assert!(v["note"].as_str().unwrap().contains("not fitted"));
-    assert!(
-        v.get("source").is_none(),
-        "seed pack must list zero sources"
-    );
+    // The pack is the seed; the calibration's evidence is fitted on the volunteer corpus.
+    let note = v["note"].as_str().unwrap();
+    assert!(note.contains("cmn.toml: seed pack") && note.contains("not fitted"));
+    assert!(note.contains("volunteers-s05-v1"));
+    let sources: Vec<&str> = v["source"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| s["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(sources, ["volunteer-corpus"]);
 }
 
 #[test]

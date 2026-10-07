@@ -18,6 +18,17 @@ pub enum MeasureIssue {
     InvalidRegister,
     /// Evidence that is not a number (a non-finite shape or neural probability) was ignored.
     InvalidEvidence,
+    /// The card has a syllable the utterance shows nothing for: no nucleus, pitched or unpitched,
+    /// could hold it (ruling R102; it was `Unvoiced` before). Nothing about its tone was measured.
+    NoNucleus,
+    /// The syllable has speech energy and a vowel-like spectrum but no pitch, such as a creaky
+    /// vowel (ruling R102): its tone is scored on the pack's calibrated evidence for unpitched
+    /// syllables (ruling R103), not on a contour.
+    Unpitched,
+    /// The syllable's pitch gives way to creak: right after its last pitched frame come at least
+    /// 5 frames of speech with a vowel's spectrum and no pitch (ruling R108). Its shape is
+    /// measured on the pitched part, and the tail is evidence for tones that often end in creak.
+    CreakyTail,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

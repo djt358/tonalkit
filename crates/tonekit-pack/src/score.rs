@@ -23,6 +23,7 @@ use tonekit_core::{
 
 use crate::deltas;
 use crate::error::{invalid, PackError};
+use crate::tail::with_tail;
 use crate::{Component, Expectation, LanguagePack, TargetContext};
 
 /// Log-values are clamped into `[-LOG_CLAMP, LOG_CLAMP]`; `-LOG_CLAMP` is also what a shape
@@ -76,7 +77,7 @@ impl Scoring {
 }
 
 /// `v` as an f32 in `[-LOG_CLAMP, LOG_CLAMP]`; NaN reads as the lower bound.
-fn clamp_log(v: f64) -> f32 {
+pub(crate) fn clamp_log(v: f64) -> f32 {
     if v.is_nan() {
         -LOG_CLAMP as f32
     } else {
@@ -159,7 +160,9 @@ fn check_shape(x: &ToneShape) -> Result<bool, PackError> {
 
 impl LanguagePack {
     /// Calibrated log-likelihood of `x` under `tone` in `ctx` (mixture over the tone's
-    /// realisations, divided by the pack temperature). The expectation is the only allocation.
+    /// realisations, divided by the pack temperature), plus the calibration's creaky-tail
+    /// evidence when `issues` has `CreakyTail` (ruling R108). The expectation is the only
+    /// allocation.
     ///
     /// Errors: those of [`LanguagePack::expect_tone`], and `Invalid` if the shape's contour or
     /// `voiced_weights` are not `CONTOUR_POINTS` long. A shape with non-finite numbers scores
@@ -178,14 +181,19 @@ impl LanguagePack {
             return Ok(-LOG_CLAMP as f32);
         }
         let s = Scoring::new(self, issues);
-        Ok(s.calibrate(self.mixture(x, &expectation, s).ll))
+        Ok(with_tail(
+            s.calibrate(self.mixture(x, &expectation, s).ll),
+            self.tail_loglik(tone, ctx, issues),
+        ))
     }
 
     /// Judge one syllable against its intended target.
     ///
-    /// - `loglik`: the calibrated log-likelihood under every inventory tone, in inventory order.
-    /// - `llr_target`: the target's mixture (lexical variants included) against the
-    ///   prior-weighted background of all tones, both calibrated.
+    /// - `loglik`: the calibrated log-likelihood under every inventory tone, in inventory order
+    ///   ([`LanguagePack::tone_loglik`], creaky-tail evidence included).
+    /// - `llr_target`: the target's mixture (lexical variants included, and its creaky-tail
+    ///   evidence, ruling R108) against the prior-weighted background of all tones, both
+    ///   calibrated.
     /// - `heard`: the tone with the largest posterior (prior × calibrated likelihood), if that
     ///   posterior reaches the pack's `heard_threshold`.
     /// - `distance` and `component`: the best-matching target component; the distance is √d²
@@ -218,7 +226,10 @@ impl LanguagePack {
         for tone in &self.inventory {
             let expectation = self.expect_tone(grading, tone, ctx)?;
             loglik.push(if usable {
-                s.calibrate(self.mixture(x, &expectation, s).ll)
+                with_tail(
+                    s.calibrate(self.mixture(x, &expectation, s).ll),
+                    self.tail_loglik(tone, ctx, issues),
+                )
             } else {
                 -LOG_CLAMP as f32
             });
@@ -268,7 +279,11 @@ impl LanguagePack {
         let background = background.value();
 
         let mixture = self.mixture(x, &target_expectation, s);
-        judgement.llr_target = clamp_log(f64::from(s.calibrate(mixture.ll)) - background);
+        let target_ll = with_tail(
+            s.calibrate(mixture.ll),
+            self.target_tail_loglik(target, ctx, issues),
+        );
+        judgement.llr_target = clamp_log(f64::from(target_ll) - background);
 
         if let Some((score, i)) = top {
             let posterior = (score - background).exp();

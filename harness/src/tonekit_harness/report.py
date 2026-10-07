@@ -126,28 +126,45 @@ def _pair_table(gate: GateMetrics) -> list[str]:
 
 
 def _fallback_section(results: Sequence[Result]) -> list[str]:
-    """The gate clips whose score is a fallback prior rather than a measured tone, per speaker."""
+    """The gate clips with a syllable no nucleus could hold, per speaker: unscored since ruling
+    R104 (a reject at every threshold), or, in results from before it, decided by a fallback
+    prior."""
     gate = [r for r in results if r.set == "gate"]
-    decided = [r for r in gate if r.decided_by_fallback]
-    if not decided:
+    listed = [r for r in gate if r.missing and (r.overall is None or r.decided_by_fallback)]
+    if not listed:
         return []
     lines = [
-        "## Scores with no tone evidence",
+        "## Syllables with no nucleus",
         "",
-        "A syllable with no nucleus (the segmenter found fewer syllables than the card has) gets a fixed "
-        "fallback p_correct, not a measurement, and a clip's overall is its lowest syllable. These gate "
-        "clips were decided by that fallback, so their accept or reject says nothing about the tone.",
+        (
+            "A syllable the card has but the utterance shows nothing for (no nucleus, pitched or "
+            "unpitched) has no tone evidence. Such a clip is not scored: it counts as a reject at "
+            "every threshold and is never accepted at a prior (ruling R104; before it, the clip's "
+            "overall was a fixed fallback p_correct, which said nothing about the tone)."
+        ),
         "",
     ]
     for speaker in dict.fromkeys(r.speaker for r in gate):
         mine = [r for r in gate if r.speaker == speaker]
         syllables = [s for r in mine for s in r.syllables]
         missed = sum(s.fallback for s in syllables)
-        clips = sum(r.decided_by_fallback for r in mine)
+        clips = sum(r in listed for r in mine)
         lines.append(
-            f"- {speaker}: {missed} of {len(syllables)} gate syllables had no nucleus; {clips} of {len(mine)} clips decided by the fallback"
+            f"- {speaker}: {missed} of {len(syllables)} gate syllables had no nucleus; "
+            f"{clips} of {len(mine)} clips rest on one"
         )
-    return lines + [""] + [f"- {r.id}" for r in decided] + [""]
+    return lines + [""] + [f"- {r.id}" for r in listed] + [""]
+
+
+def _measured_label(s) -> str:
+    """How a syllable was measured, for the failure tables."""
+    if s.fallback:
+        return "no nucleus (fallback)"
+    if s.unpitched:
+        return "unpitched (creak evidence)"
+    if "CreakyTail" in s.issues:
+        return f"{s.measured} (creaky tail)"
+    return s.measured
 
 
 def _failure(f: Failure) -> list[str]:
@@ -169,7 +186,7 @@ def _failure(f: Failure) -> list[str]:
                 s.heard or "-",
                 num(s.p_correct),
                 num(s.distance),
-                "no nucleus (fallback)" if s.fallback else s.measured,
+                _measured_label(s),
                 _deltas(s.deltas),
             ]
             for i, s in enumerate(r.syllables, start=1)
@@ -212,7 +229,11 @@ def write(
     lines += _fallback_section(results)
     if gate.rejected_none:
         lines += ["## Clips with no score", ""]
-        lines += ["Tone not checked (no syllable measured); each counts as a reject.", ""]
+        lines += [
+            "Tone not checked (no syllable measured, or a syllable with no nucleus: see above); "
+            "each counts as a reject.",
+            "",
+        ]
         lines += [f"- {cid}" for cid in gate.rejected_none] + [""]
     lines += ["## Failures", ""]
     if failures:
