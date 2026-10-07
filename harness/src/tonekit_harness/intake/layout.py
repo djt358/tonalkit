@@ -5,6 +5,7 @@
     corpora/<corpus>/sessions/<CODE>.json        the bundle's session.json, byte for byte
     corpora/.intake-<CODE>-<pid>/                intake's staging area while it runs
     corpora/<corpus>/relabels.jsonl              `tkh relabel`'s log: what a listener decided per clip
+    corpora/<corpus>/.<manifest>.relabel-<pid>   relabel's new manifest while it is checked
     reports/<corpus>.md                          where `tkh eval` is told to write its report
     reports/<corpus>.results.json                ... and its per-clip results, which `tkh review` reads
     review/<corpus>/                             `tkh review`'s page, which links the corpus's audio
@@ -102,6 +103,17 @@ def results_path(root: Path, corpus_id: str) -> Path:
     """Where `tkh eval` is told to write its per-clip results (`eval_results`), beside the report;
     `tkh review` reads them from here by default."""
     return root / "reports" / f"{corpus_id}.results.json"
+
+
+def relabel_temp(manifest: Path) -> Path:
+    """Where `tkh relabel` writes the new manifest to check it before it replaces the old one."""
+    return manifest.with_name(f".{manifest.name}.relabel-{os.getpid()}")
+
+
+def relabel_temps(corpus: Path) -> list[Path]:
+    """New manifests a killed `tkh relabel` left in the corpus directory: they hold every
+    session's rows, so relabel and purge remove them."""
+    return sorted(p for p in corpus.glob(".*.relabel-*") if p.is_file()) if corpus.is_dir() else []
 
 
 def relabel_log(corpus: Path) -> Path:
