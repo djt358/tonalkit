@@ -8,12 +8,12 @@ high."""
 
 from __future__ import annotations
 
-import json
 from collections.abc import Callable, Sequence
 
 import numpy as np
 
 from .manifest import Clip
+from .register_json import register_json
 
 MIN_REGISTER_ST = 4.0  # tonekit's minimum register width, expanded symmetrically
 
@@ -52,5 +52,5 @@ def leave_one_out_registers(
         others = [seen[c.id] for c in clips if c.speaker == clip.speaker and c.id != clip.id]
         st = [x for a in others for x in a["voiced_st"]]
         register = pooled_register(st, sum(len(a["nuclei"]) for a in others))
-        out[clip.id] = None if register is None else json.dumps(register, sort_keys=True, separators=(",", ":"))
+        out[clip.id] = None if register is None else register_json(register)
     return out
