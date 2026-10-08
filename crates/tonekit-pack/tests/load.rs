@@ -1,6 +1,6 @@
 //! Loading and validation of language packs (spec §6.2).
 
-use tonekit_core::{AccentId, FusionWeights, ToneId};
+use tonekit_core::{AccentId, FusionWeights, RollingParams, ToneId};
 use tonekit_pack::{Calibration, DecodeParams, LanguagePack, PackError};
 
 const CMN_TOML: &str = include_str!("../../../packs/cmn/cmn.toml");
@@ -128,6 +128,7 @@ fn seed_calibration() -> Calibration {
         },
         unpitched: None,
         creaky_tail: None,
+        rolling_register: RollingParams::DEFAULT,
     }
 }
 

@@ -190,6 +190,34 @@ final class SmokeTests: XCTestCase {
         XCTAssertEqual(openSet.tbus.count, 3)
     }
 
+    // MARK: The rolling register (ruling R111)
+
+    func testARegisterRollsFromUtteranceToUtterance() throws {
+        let pcm = try Fixtures.pcm()
+        let pack = try Fixtures.pack()
+        XCTAssertEqual(pack.rollingParams(), RollingParams(halfLifeS: 30, maxShare: 0.03))
+
+        let cold = try analyze(pcm: pcm, sampleRate: 16_000, register: nil, externalF0: nil)
+        let graded = try assess(analysis: cold, pack: pack, request: Fixtures.request413())
+        let first = try rollRegister(previous: nil, analysis: cold, assessment: graded, pack: pack)
+        XCTAssertEqual(first.register.nSyllables, 3)
+        XCTAssertEqual(first.pool.count, 540)
+
+        let warm = try analyze(pcm: pcm, sampleRate: 16_000, register: first.register, externalF0: nil)
+        XCTAssertEqual(warm.register, first.register)
+        let again = try assess(analysis: warm, pack: pack, request: Fixtures.request413())
+        let second = try rollRegister(previous: first, analysis: warm, assessment: again, pack: pack)
+        XCTAssertEqual(second.register.nSyllables, 6)
+
+        let bad = RollingParams(halfLifeS: -1, maxShare: nil)
+        XCTAssertThrowsError(try rollRegister(previous: nil, analysis: cold, assessment: graded, pack: pack, params: bad)) { error in
+            guard let assessError = error as? AssessError, case .InvalidRequest = assessError else {
+                XCTFail("expected AssessError.InvalidRequest, got \(error)")
+                return
+            }
+        }
+    }
+
     // MARK: A pitch track from outside
 
     func testAnExternalF0TrackIsUsedAndSanitised() throws {

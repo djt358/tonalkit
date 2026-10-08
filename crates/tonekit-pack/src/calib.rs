@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
-use tonekit_core::FusionWeights;
+use tonekit_core::{FusionWeights, RollingParams};
 
 use crate::error::{invalid, PackError};
 
@@ -55,6 +55,10 @@ pub struct Calibration {
     /// whose pitch gives way to creak (`MeasureIssue::CreakyTail`), added to every tone's
     /// log-likelihood of its shape. Without it a creaky tail says nothing.
     pub creaky_tail: Option<PlaceEvidence>,
+    /// How a speaker's rolling register forgets (ruling R111): `tonekit::roll_register`'s
+    /// parameters for this pack. Optional in the file (default [`RollingParams::DEFAULT`]); when
+    /// the section is there, both of its fields must be (`null` for none).
+    pub rolling_register: RollingParams,
 }
 
 impl Default for Calibration {
@@ -78,6 +82,7 @@ impl Default for Calibration {
             },
             unpitched: None,
             creaky_tail: None,
+            rolling_register: RollingParams::DEFAULT,
         }
     }
 }
@@ -93,6 +98,17 @@ struct FusionFile {
     veto_cap: f32,
 }
 
+/// Strict mirror of `RollingParams`: unknown fields are rejected, and each field must be given
+/// (`null` for none) so that a misspelt or forgotten half-life cannot turn decay off.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RollingFile {
+    #[serde(deserialize_with = "Option::deserialize")]
+    half_life_s: Option<f32>,
+    #[serde(deserialize_with = "Option::deserialize")]
+    max_share: Option<f32>,
+}
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct CalibFile {
@@ -103,12 +119,14 @@ struct CalibFile {
     unpitched: Option<PlaceEvidence>,
     #[serde(default)]
     creaky_tail: Option<PlaceEvidence>,
+    #[serde(default)]
+    rolling_register: Option<RollingFile>,
 }
 
 impl Calibration {
-    /// Parse and validate a calibration file. Every field is required except `unpitched` and
-    /// `creaky_tail`, and unknown fields are rejected. Their tone ids are checked against the
-    /// pack's inventory when the pack loads.
+    /// Parse and validate a calibration file. Every field is required except `unpitched`,
+    /// `creaky_tail` and `rolling_register`, and unknown fields are rejected. The evidence
+    /// tables' tone ids are checked against the pack's inventory when the pack loads.
     pub(crate) fn from_json(json: &str) -> Result<Self, PackError> {
         let f: CalibFile = serde_json::from_str(json)
             .map_err(|e| PackError::Parse(format!("calibration: {e}")))?;
@@ -124,6 +142,12 @@ impl Calibration {
             decode: f.decode,
             unpitched: f.unpitched,
             creaky_tail: f.creaky_tail,
+            rolling_register: f.rolling_register.map_or(RollingParams::DEFAULT, |r| {
+                RollingParams {
+                    half_life_s: r.half_life_s,
+                    max_share: r.max_share,
+                }
+            }),
         };
         c.validate()?;
         Ok(c)
@@ -181,6 +205,9 @@ impl Calibration {
                 "calibration fusion.veto_cap must be in [0, 1], got {}",
                 fu.veto_cap
             ));
+        }
+        if let Some(problem) = self.rolling_register.problem() {
+            return invalid(format!("calibration rolling_register: {problem}"));
         }
         for (section, place, table) in self.place_tables() {
             for (tone, v) in table {

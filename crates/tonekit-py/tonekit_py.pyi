@@ -51,3 +51,20 @@ def assess(
     request_json: str,
 ) -> str:
     """Grade an intended reading ("tonekit.assessment.v1"); returns the UtteranceAssessment JSON."""
+
+def roll_register(
+    previous_json: str | None,
+    analysis_json: str,
+    assessment_json: str,
+    pack_toml: str,
+    calib_json: str | None,
+    params_json: str | None = None,
+) -> str:
+    """Roll a graded utterance into a speaker's register (R111); returns the RollingRegister JSON.
+
+    Without params_json the pack calibration's rolling_register applies. Raises ValueError for
+    unusable parameters, a bad pack, or JSON that does not parse.
+    """
+
+def rolling_params(pack_toml: str, calib_json: str | None) -> str:
+    """The pack calibration's rolling_register parameters (or tonekit's default) as JSON."""

@@ -3,8 +3,9 @@
 //!
 //! - [`Pack`] (a Swift class): `Pack.fromToml(packToml:calibJson:)`, then `lect()`,
 //!   `baseAccent()` and `inventory()`;
-//! - [`analyze`], [`decode`], [`lattice`] and [`assess`] (Swift free functions) with the facade's
-//!   own types, which carry UniFFI derives under the `ffi` feature: there are no mirror types.
+//! - [`analyze`], [`decode`], [`lattice`], [`assess`] and [`roll_register`] (Swift free
+//!   functions) with the facade's own types, which carry UniFFI derives under the `ffi` feature:
+//!   there are no mirror types.
 //!   `AssessRequest` and the ids are the facade's; in Swift the four id types (`Lect`, `AccentId`,
 //!   `ToneId`, `CandidateId`) are plain `String`s.
 //!
@@ -28,8 +29,8 @@ use std::sync::Arc;
 
 use tonekit::{
     AccentId, Analysis, AnalyzeOptions, AssessError, AssessRequest, Candidate, DecodeResult,
-    F0Choice, F0Track, GradingTarget, LanguagePack, Lect, Register, ToneId, ToneLattice,
-    UtteranceAssessment,
+    F0Choice, F0Track, GradingTarget, LanguagePack, Lect, Register, RollingParams, RollingRegister,
+    ToneId, ToneLattice, UtteranceAssessment,
 };
 
 uniffi::setup_scaffolding!();
@@ -77,6 +78,12 @@ impl Pack {
     /// The tone ids of the pack, in pack order (`["1", "2", "3", "4", "5"]` for cmn).
     pub fn inventory(&self) -> Vec<ToneId> {
         self.inner.inventory().to_vec()
+    }
+
+    /// How a rolling register forgets for this pack: its calibration's `rolling_register` (ruling
+    /// R111), what [`roll_register`] uses when given no parameters.
+    pub fn rolling_params(&self) -> RollingParams {
+        self.inner.calibration().rolling_register.clone()
     }
 }
 
@@ -150,4 +157,31 @@ pub fn assess(
     request: AssessRequest,
 ) -> Result<UtteranceAssessment, AssessError> {
     tonekit::assess(&analysis, &pack.inner, &request)
+}
+
+/// The register to keep after grading an utterance, following the speaker as their register
+/// drifts (ruling R111): `previous` (`nil` for a speaker with nothing rolled in yet) with the
+/// utterance's voiced speech rolled in, older evidence decaying. Pass `register` of the result to
+/// the next `analyze`, and keep the whole value for the next call; persist it only if
+/// `register.nSyllables > 0`.
+///
+/// Seed it with the register drill (roll each drill utterance in, starting from `nil`) or with
+/// the first graded utterances. `assessment` must be `assess`'s result for `analysis`; an
+/// utterance with no measured syllable changes nothing. `params` default to the pack's
+/// ([`Pack::rolling_params`]); [`RollingParams::POOLED`] (both `nil`) is plain pooling.
+///
+/// # Errors
+///
+/// [`AssessError::InvalidRequest`] for unusable `params` (a half-life that is not a positive
+/// number, a share outside 0 to 1, a share without a half-life).
+#[uniffi::export(default(params = None))]
+pub fn roll_register(
+    previous: Option<RollingRegister>,
+    analysis: Analysis,
+    assessment: UtteranceAssessment,
+    pack: Arc<Pack>,
+    params: Option<RollingParams>,
+) -> Result<RollingRegister, AssessError> {
+    let params = params.unwrap_or_else(|| pack.rolling_params());
+    tonekit::roll_register(previous.as_ref(), &analysis, &assessment, &params)
 }
