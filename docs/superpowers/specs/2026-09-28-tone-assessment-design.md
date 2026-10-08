@@ -117,9 +117,13 @@ to know *which* syllables were said before it can judge them.
    ├── lattice(analysis, pack, grading)                    open set, no candidates
    │        → ToneLattice: TBU spans × inventory log-likelihoods + posteriors
    │
-   └── assess(analysis, pack, grading, intended, distractors, evidence, compare_accents)
-            = decode([intended] ∪ distractors) + diagnostics + fusion
-            → UtteranceAssessment (xiuzhen/Bendy grading)
+   ├── assess(analysis, pack, grading, intended, distractors, evidence, compare_accents)
+   │        = decode([intended] ∪ distractors) + diagnostics + fusion
+   │        → UtteranceAssessment (xiuzhen/Bendy grading)
+   │
+   └── roll_register(previous, analysis, assessment, params)          (R111)
+            → RollingRegister: the register to carry to the next utterance, following the
+              speaker's drift (its `register` goes to the next analyze())
 ```
 
 `tonekit` holds no policy. It reports likelihoods, probabilities, distances and diagnostics.
@@ -197,6 +201,12 @@ pub struct GradingTarget { pub accent: AccentId, pub style: Option<StyleProfile>
 
 // register.rs: semitones re 55 Hz; four numbers, deliberately coarse (§11.3)
 pub struct Register { pub floor_st: f32, pub median_st: f32, pub ceil_st: f32, pub n_syllables: u32 }
+// rolling.rs (R111): what an app carries between utterances to follow the speaker's drift.
+// `pool`: seconds of voiced speech (after decay) per 0.1 st bin from −6 st, 540 bins (to 48 st).
+pub struct RollingRegister { pub register: Register, pub pool: Vec<f64> }
+// None = no decay / no cap (both None: plain pooling, R107). Default 30 s and 0.03 (calib
+// `rolling_register`, optional; when present both keys are required, null for none).
+pub struct RollingParams { pub half_life_s: Option<f32>, pub max_share: Option<f32> }
 
 // style.rs: an individual's realisation within an accent (imprint). No timbre, no embedding.
 pub struct StyleTone { pub tone: ToneId, pub contour: Vec<f32>, pub n: u32 }
@@ -542,7 +552,7 @@ Inputs: boundary candidates B (sorted frames), speech region, candidates of any 
 - Seeds live in `cmn.calib.json`: `filler_per_frame = 0.03`, `unvoiced_syllable_llr = −3.0`,
   `insertion_llr = −2.0`, `null_bias = −2.0`. It also carries the optional `unpitched` and
   `creaky_tail` tables (ln P(observation | tone) at the end of a phrase and elsewhere), fitted by
-  `tkh fit` (R103, R108, R110).
+  `tkh fit` (R103, R108, R110), and the optional `rolling_register` parameters (R111).
 - Cost is O(|B|²·K) per candidate. With |B| ≤ 4·nuclei + 2 and up to 64 candidates, this is
   microseconds to milliseconds.
 
@@ -672,6 +682,16 @@ to a literal GAN.
   - Bendy persists it per user; an optional 妈麻马骂 onboarding utterance seeds it. Only syllables
     that were measured count as u, so a whispered or silent cast leaves a given register
     unchanged; consumers persist `register_update` only if `n_syllables > 0`.
+  - **Rolling register (R111).** Learners drift (they often start higher and more variable and
+    settle), so the app can instead carry a `RollingRegister` from utterance to utterance with
+    `roll_register(previous, analysis, assessment, params)`, seeded by the drill (each drill
+    utterance rolled in from `None`) or by the first graded utterances. It pools the speech-only
+    voiced semitones (R106) of every utterance with a measured syllable in 0.1 st bins: each
+    utterance counts as its voiced seconds, at most `−half_life_s · log2(1 − max_share)`
+    (1.3 s by default); the pool first decays by `2^(−counted/half_life_s)`. Floor, median and
+    ceiling are the pool's weighted p5/p50/p95, widened by `2 st · (1 − min(n, 30)/30)` while
+    cold, at least 4 st wide. Without decay or cap a warm rolling register is the pooled
+    percentiles of every frame (R107). `register_update` is unchanged.
   - It's never inferred from anything but the user's own f0.
 
 ---
@@ -725,7 +745,9 @@ with the download date next to the data, so the provenance claim can be shown la
 
 - On-device only. PCM is discarded after analysis unless the user saves a clip.
 - No speaker embeddings, ever. `Register` is four numbers, and `StyleProfile` is per-tone mean
-  contours in normalised space: pitch-shape statistics, not timbre.
+  contours in normalised space: pitch-shape statistics, not timbre. A `RollingRegister` (R111)
+  adds the user's pitch distribution (a 540-bin histogram of their voiced semitones, decayed):
+  still pitch statistics, not timbre, kept on the device like the register.
 - Common Voice's no-re-identification term is honoured.
 
 ### 11.4 Imprints and voice likeness: resolved (DJ, v2.1)
