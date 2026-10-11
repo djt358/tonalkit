@@ -12,6 +12,8 @@ forks a format locally.*
 | Manifest additions | `manifest.jsonl` in a corpus dir | `tonekit_harness.manifest` (extended) |
 | Gate file | `gates/*.toml` (repo) | `tonekit_harness.contracts.gate` |
 | Purge log | `$TONEKIT_DATA/purge-log.jsonl` | `tonekit_harness.contracts.registry` |
+| Eval results (per clip) | `$TONEKIT_DATA/reports/<corpus>.results.json` | `tonekit_harness.eval_results` |
+| Relabel export and log | `relabels-<corpus>.json` (the review page's download); `corpora/<id>/relabels.jsonl` | `tonekit_harness.contracts.relabel` |
 
 All models are pydantic v2 with `extra="forbid"`, like `manifest.Clip`. `tkh schema` writes their
 JSON Schemas to `kit/schema/`, and the kit's JavaScript tests validate against those.
@@ -155,15 +157,19 @@ $TONEKIT_DATA/
   corpora/<corpus id>/audio/...
   corpora/<corpus id>/audio/<CODE>/<card id>.wav  # intake: a session's clips, byte for byte
   corpora/<corpus id>/sessions/<CODE>.json        # intake: the session's session.json, byte for byte
+  corpora/<corpus id>/relabels.jsonl              # tkh relabel: append-only log of decisions and row changes (§7)
   inbox/                      # bundles waiting for intake
   stale/<corpus id>.json      # outputs made from this corpus are stale (purge, relabel); cleared by the next run
   reports/<corpus id>.md      # where intake tells `tkh eval` to write (reports list clips by session code)
+  reports/<corpus id>.results.json  # `tkh eval --results`: every clip's grading, which `tkh review` reads
+  review/<corpus id>/index.html     # `tkh review`: the listening page; links the audio, opened from disk (§7)
   purge-log.jsonl
 ```
 
 A stale marker (`contracts.registry.StaleMarker`) is `{"corpus": "<id>", "reasons": [{"reason":
 "purged session K7Q2MD", "marked_at": "<UTC time>"}]}`; marking again appends a reason, and a
-marker that can't be read is replaced by one that says so.
+marker that can't be read is replaced by one that says so. A relabel that changes rows marks the
+corpus with `relabelled <n> clips (<file name>)` (no clip ids).
 
 A pack fitted on corpora lists them in its `PROVENANCE.toml` as `corpora = ["<corpus id>", ...]`
 beside its `[[source]]` rows (ruling R113). `tkh provenance` fails while
@@ -225,6 +231,12 @@ manifest holds many speakers and a gate pair is one speaker's two readings (the 
 false. A recorded `gate` or `diag_t23` card whose twin was skipped gets no row (pairs are graded
 whole).
 
+Rows `tkh relabel` changes (§7, R112): `produced_tones` become what the listener heard and `label`
+follows them (`correct` when they are the intended reading, else `tone_error`); "unclear" sets
+`needs_listen`; "exclude" removes the row. When a pair of a pair set is no longer one `correct`
+and one `tone_error` row, both rows lose their `pair` (`null`): a `gate` row with no pair is kept
+for fitting and listed by the gate report, but is not in any pair. Every row still validates.
+
 ## 5. Gate file (`gates/<id>.toml`)
 
 ```toml
@@ -277,15 +289,20 @@ Removes, for that session:
 - the speaker entry;
 - analysis-cache entries: the cache keys an entry by a hash over the WAV, the register and the
   tonekit build, so one session's entries can't be picked out and purge clears the whole cache;
-- review pages that embed the audio (none yet: `tkh review` must write them where purge looks);
-- reports under `$TONEKIT_DATA/reports/` that mention the session (they list clips by id;
-  the next `tkh eval` makes new ones);
+- review pages that link the audio: every `review/<corpus>/` whose files mention the session goes
+  whole (the next `tkh review` makes a new one);
+- the session's entries in each corpus's `relabels.jsonl` (by `session`, or a clip id starting
+  `<CODE>-`), and any new manifest a killed `tkh relabel` left in the corpus directory;
+- reports under `$TONEKIT_DATA/reports/` that mention the session, the `tkh eval --results`
+  files among them (they list clips by id; the next `tkh eval` makes new ones);
 - everything intake wrote for it: the copy of `session.json` (intake keeps no QC rows yet), and
   any staging area an interrupted intake left;
 - any bundle left in `inbox/` (by name, or by the code in its `session.json`).
 
-What the engine can't reach is DJ's: the original zip in Messages, Mail, Downloads or Files. The
-purge output ends with that reminder.
+What the engine can't reach is DJ's: the original zip in Messages, Mail, Downloads or Files, and
+any `relabels-*.json` he exported from a review page. The purge output ends with that reminder.
+A review page drops the decisions it kept in the browser about sessions its corpus no longer has
+the next time a page made after the purge is opened.
 
 Then:
 - **Stale outputs:** it marks the scoreboard and any calibration fitted on that corpus as stale.
@@ -294,3 +311,44 @@ Then:
 - **Log:** it appends `{"session", "purged_at", "files_removed", "corpora"}` to `purge-log.jsonl`;
   `files_removed` is a count, never names (R68).
 - **Repeat runs:** it is idempotent, and it reports "nothing found" for an unknown code.
+
+## 7. Listen and relabel (`tkh review`, `tkh relabel`)
+
+Labels come from the cards; a listener checks what was said. `tkh review --corpus ID` writes
+`review/<corpus>/index.html` under the data root: one self-contained page (script, style and data
+inline, so it works opened from disk; a Content-Security-Policy with no network source; audio by
+relative links under the data root). It reads the scorer's view from `tkh eval --results`
+(`tonekit.eval-results.v1`, `tonekit_harness.eval_results`: per clip `overall`, per syllable
+`expected`, `heard`, `p_correct`, `measured`, `issues`). The page keeps decisions in the browser
+(`localStorage`, per corpus) and exports them.
+
+The export, `relabels-<corpus>.json` (`contracts.relabel.RelabelExport`):
+
+```json
+{"schema": "tonekit.relabels.v1", "corpus": "volunteers-s05-v1", "who": "DJ",
+ "exported_at": "<UTC time>",
+ "decisions": [{"clip": "K7Q2MD-g01-e", "verdict": "heard", "tones": ["4", "1", "3"],
+                "decided_at": "<UTC time>"}]}
+```
+
+`verdict` is `as_card`, `heard` (with `tones`, one pack tone id per syllable), `unclear` or
+`exclude` (no tones); each clip at most once.
+
+`tkh relabel FILE --corpus ID` rebuilds each decided clip's row from the row intake wrote and its
+latest decision (§4), keeps pairs whole or takes them apart, writes the manifest in one rename,
+marks the corpus stale (§3), and appends to `corpora/<id>/relabels.jsonl`
+(`contracts.relabel.LogEntry`), one line per clip with a new decision or a changed row:
+
+```json
+{"session": "K7Q2MD", "clip": "K7Q2MD-g01-e", "applied_at": "<UTC time>",
+ "decision": {"verdict": "heard", "tones": ["4", "1", "3"], "decided_at": "<UTC time>", "who": "DJ"},
+ "row": {"before": {"...": "the manifest row"}, "after": {"...": "the new row, or null when excluded"}}}
+```
+
+`decision` is null for a row changed only because its twin's relabel broke the pair; `row` is null
+when the decision changes nothing. A clip's first `row.before` is the row intake wrote, so every
+relabel starts from the card's reading. A decision older (`decided_at`) than the one applied is
+skipped; one that says what the applied one says changes nothing, so applying a file twice is a
+no-op and a newer export replaces older decisions. Decisions for clips the corpus does not have
+are skipped; a decision that does not fit its clip (tone count, unknown tone, `as_card` with other
+tones) refuses the whole file.

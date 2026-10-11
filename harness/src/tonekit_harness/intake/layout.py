@@ -4,7 +4,11 @@
     corpora/<corpus>/audio/<CODE>/<card>.wav     the bundle's clips, byte for byte
     corpora/<corpus>/sessions/<CODE>.json        the bundle's session.json, byte for byte
     corpora/.intake-<CODE>-<pid>/                intake's staging area while it runs
+    corpora/<corpus>/relabels.jsonl              `tkh relabel`'s log: what a listener decided per clip
+    corpora/<corpus>/.<manifest>.relabel-<pid>   relabel's new manifest while it is checked
     reports/<corpus>.md                          where `tkh eval` is told to write its report
+    reports/<corpus>.results.json                ... and its per-clip results, which `tkh review` reads
+    review/<corpus>/                             `tkh review`'s page, which links the corpus's audio
 """
 
 from __future__ import annotations
@@ -15,6 +19,8 @@ from pathlib import Path, PurePosixPath
 AUDIO_DIR = "audio"
 SESSIONS_DIR = "sessions"
 STAGING_PREFIX = ".intake-"
+RELABEL_LOG = "relabels.jsonl"
+REVIEW_DIR = "review"
 DEFAULT_CORPUS_PREFIX = "volunteers-"
 
 
@@ -91,3 +97,35 @@ def is_session_row(row: dict, corpus: Path, manifest: Path, code: str) -> bool:
 def report_path(root: Path, corpus_id: str) -> Path:
     """Under the data root: a report names clips by session code and lists per-clip scores."""
     return root / "reports" / f"{corpus_id}.md"
+
+
+def results_path(root: Path, corpus_id: str) -> Path:
+    """Where `tkh eval` is told to write its per-clip results (`eval_results`), beside the report;
+    `tkh review` reads them from here by default."""
+    return root / "reports" / f"{corpus_id}.results.json"
+
+
+def relabel_temp(manifest: Path) -> Path:
+    """Where `tkh relabel` writes the new manifest to check it before it replaces the old one."""
+    return manifest.with_name(f".{manifest.name}.relabel-{os.getpid()}")
+
+
+def relabel_temps(corpus: Path) -> list[Path]:
+    """New manifests a killed `tkh relabel` left in the corpus directory: they hold every
+    session's rows, so relabel and purge remove them."""
+    return sorted(p for p in corpus.glob(".*.relabel-*") if p.is_file()) if corpus.is_dir() else []
+
+
+def relabel_log(corpus: Path) -> Path:
+    """`tkh relabel`'s append-only log in the corpus directory (`contracts.relabel`)."""
+    return corpus / RELABEL_LOG
+
+
+def review_root(root: Path) -> Path:
+    return root / REVIEW_DIR
+
+
+def review_dir(root: Path, corpus_id: str) -> Path:
+    """`tkh review`'s page for a corpus: under the data root, since it links the volunteers' audio
+    and names their clips; purge removes a page that mentions the session."""
+    return review_root(root) / corpus_id

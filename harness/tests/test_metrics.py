@@ -301,12 +301,22 @@ def test_a_pair_needs_one_correct_and_one_tone_error():
     with pytest.raises(MetricsError, match="gate-01.*more than one"):
         metrics.loo_gate(doubled)
 
-    with pytest.raises(MetricsError, match="gate-x.*no pair"):
-        metrics.loo_gate(results + [res("gate-x", 0.5, pair=None)])
 
     graded = results + [res("gate-03-g", 0.5, pair="gate-03", label="graded")]
     with pytest.raises(MetricsError, match="gate-03-g.*label"):
         metrics.loo_gate(graded)
+
+
+def test_a_gate_clip_with_no_pair_is_left_out_of_the_pairs_and_listed():
+    """`tkh relabel` takes the pair off both clips of a pair it leaves without one correct and one
+    tone_error reading (R112): they are graded, but not counted in CA or WA."""
+    results = gate_pairs([(0.6, 0.1), (0.7, 0.2)])
+    unpaired = [res("gate-y", 0.0, pair=None), res("gate-x", 0.9, pair=None, label="tone_error")]
+    gate = metrics.loo_gate(results + unpaired)
+    assert gate.unpaired == ["gate-x", "gate-y"]
+    assert gate.outcomes == metrics.loo_gate(results).outcomes
+    assert "gate-x" not in gate.accepted and metrics.loo_gate(results).unpaired == []
+    assert metrics.failures(results + unpaired, gate, 0.5) == metrics.failures(results, gate, 0.5)
 
 
 # ---- diag_minimal and diag_count --------------------------------------------------------------
@@ -321,6 +331,17 @@ def test_candidate_id_accuracy_is_the_fraction_ranked_first():
         res("g1", 0.5, set="gate", rank=2),  # not diag_minimal: ignored
     ]
     assert metrics.candidate_id_accuracy(results) == pytest.approx(2 / 4)
+
+
+def test_candidate_id_accuracy_leaves_out_minimal_set_clips_relabelled_as_misread():
+    """A minimal-set clip a listener heard as another reading is `tone_error` (R112): ranking its
+    intended reading first would be wrong, so it neither counts nor fails."""
+    misread = res("m9", 0.5, set="diag_minimal", rank=2, label="tone_error")
+    results = [res("m1", 0.5, set="diag_minimal", rank=1), misread]
+    assert metrics.candidate_id_accuracy(results) == 1.0
+    assert metrics.candidate_id_accuracy([misread]) is None
+    gate = metrics.loo_gate(gate_pairs([(0.6, 0.1), (0.7, 0.2)]))
+    assert metrics.failures(results, gate, 0.5) == []
 
 
 def test_candidate_id_accuracy_without_clips_is_none():

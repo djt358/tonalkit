@@ -1,7 +1,8 @@
 """`tkh purge --session CODE` (docs/s05/contracts.md section 6): remove everything intake wrote
-for a session, its bundles in inbox/ and the analysis cache, mark the corpora it changed stale,
-and log it. What would be written is worked out and checked before anything is deleted; a code
-found nowhere changes nothing."""
+for a session, its bundles in inbox/ and the analysis cache, its entries in the corpus's relabel
+log and the review pages that link its audio, mark the corpora it changed stale, and log it. What
+would be written is worked out and checked before anything is deleted; a code found nowhere
+changes nothing."""
 
 from __future__ import annotations
 
@@ -22,6 +23,7 @@ from .errors import IntakeError
 from .manifest_lines import without_rows
 from .packs import pack_path
 from .purge_log import append_purge_record
+from .review_pages import review_pages_mentioning
 from .stale import mark_stale
 from .trace import CorpusTrace, corpus_document, find_session, manifest_text
 
@@ -31,6 +33,7 @@ class CorpusPlan:
     trace: CorpusTrace
     corpus_text: str | None  # corpus.toml without the session; None: leave it
     manifest_text: str | None  # the manifest without the session's rows; None: leave it
+    relabel_text: str | None  # the relabel log without the session's entries; None: leave it
 
 
 @dataclass(frozen=True)
@@ -41,6 +44,7 @@ class PurgeOutcome:
     inbox: int  # bundles removed from inbox/
     cache_entries: int  # analysis-cache files cleared
     reports: int  # reports under the data root that listed the session's clips
+    review_pages: int  # `tkh review` pages that linked the session's audio
     log: Path
 
 
@@ -64,8 +68,21 @@ def _manifest_text(trace: CorpusTrace, code: str) -> str | None:
     return without_rows(text, lambda row: layout.is_session_row(row, trace.corpus, trace.manifest, code))[0]
 
 
+def _is_session_entry(entry: dict, code: str) -> bool:
+    return entry.get("session") == code or str(entry.get("clip", "")).startswith(f"{code}-")
+
+
+def _relabel_text(trace: CorpusTrace, code: str) -> str | None:
+    """The relabel log without the session's entries (each names its session and clip)."""
+    log = layout.relabel_log(trace.corpus)
+    text, removed = without_rows(manifest_text(log), lambda entry: _is_session_entry(entry, code))
+    return text if removed else None
+
+
 def _plan(root: Path, trace: CorpusTrace, code: str, repo: Path) -> CorpusPlan:
-    return CorpusPlan(trace, _corpus_text(root, trace, code, repo), _manifest_text(trace, code))
+    return CorpusPlan(
+        trace, _corpus_text(root, trace, code, repo), _manifest_text(trace, code), _relabel_text(trace, code)
+    )
 
 
 def _remove_if_empty(d: Path) -> None:
@@ -80,7 +97,11 @@ def _apply(root: Path, plan: CorpusPlan, code: str) -> int:
         write_text_atomic(t.manifest, plan.manifest_text)
     if plan.corpus_text is not None:
         write_text_atomic(corpus_file_path(root, t.corpus_id), plan.corpus_text)
+    if plan.relabel_text is not None:
+        write_text_atomic(layout.relabel_log(t.corpus), plan.relabel_text)
     removed = 0
+    for leftover in layout.relabel_temps(t.corpus):  # a killed relabel's new manifest: every session's rows
+        removed += remove_tree(leftover)
     for path in (layout.audio_dir(t.corpus, code), layout.session_copy(t.corpus, code)):
         if path.exists():
             removed += remove_tree(path)
@@ -96,7 +117,8 @@ def purge_session(
     trace = find_session(root, code)
     inbox = session_bundles(inbox_dir(root), code)
     reports = reports_mentioning(root, code)
-    if not trace.found and not inbox and not reports:
+    pages = review_pages_mentioning(root, code)
+    if not trace.found and not inbox and not reports and not pages:
         return None
     plans = [_plan(root, t, code, repo) for t in trace.corpora]  # may refuse: before any change
     files = sum(_apply(root, p, code) for p in plans)
@@ -104,6 +126,7 @@ def purge_session(
     files += sum(remove_tree(p) for p in inbox)
     cache = clear_analysis_cache(cache_dir) if trace.corpora else 0
     files += remove_files(reports)
+    files += sum(remove_tree(d) for d in pages)
     at = now or datetime.now(UTC)
     for t in trace.corpora:
         mark_stale(root, t.corpus_id, f"purged session {code}", now=at)
@@ -116,5 +139,6 @@ def purge_session(
         inbox=len(inbox),
         cache_entries=cache,
         reports=len(reports),
+        review_pages=len(pages),
         log=log,
     )
