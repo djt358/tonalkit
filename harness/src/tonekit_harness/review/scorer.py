@@ -10,9 +10,11 @@ asks for an error tone. A syllable with no nucleus has no evidence and no doubt.
 
 A clip is in one of five groups, in page order:
 - TWIN: on a syllable where the clip's card and its pair twin differ, the scorer heard the twin's
-  tone: an error card read as the correct word, or a correct card read as the error word. This
-  is the most specific sign of a wrong label; the scorer's general weaknesses (a creaky final T4,
-  a shallow reduced T4) spread over every card and say less;
+  tone, or, on an error card (whose twin there has the intended tone), it gives the intended tone
+  at least even odds without hearing any tone confidently: an error card read as the correct
+  word, or a correct card read as the error word. This is the most specific sign of a wrong
+  label; the scorer's general weaknesses (a creaky final T4, a shallow reduced T4) spread over
+  every card and say less;
 - DISAGREES: some other syllable was heard, confidently, as another tone than the card's;
 - UNSURE: the scorer doubts a syllable (doubt at least 0.5), or could not measure one, or left
   the clip unscored;
@@ -78,11 +80,21 @@ def _syllable(s: SyllableResult, card_tone: str, intended_tone: str) -> Syllable
     return SyllableView(s.heard, s.p_correct, _note(s), doubt)
 
 
-def _group(views: list[SyllableView], asked: list[str], twin: list[str] | None, result: ClipResult, doubt) -> str:
-    heard = [v.heard for v in views]
-    if twin is not None and any(h is not None and t != a and h == t for h, a, t in zip(heard, asked, twin, strict=True)):
+def _leans_to_twin(v: SyllableView, asked: str, twin: str, intended: str) -> bool:
+    """On a syllable where the card and its twin differ: the scorer heard the twin's tone, or (the
+    twin's tone being the intended one, as on an error card) gives it at least even odds."""
+    if asked == twin:
+        return False
+    if v.heard is not None:
+        return v.heard == twin
+    return twin == intended and v.p_correct is not None and v.p_correct >= DOUBTFUL
+
+
+def _group(views: list[SyllableView], asked: list[str], twin: list[str] | None, intended: list[str],
+           result: ClipResult, doubt: float | None) -> str:  # fmt: skip
+    if twin is not None and any(map(_leans_to_twin, views, asked, twin, intended)):
         return TWIN
-    if any(h is not None and h != a for h, a in zip(heard, asked, strict=True)):
+    if any(v.heard is not None and v.heard != a for v, a in zip(views, asked, strict=True)):
         return DISAGREES
     if result.overall is None or any(v.doubt is None for v in views) or (doubt or 0.0) >= DOUBTFUL:
         return UNSURE
@@ -103,4 +115,5 @@ def scorer_view(original: Clip, result: ClipResult | None, twin_tones: list[str]
     doubts = [v.doubt for v in views if v.doubt is not None]
     doubt = 1.0 if result.overall is None else max(doubts, default=None)
     twin = twin_tones if twin_tones is not None and len(twin_tones) == n else None
-    return ScorerView(_group(views, asked, twin, result, doubt), doubt, result.overall, views)
+    group = _group(views, asked, twin, list(original.intended.tones), result, doubt)
+    return ScorerView(group, doubt, result.overall, views)
