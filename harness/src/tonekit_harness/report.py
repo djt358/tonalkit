@@ -105,6 +105,12 @@ def _metrics_table(
         ["Candidate-ID accuracy (diag_minimal)", rate(cand_acc, n_minimal), "diagnostic", "-"],
         ["Count robustness (diag_count)", rate(count_rob, n_count), "diagnostic", "-"],
         ["Median threshold over the held-out pairs", num(gate.median_threshold), "-", "-"],
+        [
+            "Rank (correct clip outscores its error clip, ties ½)",
+            "n/a" if gate.rank is None else f"{gate.rank:.3f} ({gate.ranked:g}/{n})",
+            "diagnostic",
+            "-",
+        ],
     ]
     return table(["Metric", "Value", "Requirement", "Result"], rows)
 

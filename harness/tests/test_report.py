@@ -158,6 +158,7 @@ def test_the_metrics_table_has_counts_diagnostics_and_the_median_threshold(tmp_p
     assert "0.500 (1/2)" in text  # candidate-ID accuracy
     assert "1.000 (1/1)" in text  # count robustness
     assert "Median threshold" in text
+    assert "| Rank (correct clip outscores its error clip, ties ½) | 1.000 (20/20) | diagnostic | - |" in text
 
 
 def test_diagnostics_without_clips_read_n_a(tmp_path):
