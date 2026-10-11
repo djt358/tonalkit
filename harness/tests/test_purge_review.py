@@ -6,7 +6,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from intake_support import tkh
-from relabel_support import CODE, CORPUS, corpus_dir, decision, log_lines, make_corpus, relabel
+from relabel_support import CODE, CORPUS, corpus_dir, decision, log_lines, make_corpus, relabel, results_file
 
 from tonekit_harness.contracts.registry import load_purge_log
 from tonekit_harness.intake import purge_cli
@@ -80,3 +80,10 @@ def test_tkh_purge_says_it_removed_the_review_page_and_reminds_of_exported_decis
     assert code == 0, err
     assert "removed 1 review page(s) that linked its audio" in out
     assert "relabels-*.json you exported from a review page" in out
+
+
+def test_purge_removes_the_eval_results_file_that_lists_the_session(tmp_path):
+    root = make_corpus(tmp_path)
+    results = results_file(root, {f"{CODE}-g01-c": ["4", "1", "3"]})
+    purge(root, CODE, tmp_path)
+    assert not results.exists()
