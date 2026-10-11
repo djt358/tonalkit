@@ -95,15 +95,15 @@ fn reading(tones: &[&str]) -> Candidate {
     }
 }
 
-/// `pcm` graded with `calib`, or with the shipped calibration less its unpitched evidence.
+/// `pcm` graded with `calib`, or with the compiled-in default calibration (no calibration file,
+/// as `Pack.fromToml(calibJson: nil)` gives).
 fn graded(
     pcm: &[f32],
     calib: Option<&str>,
     intended: &[&str],
     other: &[&str],
 ) -> UtteranceAssessment {
-    let calib = calib.map_or_else(without_evidence, str::to_owned);
-    let pack = LanguagePack::from_toml(CMN_TOML, Some(&calib)).unwrap();
+    let pack = LanguagePack::from_toml(CMN_TOML, calib).unwrap();
     let register = register_for(SPEAKER.0, SPEAKER.1);
     let a = analyze(pcm, 16_000, Some(&register), &AnalyzeOptions::default()).unwrap();
     assert_eq!(a.nuclei.len(), 2, "{:?}", a.nuclei);
@@ -136,16 +136,27 @@ fn issues(m: &Measured) -> Vec<MeasureIssue> {
 #[test]
 fn a_vowel_like_stretch_with_no_pitch_is_an_unpitched_syllable() {
     let pcm = clip(true);
-    let u = graded(&pcm, None, &["4", "1", "3"], &["4", "1", "1"]);
+    // The shipped calibration less its unpitched evidence, and the compiled-in default (which
+    // has none): either way the syllable is found and nothing decides its tone.
+    for calib in [Some(without_evidence()), None] {
+        unscored_without_evidence(&pcm, calib.as_deref());
+    }
+}
+
+fn unscored_without_evidence(pcm: &[f32], calib: Option<&str>) {
+    let u = graded(pcm, calib, &["4", "1", "3"], &["4", "1", "1"]);
     let last = &u.syllables[2];
     assert_eq!(
-        issues(&last.measured),
-        vec![MeasureIssue::Unpitched],
+        last.measured,
+        Measured::NotMeasured {
+            issue: MeasureIssue::Unpitched
+        },
         "{u:#?}"
     );
     assert!(last.distance.is_none());
-    // Without unpitched evidence it scores the unvoiced fallback, as a miss would.
-    assert!((last.p_correct - 0.0474).abs() < 1e-3, "{}", last.p_correct);
+    // Without unpitched evidence nothing about its tone was measured, so the reading is not
+    // scored (rulings R103, R104): a prior decides nothing.
+    assert_eq!(u.overall, None);
     // The first two are measured on their shapes.
     assert!(u.syllables[..2].iter().all(|s| s.distance.is_some()));
 }

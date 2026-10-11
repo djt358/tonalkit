@@ -231,7 +231,7 @@ pub enum MeasureIssue {
     /// No anchor, pitched or unpitched, could hold the syllable (R102; it was `Unvoiced` before).
     NoNucleus,
     /// Speech energy and a vowel's spectrum but no pitch: scored on the calibration's unpitched
-    /// evidence (R103).
+    /// evidence (R103), `Partial`; `NotMeasured` without that evidence (`overall` is then None).
     Unpitched,
     /// The pitch gives way to ≥ 50 ms of creak (unpitched vowel-like speech): the calibration's
     /// creaky-tail evidence is added to every tone's likelihood (R108).
@@ -524,8 +524,10 @@ Inputs: boundary candidates B (sorted frames), speech region, candidates of any 
     pass run again over the nuclei plus extra syllable candidates (unpitched vowel-like energy
     peaks, and a second syllable where a voiced run's spectrum changes), with their boundaries.
     An extra candidate no syllable covers costs no insertion. A syllable on an unpitched
-    candidate is scored on the calibration's `unpitched` evidence (R103), or
-    `unvoiced_syllable_llr` without it.
+    candidate is scored on the calibration's `unpitched` evidence (R103) and is
+    `Partial(Unpitched)`. Without that evidence (the compiled-in default calibration, a pack
+    whose calibration has no `unpitched` section) its path scores `unvoiced_syllable_llr` and it
+    is `NotMeasured(Unpitched)`: like a missing syllable, it leaves `overall` `None` (R104).
   - **Relaxed pass:** only if no such path exists and the analysis has ≥ 1 nucleus, syllables may
     hold at most one nucleus. A syllable without one (a missing syllable) scores
     `unvoiced_syllable_llr` and is `NotMeasured(NoNucleus)`: the assessment's `overall` is then

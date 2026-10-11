@@ -489,6 +489,19 @@ def test_an_unpitched_syllable_is_evidence_not_a_fallback(tmp_path):
     assert "unpitched (creak evidence)" in table_text
 
 
+def test_an_unpitched_syllable_without_evidence_is_named_as_such(tmp_path):
+    # R103: with no unpitched evidence in the calibration nothing was measured, and the clip has
+    # no score (R104), so the label must not claim creak evidence.
+    results = fallback_pair(1, error_fallback=False) + fallback_pair(2, error_fallback=False)
+    bare = Syllable("3", None, 0.047, None, "NotMeasured", [], ["Unpitched"])
+    results[1].syllables[1] = bare
+    results[1].overall = None
+    assert not bare.fallback and bare.unpitched
+    table_text = "\n".join(report._failure(metrics.Failure(result=results[1], reason="x")))
+    assert "unpitched (no evidence)" in table_text and "creak evidence" not in table_text
+    assert "- gate-01-error" in render(results, tmp_path).split("## Clips with no score\n", 1)[1]
+
+
 def test_a_creaky_tail_is_named_in_the_failure_table():
     # R108: a shape whose pitch gives way to creak is measured, and its tail is evidence.
     results = fallback_pair(1, error_fallback=False) + fallback_pair(2, error_fallback=False)

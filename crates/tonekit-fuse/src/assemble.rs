@@ -29,9 +29,10 @@ fn as_u32(n: usize) -> u32 {
 ///   (`Full` or `Partial`) and those that carry a confusion hit (`heard_as` is `Some`), even if
 ///   unmeasured, because a hit is a specific miss and the veto has already capped its `p_correct`.
 ///   It is `None` when no syllable is measured and none has a hit ("tone not checked"), and when
-///   any syllable is `NotMeasured { NoNucleus }` without a hit (ruling R104): the card has a
-///   syllable the utterance shows nothing for, so the reading is not scored rather than accepted
-///   at a prior. A counted `p_correct` that is not a number counts as 0: a syllable that cannot be
+///   any syllable is `NotMeasured { NoNucleus }` or `NotMeasured { Unpitched }` without a hit
+///   (rulings R104, R103): the card has a syllable the utterance shows nothing for, or one with
+///   no pitch that the calibration has no evidence for, so the reading is not scored rather than
+///   accepted at a prior. A counted `p_correct` that is not a number counts as 0: a syllable that cannot be
 ///   graded fails the cast rather than dropping out of it.
 pub fn assemble(
     r: &DecodeResult,
@@ -75,14 +76,15 @@ pub fn assemble(
 
     // Ruling R104: a syllable the card has and the utterance shows nothing for (no nucleus,
     // pitched or unpitched) has no tone evidence, so the reading cannot be said to be right: the
-    // clip is not scored rather than accepted at a prior. A confusion hit on it is evidence, and
+    // clip is not scored rather than accepted at a prior. Nor can an unpitched syllable the
+    // calibration has no evidence for (ruling R103). A confusion hit on either is evidence, and
     // counts as R19 says.
     let missing = syllables.iter().any(|s| {
         s.heard_as.is_none()
             && matches!(
                 s.measured,
                 Measured::NotMeasured {
-                    issue: MeasureIssue::NoNucleus
+                    issue: MeasureIssue::NoNucleus | MeasureIssue::Unpitched
                 }
             )
     });

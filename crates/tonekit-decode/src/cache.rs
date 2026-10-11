@@ -75,19 +75,6 @@ pub(crate) fn missed(target: &ToneTarget, llr: f32) -> ToneJudgement {
     )
 }
 
-/// The judgement of a syllable with speech energy and a vowel's spectrum but no pitch (ruling
-/// R102) while the calibration has no evidence for such syllables (ruling R103): the unvoiced
-/// fallback `llr`, reported `Partial { [Unpitched] }`.
-pub(crate) fn unpitched(target: &ToneTarget, llr: f32) -> ToneJudgement {
-    shapeless(
-        target,
-        llr,
-        Measured::Partial {
-            issues: vec![MeasureIssue::Unpitched],
-        },
-    )
-}
-
 /// Every inventory tone's LLR on `ex` in `ctx`, in inventory order: its calibrated
 /// log-likelihood less the prior-weighted background of all tones.
 ///
@@ -307,8 +294,11 @@ impl<'a> Scorer<'a> {
     }
 
     /// The syllable holding nucleus `nucleus`, judged as `target` in `ctx`: `judge` on the
-    /// nucleus's shape, or [`unmeasured`] if it has none. Its span is the nucleus's TBU, the frames
-    /// that shape was measured on (whichever boundary pair the path gave the syllable).
+    /// nucleus's shape, or [`unmeasured`] if it has none. An unpitched syllable is judged on the
+    /// calibration's unpitched evidence; without any it is `NotMeasured { Unpitched }` (ruling
+    /// R103), which leaves `overall` None as a missed syllable does (ruling R104): a prior is not
+    /// evidence about its tone. Its span is the nucleus's TBU, the frames that shape was measured
+    /// on (whichever boundary pair the path gave the syllable).
     pub(crate) fn fit(
         &self,
         nucleus: usize,
@@ -327,7 +317,7 @@ impl<'a> Scorer<'a> {
                 .pack
                 .judge_unpitched(target, ctx, &self.a.issues)
                 .map_err(pack_err)?
-                .unwrap_or_else(|| unpitched(target, self.unvoiced_llr)),
+                .unwrap_or_else(|| unmeasured(target, MeasureIssue::Unpitched, self.unvoiced_llr)),
             Err(issue) => unmeasured(target, *issue, self.unvoiced_llr),
         };
         Ok(SyllableFit {
