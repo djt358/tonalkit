@@ -13,6 +13,7 @@
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.4 system-ui, -apple-system, "PingFang SC", "Noto Sans CJK SC", sans-serif; }
 header { position: sticky; top: 0; z-index: 2; background: var(--bg); border-bottom: 1px solid var(--line); padding: 10px 16px; }
+@media (max-width: 700px), (max-height: 600px) { header { position: static; } }
 h1 { font-size: 18px; margin: 0 0 4px; }
 #summary, .keys { margin: 4px 0; color: var(--muted); font-size: 13px; }
 .controls { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; font-size: 14px; }
