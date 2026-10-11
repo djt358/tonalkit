@@ -171,6 +171,12 @@ A stale marker (`contracts.registry.StaleMarker`) is `{"corpus": "<id>", "reason
 marker that can't be read is replaced by one that says so. A relabel that changes rows marks the
 corpus with `relabelled <n> clips (<file name>)` (no clip ids).
 
+A pack fitted on corpora lists them in its `PROVENANCE.toml` as `corpora = ["<corpus id>", ...]`
+beside its `[[source]]` rows (ruling R113). `tkh provenance` fails while
+`$TONEKIT_DATA/stale/<corpus id>.json` exists for a listed corpus; `tkh provenance --data PATH`
+names another data root, and a data root that doesn't exist (CI) holds no marker. The violation
+counts the marker's reasons and never prints them, since they name sessions.
+
 `corpus.toml`:
 
 ```toml
@@ -300,7 +306,8 @@ the next time a page made after the purge is opened.
 
 Then:
 - **Stale outputs:** it marks the scoreboard and any calibration fitted on that corpus as stale.
-  The next `tkh score` re-runs, and a stale calibration can't ship.
+  The next `tkh score` re-runs, and a stale calibration can't ship: `tkh provenance` fails for a
+  pack whose `PROVENANCE.toml` lists the corpus under `corpora` until it is refitted (§3, R113).
 - **Log:** it appends `{"session", "purged_at", "files_removed", "corpora"}` to `purge-log.jsonl`;
   `files_removed` is a count, never names (R68).
 - **Repeat runs:** it is idempotent, and it reports "nothing found" for an unknown code.

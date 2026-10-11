@@ -158,6 +158,7 @@ def test_the_metrics_table_has_counts_diagnostics_and_the_median_threshold(tmp_p
     assert "0.500 (1/2)" in text  # candidate-ID accuracy
     assert "1.000 (1/1)" in text  # count robustness
     assert "Median threshold" in text
+    assert "| Rank (correct clip outscores its error clip, ties ½) | 1.000 (20/20) | diagnostic | - |" in text
 
 
 def test_diagnostics_without_clips_read_n_a(tmp_path):
@@ -487,6 +488,19 @@ def test_an_unpitched_syllable_is_evidence_not_a_fallback(tmp_path):
     assert "Syllables with no nucleus" not in render(results, tmp_path)
     table_text = "\n".join(report._failure(metrics.Failure(result=results[1], reason="x")))
     assert "unpitched (creak evidence)" in table_text
+
+
+def test_an_unpitched_syllable_without_evidence_is_named_as_such(tmp_path):
+    # R103: with no unpitched evidence in the calibration nothing was measured, and the clip has
+    # no score (R104), so the label must not claim creak evidence.
+    results = fallback_pair(1, error_fallback=False) + fallback_pair(2, error_fallback=False)
+    bare = Syllable("3", None, 0.047, None, "NotMeasured", [], ["Unpitched"])
+    results[1].syllables[1] = bare
+    results[1].overall = None
+    assert not bare.fallback and bare.unpitched
+    table_text = "\n".join(report._failure(metrics.Failure(result=results[1], reason="x")))
+    assert "unpitched (no evidence)" in table_text and "creak evidence" not in table_text
+    assert "- gate-01-error" in render(results, tmp_path).split("## Clips with no score\n", 1)[1]
 
 
 def test_a_creaky_tail_is_named_in_the_failure_table():

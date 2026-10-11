@@ -15,6 +15,11 @@ from .observe import SHAPE, UNPITCHED, Observation
 SMOOTHING = 4.0
 # No rate is taken below this (a tone never seen unpitched is still not impossible).
 MIN_RATE = 0.005
+# A place with fewer hits than this, over every tone, says too little to tell the tones apart:
+# every tone gets the pooled rate there, so the table adds nothing for or against any tone. With
+# 3 hits, one more or one fewer moves a tone's log-rate by several tenths of a nat, and a tone
+# never seen as a hit would sit at `MIN_RATE` (2 nats against the others from zero events).
+MIN_HITS = 10
 
 Rates = Callable[[Iterable[Observation], Sequence[str], bool], dict[str, float]]
 
@@ -30,13 +35,18 @@ def place_rates(
     `counted` syllables of clips read as the card asks (`correct`: an error card's tone may not be
     what was said) that are hits, smoothed towards the pooled share by `SMOOTHING`
     pseudo-observations and kept within [`MIN_RATE`, 1 - `MIN_RATE`]. A tone with no syllable
-    there gets the pooled share (Laplace's (hits + 1) / (n + 2) over every tone)."""
+    there gets the pooled share (Laplace's (hits + 1) / (n + 2) over every tone), and so does
+    every tone when the place has fewer than `MIN_HITS` hits in all."""
     measured = [o for o in observations if o.final == final and o.label == "correct" and counted(o)]
-    pooled = (sum(map(hit, measured)) + 1) / (len(measured) + 2)
+    hits = sum(map(hit, measured))
+    pooled = (hits + 1) / (len(measured) + 2)
     out = {}
     for tone in tones:
         mine = [o for o in measured if o.tone == tone]
-        rate = (sum(map(hit, mine)) + SMOOTHING * pooled) / (len(mine) + SMOOTHING)
+        if hits < MIN_HITS:
+            rate = pooled
+        else:
+            rate = (sum(map(hit, mine)) + SMOOTHING * pooled) / (len(mine) + SMOOTHING)
         out[tone] = min(max(rate, MIN_RATE), 1.0 - MIN_RATE)
     return out
 

@@ -28,7 +28,7 @@ use crate::{Component, Expectation, LanguagePack, TargetContext};
 
 /// Log-values are clamped into `[-LOG_CLAMP, LOG_CLAMP]`; `-LOG_CLAMP` is also what a shape
 /// with no usable numbers scores.
-const LOG_CLAMP: f64 = 1.0e6;
+pub(crate) const LOG_CLAMP: f64 = 1.0e6;
 /// Tolerance multiplier under `LowSnr`, `Clipped` or `ColdStartRegister`.
 const WIDEN: f32 = 1.5;
 /// Every point counts for at least this much, however unvoiced.

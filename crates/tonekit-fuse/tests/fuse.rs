@@ -926,6 +926,33 @@ fn a_syllable_with_no_nucleus_leaves_the_reading_unscored() {
 }
 
 #[test]
+fn an_unpitched_syllable_with_no_evidence_leaves_the_reading_unscored() {
+    // A creaky vowel the calibration has no unpitched evidence for (ruling R103): no tone was
+    // measured on it, so it decides nothing, as a missing syllable decides nothing (ruling R104).
+    let unpitched = Measured::NotMeasured {
+        issue: MeasureIssue::Unpitched,
+    };
+    let r = decoded(
+        vec![cand(
+            "a",
+            1.0,
+            vec![
+                fit(logit(0.9), Measured::Full),
+                fit(-3.0, unpitched.clone()),
+            ],
+        )],
+        0.0,
+    );
+    let out = run(&r, "a", &[]).unwrap();
+    assert_eq!(out.overall, None);
+    assert_eq!(out.syllables[1].measured, unpitched);
+    // A confusion hit on it is still evidence (R19).
+    let external = vec![vec![], vec![confusion("2", "谁")]];
+    let out = run(&r, "a", &external).unwrap();
+    assert_abs_diff_eq!(out.overall.unwrap(), 0.05, epsilon = 1e-7);
+}
+
+#[test]
 fn a_confusion_hit_on_a_missing_syllable_still_counts() {
     // A hit is a specific miss (R19): the reading is graded, and fails.
     let r = decoded(

@@ -2,7 +2,8 @@
 
 The P0 gate S1: pick the accept threshold by leave-one-pair-out (LOO) and require correct-accept
 at least 0.90 and wrong-accept at most 0.10. The utterance score is `Result.overall`; a clip with
-no score (`None`, "tone not checked") is a reject at every threshold.
+no score (`None`, "tone not checked") is a reject at every threshold. `GateMetrics.rank` is a
+diagnostic beside it that needs no threshold.
 """
 
 from __future__ import annotations
@@ -89,6 +90,19 @@ class GateMetrics:
         return lower
 
     @property
+    def ranked(self) -> float:
+        """How many gate pairs have their correct clip outscoring its tone-error clip, a tie
+        counting ½ (`outscores`)."""
+        return sum(outscores(o.correct_overall, o.wrong_overall) for o in self.outcomes)
+
+    @property
+    def rank(self) -> float | None:
+        """The share of gate pairs whose correct clip outscores its tone-error clip, a tie
+        counting ½ (`outscores`); None without pairs. It needs no threshold: with 20 to 40 pairs
+        the LOO θ can move a lot between runs, and CA and WA move with it, while this does not."""
+        return self.ranked / len(self.outcomes) if self.outcomes else None
+
+    @property
     def accepted(self) -> dict[str, bool]:
         """Clip id -> accepted at its held-out threshold, for every gate clip."""
         out: dict[str, bool] = {}
@@ -116,6 +130,14 @@ def unpaired_gate_clips(results: Sequence[Result]) -> list[str]:
     return sorted(r.id for r in results if r.set == "gate" and r.pair is None)
 
 
+def outscores(correct: float | None, wrong: float | None) -> float:
+    """1 when the correct clip scores above the wrong one, ½ for a tie, else 0. A clip with no
+    score (None, a reject at every threshold) is below every score, and two such clips tie."""
+    c = -math.inf if correct is None else correct
+    w = -math.inf if wrong is None else wrong
+    return 1.0 if c > w else 0.5 if c == w else 0.0
+
+
 def _gate_pairs(results: Sequence[Result]) -> list[tuple[str, Result, Result]]:
     """The gate results grouped by pair, as (pair, correct, wrong) sorted by pair id; gate clips
     with no pair are not in a pair (`unpaired_gate_clips`)."""
@@ -124,14 +146,11 @@ def _gate_pairs(results: Sequence[Result]) -> list[tuple[str, Result, Result]]:
         if r.set != "gate" or r.pair is None:
             continue
         if r.label not in ("correct", "tone_error"):
-            raise MetricsError(
-                f"gate clip {r.id!r} has label {r.label!r}; expected 'correct' or 'tone_error'"
-            )
+            raise MetricsError(f"gate clip {r.id!r} has label {r.label!r}; expected 'correct' or 'tone_error'")
         slot = by_pair.setdefault(r.pair, {})
         if r.label in slot:
             raise MetricsError(
-                f"gate pair {r.pair!r} has more than one {r.label!r} clip "
-                f"({slot[r.label].id!r} and {r.id!r})"
+                f"gate pair {r.pair!r} has more than one {r.label!r} clip ({slot[r.label].id!r} and {r.id!r})"
             )
         slot[r.label] = r
     pairs = []
@@ -155,10 +174,7 @@ def _fit_threshold(correct: Sequence[float | None], wrong: Sequence[float | None
     candidates = [-math.inf, *((a + b) / 2 for a, b in zip(measured, measured[1:])), math.inf]
     # Both lists have the same length, so J's numerator, accepted-correct minus accepted-wrong,
     # ranks θs exactly (integers, no float ties).
-    gains = [
-        sum(_accepts(s, theta) for s in correct) - sum(_accepts(s, theta) for s in wrong)
-        for theta in candidates
-    ]
+    gains = [sum(_accepts(s, theta) for s in correct) - sum(_accepts(s, theta) for s in wrong) for theta in candidates]
     best = max(gains)
     tied = [theta for theta, gain in zip(candidates, gains) if gain == best]
     return tied[(len(tied) - 1) // 2]
@@ -175,9 +191,7 @@ def loo_gate(results: Sequence[Result]) -> GateMetrics:
     """
     pairs = _gate_pairs(results)
     if len(pairs) < 2:
-        raise MetricsError(
-            f"leave-one-pair-out needs at least 2 gate pairs; the results have {len(pairs)}"
-        )
+        raise MetricsError(f"leave-one-pair-out needs at least 2 gate pairs; the results have {len(pairs)}")
     outcomes: list[PairOutcome] = []
     for i, (pair, correct, wrong) in enumerate(pairs):
         others = pairs[:i] + pairs[i + 1 :]
@@ -195,9 +209,7 @@ def loo_gate(results: Sequence[Result]) -> GateMetrics:
             )
         )
     n = len(pairs)
-    rejected_none = sorted(
-        r.id for _, c, w in pairs for r in (c, w) if r.overall is None
-    )
+    rejected_none = sorted(r.id for _, c, w in pairs for r in (c, w) if r.overall is None)
     return GateMetrics(
         ca=sum(o.correct_accepted for o in outcomes) / n,
         wa=sum(o.wrong_accepted for o in outcomes) / n,

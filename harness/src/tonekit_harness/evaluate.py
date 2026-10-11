@@ -71,7 +71,8 @@ class Syllable:
     @property
     def unpitched(self) -> bool:
         """Speech with a vowel's spectrum but no pitch (a creaky vowel), scored on the
-        calibration's unpitched evidence (ruling R103) rather than on a contour."""
+        calibration's unpitched evidence (ruling R103) rather than on a contour: `Partial`, or
+        `NotMeasured` (the clip unscored) when the calibration has no such evidence."""
         return "Unpitched" in self.issues
 
 

@@ -255,6 +255,19 @@ def test_outcomes_carry_scores_and_decisions_for_the_report():
     assert first.theta == gate.thresholds["gate-01"]
 
 
+def test_rank_counts_pairs_whose_correct_clip_outscores_its_error():
+    # Outscores, loses, ties, an unscored error (below every score), an unscored correct clip,
+    # and two unscored clips (a tie).
+    gate = metrics.loo_gate(
+        gate_pairs([(0.6, 0.1), (0.2, 0.7), (0.4, 0.4), (0.05, None), (None, 0.01), (None, None)])
+    )
+    assert gate.ranked == 1 + 0 + 0.5 + 1 + 0 + 0.5
+    assert gate.rank == pytest.approx(3 / 6)
+    assert metrics.outscores(0.0, None) == 1.0 and metrics.outscores(None, None) == 0.5
+    # It needs no threshold: any LOO θ leaves it as it is.
+    assert metrics.GateMetrics(ca=0.0, wa=0.0, thresholds={}, rejected_none=[]).rank is None
+
+
 def test_other_sets_are_ignored_by_the_gate():
     results = gate_pairs([(0.6, 0.1), (0.7, 0.2)]) + [
         res("t23-1", 0.0, set="diag_t23", pair="t23-01"),

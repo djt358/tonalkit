@@ -190,6 +190,31 @@ final class SmokeTests: XCTestCase {
         XCTAssertEqual(openSet.tbus.count, 3)
     }
 
+    // MARK: Every measurement issue is handled
+
+    /// `issueKind` switches over `MeasureIssue` with no `default`, so a case added on the Rust side
+    /// fails to compile here until it is handled, as it must in Bendy's own `switch`.
+    func testEveryMeasureIssueIsHandled() throws {
+        let all: [MeasureIssue] = [
+            .unvoiced, .lowSnr, .clipped, .tooShort, .coldStartRegister, .invalidRegister,
+            .invalidEvidence, .noNucleus, .unpitched, .creakyTail,
+        ]
+        XCTAssertEqual(Set(all.map(issueKind)).count, all.count)
+        // The fixture's issues go through the same switch.
+        let analysis = try analyze(pcm: try Fixtures.pcm(), sampleRate: 16_000, register: nil, externalF0: nil)
+        let assessment = try assess(analysis: analysis, pack: try Fixtures.pack(), request: Fixtures.request413())
+        for syllable in assessment.syllables {
+            switch syllable.measured {
+            case .full:
+                break
+            case .partial(let issues):
+                XCTAssertEqual(issues.map(issueKind), ["cold start register"])
+            case .notMeasured(let issue):
+                XCTFail("syllable not measured: \(issueKind(issue))")
+            }
+        }
+    }
+
     // MARK: A pitch track from outside
 
     func testAnExternalF0TrackIsUsedAndSanitised() throws {
@@ -247,6 +272,24 @@ final class SmokeTests: XCTestCase {
             largest = max(largest, abs(a - b))
         }
         XCTAssertLessThan(largest, 1e-6)
+    }
+}
+
+// MARK: - Measurement issues
+
+/// What each issue means to a caller. No `default`: the compiler checks that every case is here.
+private func issueKind(_ issue: MeasureIssue) -> String {
+    switch issue {
+    case .unvoiced: return "unvoiced"
+    case .lowSnr: return "low signal-to-noise"
+    case .clipped: return "clipped"
+    case .tooShort: return "too short"
+    case .coldStartRegister: return "cold start register"
+    case .invalidRegister: return "invalid register"
+    case .invalidEvidence: return "invalid evidence"
+    case .noNucleus: return "no nucleus"
+    case .unpitched: return "unpitched"
+    case .creakyTail: return "creaky tail"
     }
 }
 
