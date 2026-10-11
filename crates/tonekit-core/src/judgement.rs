@@ -23,7 +23,8 @@ pub enum MeasureIssue {
     NoNucleus,
     /// The syllable has speech energy and a vowel-like spectrum but no pitch, such as a creaky
     /// vowel (ruling R102): its tone is scored on the pack's calibrated evidence for unpitched
-    /// syllables (ruling R103), not on a contour.
+    /// syllables (ruling R103), not on a contour, and it is `Partial`. Without that evidence it is
+    /// `NotMeasured`, and the assessment's `overall` is `None` (rulings R103, R104).
     Unpitched,
     /// The syllable's pitch gives way to creak: right after its last pitched frame come at least
     /// 5 frames of speech with a vowel's spectrum and no pitch (ruling R108). Its shape is
