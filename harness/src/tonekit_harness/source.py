@@ -20,11 +20,11 @@ import tonekit_py
 from . import calibration, evaluate, manifest, world
 from .family import SynthError
 from .manifest import Clip
+from .speaker_register import register_bounds
 from .voice import PackTones, Voice
 
 MIN_VOICED_FRAMES = 5  # a syllable needs this many voiced frames to be redrawn (50 ms)
 MAX_GAP_FRAMES = 2  # unvoiced frames a voiced core tolerates inside itself (20 ms)
-MIN_REGISTER_ST = 4.0  # tonekit's minimum register width, expanded symmetrically
 # The data-register id of the volunteers' recordings, which are never resynthesised (R80).
 NEVER_RESYNTHESISED = "volunteer-corpus"
 
@@ -57,16 +57,6 @@ def _semitones(hz: np.ndarray) -> np.ndarray:
     """Semitones re 55 Hz, NaN where unvoiced (hz == 0)."""
     voiced = hz > 0
     return np.where(voiced, 12.0 * np.log2(np.where(voiced, hz, 55.0) / 55.0), np.nan)
-
-
-def register_bounds(voiced_st: np.ndarray) -> tuple[float, float]:
-    """The speaker's register as (floor, ceil) semitones: p5 and p95 of the voiced semitones, at
-    least `MIN_REGISTER_ST` wide (expanded symmetrically), Chao 1 and Chao 5."""
-    floor, ceil = (float(x) for x in np.percentile(voiced_st, [5, 95]))
-    if ceil - floor < MIN_REGISTER_ST:
-        mid = (floor + ceil) / 2.0
-        floor, ceil = mid - MIN_REGISTER_ST / 2.0, mid + MIN_REGISTER_ST / 2.0
-    return floor, ceil
 
 
 def voiced_core(voiced: np.ndarray, max_gap: int = MAX_GAP_FRAMES) -> tuple[int, int] | None:

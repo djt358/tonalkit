@@ -32,6 +32,7 @@ Kind = Literal["recorded", "public", "synthetic"]
 Split = Literal["gate", "dev", "calib", "heldout"]
 
 SessionCode = Annotated[str, Field(pattern=SESSION_CODE_PATTERN)]
+CORPUS_ID_PATTERN = r"^[a-z0-9][a-z0-9._-]*$"  # no `/`: a corpus id names a directory and a file
 _VOLUNTEER_ID = re.compile(r"v-([a-hj-np-z2-9]{6})")
 
 
@@ -94,7 +95,7 @@ class Speaker(StrictModel):
 
 
 class CorpusMeta(StrictModel):
-    id: str = Field(pattern=r"^[a-z0-9][a-z0-9._-]*$")
+    id: str = Field(pattern=CORPUS_ID_PATTERN)
     source: str = Field(min_length=1)  # a data-register.csv id
     kind: Kind
     lect: str = Field(min_length=1)

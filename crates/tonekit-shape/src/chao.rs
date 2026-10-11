@@ -64,3 +64,18 @@ pub fn voiced_semitones(f0: &F0Track, region: Option<&FrameRange>) -> Vec<f32> {
         .map(|st| st as f32)
         .collect()
 }
+
+/// Semitones (re 55 Hz) of the voiced frames of `f0` that are speech (`speech[i]`, the speech
+/// test of the energy track), in order (ruling R106): the register is the voice's pitch, and a
+/// pitch tracker can report a pitch on near-silent frames between syllables (pYIN at its 50 to
+/// 65 Hz floor in a quiet phone recording), which would drag the register's floor an octave
+/// down. Frames past the end of `speech` are not speech.
+pub fn speech_semitones(f0: &F0Track, speech: &[bool]) -> Vec<f32> {
+    f0.frames
+        .iter()
+        .zip(speech)
+        .filter(|(_, &s)| s)
+        .filter_map(|(frame, _)| voiced_st(frame))
+        .map(|st| st as f32)
+        .collect()
+}
