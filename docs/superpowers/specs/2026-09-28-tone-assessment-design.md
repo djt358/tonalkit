@@ -534,19 +534,26 @@ Inputs: boundary candidates B (sorted frames), speech region, candidates of any 
     `None` (not scored, a reject at every threshold), never a prior (R104).
   - **No path:** the candidate's K syllables sit at an empty span at the speech-region start and
     score `K × unvoiced_syllable_llr`. They're `NotMeasured(Unvoiced)` if the analysis has no
-    nuclei and `NotMeasured(NoNucleus)` otherwise; either way `overall = None`.
+    nuclei and `NotMeasured(NoNucleus)` otherwise; either way `overall = None`. Neither stage runs
+    without a pitched nucleus (no syllable could be anchored), so an isolated syllable said
+    entirely in creak, or any clip with no pitch at all, never reaches the `unpitched` evidence
+    (R103): it is `NotMeasured(Unvoiced)`, "tone not checked".
 - `dur(d) = −(ln(d/r))² / (2·dur_sigma²)`: 0 at d = r and symmetric in log-duration, where
   r = median inter-nucleus interval (default 220 ms) and `dur_sigma` = 0.4.
 - **Null hypothesis ("something else was said"):**
   `null_llr = Σ_tbu [max_t loglik_t − logsumexp_t(ln prior_t + loglik_t)]` over the open lattice
   (§7.3). That is the best free choice of tone per nucleus, which is always ≥ 0. Candidate
-  posteriors are a softmax over `{llr_c} ∪ {null_llr + null_bias}`.
+  posteriors are a softmax over `{llr_c} ∪ {null_llr + null_bias}`. The lattice is over the
+  nuclei only: the count stage's extra candidates (R102) add no term to the null, so a syllable a
+  reading places on one is scored for the reading and not for the null.
 - Seeds live in `cmn.calib.json`: `filler_per_frame = 0.03`, `unvoiced_syllable_llr = −3.0`,
   `insertion_llr = −2.0`, `null_bias = −2.0`. It also carries the optional `unpitched` and
   `creaky_tail` tables (ln P(observation | tone) at the end of a phrase and elsewhere), fitted by
   `tkh fit` (R103, R108, R110).
 - Cost is O(|B|²·K) per candidate. With |B| ≤ 4·nuclei + 2 and up to 64 candidates, this is
-  microseconds to milliseconds.
+  microseconds to milliseconds. That bound is the nuclei's stage only: the count stage's B is the
+  nuclei's boundaries plus up to two per extra candidate (R102), so there |B| ≤ 4·nuclei + 2 +
+  2·(extra candidates). It runs only for a candidate the nuclei cannot place.
 
 This subsumes v1's "known N": a single intended candidate is a set of size 1, and the same code
 handles spellbooks with tonal overlap, extra syllables and a generation-widened vocabulary.

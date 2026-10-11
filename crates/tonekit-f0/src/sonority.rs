@@ -67,8 +67,8 @@ impl Biquad {
 /// The band is the signal high-passed at 150 Hz (a second-order Butterworth section) and then
 /// low-passed at 2 kHz (two sections, fourth order); the reference is the whole signal, so room
 /// rumble below 150 Hz reads low as well as fricatives above 2 kHz. A silent frame reads 0.
-/// Non-finite samples count as silence. A vowel reads about 0.5 to 1, a fricative or rumble under
-/// 0.3 and white noise about 0.23 (the band's share of the spectrum)., a fricative or white noise under 0.2.
+/// Non-finite samples count as silence. A vowel reads about 0.5 to 1, a fricative or room rumble
+/// under 0.3, and white noise about 0.23 (the band's share of the spectrum).
 pub fn sonority(pcm: &[f32]) -> Vec<f32> {
     let x: Vec<f64> = pcm.iter().map(|&v| finite_or_silence(v)).collect();
     let high = Biquad::butterworth(BAND_LOW_HZ, true).run(&x);

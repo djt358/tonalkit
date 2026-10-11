@@ -53,8 +53,19 @@ fn clip(vowel_like: bool) -> Vec<f32> {
         snr_db: Some(30.0),
         seed: 1,
     });
-    let rms = |x: &[f32]| (x.iter().map(|v| v * v).sum::<f32>() / x.len() as f32).sqrt();
     let voiced = rms(&s.pcm[3200..s.pcm.len() - 960]);
+    let mut pcm = s.pcm.clone();
+    pcm.extend(noise(vowel_like, voiced));
+    pcm.extend(std::iter::repeat_n(0.0, 3200));
+    pcm
+}
+
+fn rms(x: &[f32]) -> f32 {
+    (x.iter().map(|v| v * v).sum::<f32>() / x.len() as f32).sqrt()
+}
+
+/// 250 ms of seeded noise at RMS `level`, low-passed twice at about 600 Hz when `vowel_like`.
+fn noise(vowel_like: bool, level: f32) -> Vec<f32> {
     let mut state = 0x9E37_79B9_7F4A_7C15_u64;
     let mut white = || {
         state ^= state << 13;
@@ -74,9 +85,15 @@ fn clip(vowel_like: bool) -> Vec<f32> {
             }
         }
     }
-    let gain = voiced / rms(&noise);
-    let mut pcm = s.pcm.clone();
-    pcm.extend(noise.iter().map(|v| v * gain));
+    let gain = level / rms(&noise);
+    noise.iter().map(|v| v * gain).collect()
+}
+
+/// The vowel-like noise alone, between 200 ms silences: a creaky syllable said on its own, or a
+/// clip with no pitch anywhere.
+fn creak_alone() -> Vec<f32> {
+    let mut pcm = vec![0.0; 3200];
+    pcm.extend(noise(true, 0.05));
     pcm.extend(std::iter::repeat_n(0.0, 3200));
     pcm
 }
@@ -96,17 +113,29 @@ fn reading(tones: &[&str]) -> Candidate {
 }
 
 /// `pcm` graded with `calib`, or with the compiled-in default calibration (no calibration file,
-/// as `Pack.fromToml(calibJson: nil)` gives).
+/// as `Pack.fromToml(calibJson: nil)` gives). The clip must have the two voiced nuclei.
 fn graded(
     pcm: &[f32],
     calib: Option<&str>,
     intended: &[&str],
     other: &[&str],
 ) -> UtteranceAssessment {
+    graded_with_nuclei(pcm, calib, intended, other, 2)
+}
+
+fn graded_with_nuclei(
+    pcm: &[f32],
+    calib: Option<&str>,
+    intended: &[&str],
+    other: &[&str],
+    nuclei: usize,
+) -> UtteranceAssessment {
     let pack = LanguagePack::from_toml(CMN_TOML, calib).unwrap();
     let register = register_for(SPEAKER.0, SPEAKER.1);
     let a = analyze(pcm, 16_000, Some(&register), &AnalyzeOptions::default()).unwrap();
-    assert_eq!(a.nuclei.len(), 2, "{:?}", a.nuclei);
+    assert_eq!(a.nuclei.len(), nuclei, "{:?}", a.nuclei);
+    // There is speech: what decides is whether a pitched nucleus anchors the decode.
+    assert!(a.speech.is_some());
     assess(
         &a,
         &pack,
@@ -195,4 +224,25 @@ fn noise_without_a_vowel_spectrum_is_no_syllable() {
         .all(|s| !issues(&s.measured).contains(&MeasureIssue::Unpitched)));
     // A syllable nothing could hold leaves the reading unscored (ruling R104).
     assert_eq!(u.overall, None);
+}
+
+#[test]
+fn an_isolated_or_all_unpitched_clip_never_reaches_the_unpitched_evidence() {
+    // The decoder anchors syllables only once the analysis has a pitched nucleus (`search` gives
+    // up without one), so a creaky syllable said on its own, or a clip with no pitch anywhere, is
+    // `NotMeasured { Unvoiced }` and unscored even with unpitched evidence (spec §7.2, R103).
+    let pcm = creak_alone();
+    let calib = with_evidence();
+    for (intended, other) in [(&["3"][..], &["1"][..]), (&["3", "4"][..], &["1", "1"][..])] {
+        let u = graded_with_nuclei(&pcm, Some(&calib), intended, other, 0);
+        assert_eq!(u.syllables.len(), intended.len());
+        assert!(
+            u.syllables.iter().all(|s| s.measured
+                == Measured::NotMeasured {
+                    issue: MeasureIssue::Unvoiced
+                }),
+            "{u:#?}"
+        );
+        assert_eq!(u.overall, None);
+    }
 }
