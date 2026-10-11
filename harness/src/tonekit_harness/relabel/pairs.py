@@ -22,6 +22,17 @@ def _groups(originals: Mapping[str, Clip]) -> dict[tuple[str, str], list[str]]:
     return groups
 
 
+def twins(originals: Mapping[str, Clip]) -> dict[str, str]:
+    """Clip id -> the id of the other clip of its pair, for the pairs of pair sets that are whole
+    (two clips) as intake wrote them."""
+    out = {}
+    for members in _groups(originals).values():
+        if len(members) == 2:
+            a, b = members
+            out[a], out[b] = b, a
+    return out
+
+
 def _whole(rows: list[Clip | None]) -> bool:
     return len(rows) == 2 and all(r is not None for r in rows) and sorted(r.label for r in rows) == [
         "correct",

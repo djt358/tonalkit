@@ -10,6 +10,7 @@ from intake_support import kit_bundle, options
 
 from tonekit_harness import clearance, manifest
 from tonekit_harness.contracts.relabel import RelabelExport, load_log
+from tonekit_harness.eval_results import SCHEMA, EvalResults
 from tonekit_harness.intake.run import intake_bundle
 from tonekit_harness.relabel.apply import Outcome, relabel_corpus
 from tonekit_harness.repo import repo_root
@@ -76,3 +77,31 @@ def log_entries(root: Path) -> list:
 def log_lines(root: Path) -> list[dict]:
     path = corpus_dir(root) / "relabels.jsonl"
     return [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
+
+
+def results_file(root: Path, heard: dict[str, list[str | None]]) -> Path:
+    """A `tkh eval --results` file at the default place, grading the clips in `heard` (clip id ->
+    the tone heard per syllable, None for unsure): p_correct is 0.9 where the intended tone was
+    heard, 0.5 where nothing was, 0.05 elsewhere. Clips not in `heard` are not graded."""
+    by_id = rows(root)
+    clips = []
+    for cid, tones in heard.items():
+        row = by_id[cid]
+        syllables = [
+            {
+                "expected": intended,
+                "heard": h,
+                "p_correct": 0.5 if h is None else 0.9 if h == intended else 0.05,
+                "distance": 1.0,
+                "measured": "Full",
+            }
+            for h, intended in zip(tones, row.intended.tones, strict=True)
+        ]
+        clips.append({"id": cid, "set": row.set, "pair": row.pair, "label": row.label, "speaker": row.speaker,
+                      "overall": min(s["p_correct"] for s in syllables), "intended_rank": 1, "margin_llr": 0.0,
+                      "register_source": "cold", "syllables": syllables})  # fmt: skip
+    doc = EvalResults.model_validate({"schema": SCHEMA, "register_from": "drill", "tonekit_py": "test", "clips": clips})
+    path = root / "reports" / f"{CORPUS}.results.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(doc.model_dump_json(by_alias=True), encoding="utf-8")
+    return path

@@ -38,6 +38,8 @@ def _done_lines(o: PurgeOutcome) -> list[str]:
         lines.append(
             f"  removed {o.reports} report(s) under the data root that listed its clips (tkh eval makes new ones)"
         )
+    if o.review_pages:
+        lines.append(f"  removed {o.review_pages} review page(s) that linked its audio (tkh review makes new ones)")
     if o.cache_entries:
         lines.append(
             f"  cleared tkh eval's analysis cache ({o.cache_entries} entries in {DEFAULT_CACHE_DIR}): "
@@ -51,7 +53,9 @@ def _reminder(code: str, repo: Path) -> list[str]:
     """The last lines of every purge: what the engine cannot reach (contracts section 6)."""
     lines = [
         "What only you can delete: the original zip wherever it reached you (Messages, Mail, AirDrop "
-        "or Downloads, Files) and any copy outside the data root, such as an unzipped folder, a backup or a report written elsewhere.",
+        "or Downloads, Files) and any copy outside the data root, such as an unzipped folder, a backup or a report written elsewhere, "
+        "and any relabels-*.json you exported from a review page (it names the session's clips); the decisions a "
+        "review page kept in your browser go the next time you open a page tkh review made after this purge.",
     ]
     return lines + [f"  still on disk: {p}" for p in session_bundles(repo / RAW_COPIES, code)]
 
