@@ -1,11 +1,15 @@
 """The corpus registry: load corpora from the data root, select across them, refuse what the data
 promises forbid (contracts.md section 3). The models and formats are `contracts.registry`'s.
 
-    root = DataRoot()                                    # $TONEKIT_DATA, else ~/tonekit-data
-    fit = root.select(kinds=["public"], splits=["calib"]).for_fitting()
+    root = DataRoot(pack="packs/cmn/cmn.toml")           # $TONEKIT_DATA, else ~/tonekit-data
+    fit = root.select(kinds=["public"], splits=["calib"]).for_fitting()   # a FittingSelection
     gate = root.select(["volunteers-*", "dj-*"], kinds=["recorded"], splits=["gate"], sets=["gate"])
-    gate.for_gate()                                      # raises RefusalError if it may not be graded
-    union = fit | gate                                   # compose; speaker ids are `corpus/speaker`
+    gate.for_gate()                                      # a GateSelection, or RefusalError saying why
+    union = fit | gate                                   # compose (unchecked); speakers `corpus/speaker`
+
+`tkh eval` and `tkh fit` take the same selections from the command line (`selectors`:
+`--select CORPUS_GLOB[:SPLIT[,SPLIT]]`, repeatable) and grade or fit `Selection.grading_clips()`
+from `Selection.audio_root` (`runs`); `tkh corpora` lists what is there (`corpora_cmd`).
 """
 
 from .accent import accent_for
