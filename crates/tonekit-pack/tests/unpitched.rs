@@ -152,3 +152,65 @@ fn the_evidence_must_name_every_tone_as_a_log_probability() {
     );
     assert!(matches!(r, Err(PackError::Parse(_))), "{r:?}");
 }
+
+#[test]
+fn a_place_that_rates_every_tone_alike_is_no_evidence() {
+    // Ruling R119: a flat table (a pooled place) leaves every tone's LLR at 0, so it is treated
+    // as no table at all, place by place.
+    let flat = r#"{
+        "phrase_final": { "1": -3.2189, "2": -3.2189, "3": -3.2189, "4": -3.2189, "5": -3.2189 },
+        "other": { "1": -5.0, "2": -4.0, "3": -1.5, "4": -3.0, "5": -3.0 }
+    }"#;
+    let p = LanguagePack::from_toml(CMN_TOML, Some(&calib_with(flat))).unwrap();
+    for tone in ["1", "3", "5"] {
+        assert_eq!(p.judge_unpitched(&target(tone), &ctx(true), &[]), Ok(None));
+    }
+    // A target with lexical variants is no different: every tone is rated alike.
+    let mut t = target("1");
+    t.lexical_variants.push(WeightedTone {
+        tone: ToneId("3".into()),
+        weight: 0.5,
+    });
+    assert_eq!(p.judge_unpitched(&t, &ctx(true), &[]), Ok(None));
+    // The other place still tells the tones apart, and is still evidence.
+    let mid = p
+        .judge_unpitched(&target("3"), &ctx(false), &[])
+        .unwrap()
+        .unwrap();
+    assert_eq!(mid.loglik[2], -1.5);
+    assert!(mid.llr_target > 0.5, "{mid:?}");
+}
+
+#[test]
+fn the_shipped_pooled_table_is_no_evidence_at_either_place() {
+    // The shipped calibration pooled both places (too few unpitched syllables to tell the tones
+    // apart), so it scores no unpitched syllable (rulings R103, R119).
+    let p = LanguagePack::from_toml(CMN_TOML, Some(CMN_CALIB)).unwrap();
+    assert!(p.calibration().unpitched.is_some());
+    for phrase_final in [true, false] {
+        assert_eq!(
+            p.judge_unpitched(&target("3"), &ctx(phrase_final), &[]),
+            Ok(None)
+        );
+    }
+}
+
+#[test]
+fn a_table_that_differs_by_more_than_the_tolerance_still_scores() {
+    // One tone 1e-4 apart (representable in f32 at this magnitude, unlike 1e-9) is evidence.
+    let nearly = r#"{
+        "phrase_final": { "1": -3.2189, "2": -3.2189, "3": -3.2188, "4": -3.2189, "5": -3.2189 },
+        "other": { "1": -3.6376, "2": -3.6376, "3": -3.6376, "4": -3.6376, "5": -3.6376 }
+    }"#;
+    let p = LanguagePack::from_toml(CMN_TOML, Some(&calib_with(nearly))).unwrap();
+    let three = p
+        .judge_unpitched(&target("3"), &ctx(true), &[])
+        .unwrap()
+        .unwrap();
+    assert!(
+        three.llr_target > 0.0 && three.llr_target < 1e-3,
+        "{three:?}"
+    );
+    assert!(matches!(three.measured, Measured::Partial { .. }));
+    assert_eq!(p.judge_unpitched(&target("3"), &ctx(false), &[]), Ok(None));
+}

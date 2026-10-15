@@ -1,5 +1,6 @@
 //! The judgement of an unpitched syllable (ruling R103): speech energy and a vowel's spectrum but
-//! no pitch, scored on the calibration's evidence for such syllables instead of a contour.
+//! no pitch, scored on the calibration's evidence for such syllables instead of a contour. A place
+//! whose table gives every tone the same value is no evidence (ruling R119).
 
 use tonekit_core::{MeasureIssue, Measured, ToneJudgement, ToneTarget};
 
@@ -7,9 +8,29 @@ use crate::error::{invalid, PackError};
 use crate::score::{clamp_log, logsumexp, LOG_CLAMP};
 use crate::{LanguagePack, TargetContext};
 
+/// How far apart a place's per-tone log-likelihoods must be for its table to be evidence (ruling
+/// R119): when every tone is within this of every other, every tone's LLR is the same (0).
+const FLAT_LLR: f64 = 1e-9;
+
+/// Whether per-tone log-likelihoods tell the tones apart: some two differ by more than
+/// [`FLAT_LLR`]. A pooled place (the same rate for every tone) does not.
+fn tells_tones_apart(loglik: &[f32]) -> bool {
+    let (lo, hi) = loglik
+        .iter()
+        .map(|&v| f64::from(v))
+        .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), v| {
+            (lo.min(v), hi.max(v))
+        });
+    hi - lo > FLAT_LLR
+}
+
 impl LanguagePack {
     /// Judges `target` on a syllable in `ctx` that has speech energy and a vowel's spectrum but no
-    /// pitch, or `None` when the calibration carries no unpitched evidence.
+    /// pitch, or `None` when the calibration carries no unpitched evidence for the context's
+    /// place: no `unpitched` section, or a place whose table gives every tone the same value
+    /// (within 1e-9). Such a table (a pooled place) leaves every tone's LLR at 0, so it tells the
+    /// tones apart no better than no table, and the syllable is no more measured than without one
+    /// (ruling R119; the caller reports `NotMeasured { Unpitched }`).
     ///
     /// - `loglik[t]` is the calibration's `ln P(unpitched | t)` for the context's place (the end
     ///   of the phrase, or elsewhere), in inventory order; `-LOG_CLAMP` for a tone the table does
@@ -41,6 +62,9 @@ impl LanguagePack {
             .iter()
             .map(|t| table.get(&t.0).copied().unwrap_or(-LOG_CLAMP as f32))
             .collect();
+        if !tells_tones_apart(&loglik) {
+            return Ok(None);
+        }
         let ll = |tone: &tonekit_core::ToneId| -> Result<f64, PackError> {
             let i = self
                 .tone_index(tone)

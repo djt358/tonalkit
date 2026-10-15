@@ -283,7 +283,8 @@ impl<'a> Scorer<'a> {
     }
 
     /// The LLR of the target behind `key` on an unpitched syllable (ruling R103): the pack's
-    /// unpitched evidence, or `unvoiced_syllable_llr` without any.
+    /// unpitched evidence, or `unvoiced_syllable_llr` without any (no `unpitched` section, or a
+    /// place whose table is the same for every tone, ruling R119).
     fn unpitched_llr(&self, key: TargetKey) -> Result<f32, AssessError> {
         let (target, ctx) = self.target_of(key);
         Ok(self
@@ -295,10 +296,11 @@ impl<'a> Scorer<'a> {
 
     /// The syllable holding nucleus `nucleus`, judged as `target` in `ctx`: `judge` on the
     /// nucleus's shape, or [`unmeasured`] if it has none. An unpitched syllable is judged on the
-    /// calibration's unpitched evidence; without any it is `NotMeasured { Unpitched }` (ruling
-    /// R103), which leaves `overall` None as a missed syllable does (ruling R104): a prior is not
-    /// evidence about its tone. Its span is the nucleus's TBU, the frames that shape was measured
-    /// on (whichever boundary pair the path gave the syllable).
+    /// calibration's unpitched evidence; without any (no section, or a flat table at its place,
+    /// ruling R119) it is `NotMeasured { Unpitched }` (ruling R103), which leaves `overall` None
+    /// as a missed syllable does (ruling R104): a prior is not evidence about its tone, and nor is
+    /// a table that rates every tone alike. Its span is the nucleus's TBU, the frames that shape
+    /// was measured on (whichever boundary pair the path gave the syllable).
     pub(crate) fn fit(
         &self,
         nucleus: usize,

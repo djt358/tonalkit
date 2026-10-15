@@ -31,7 +31,9 @@ pub struct DecodeParams {
 /// syllables (ruling R103) and creaky tails (ruling R108): creak goes with some tones more than
 /// others (the literature names tone 3; in the calibration speakers' phrase-final syllables it
 /// went with tone 4), so it is evidence, not absence. A place with too few such syllables to tell
-/// the tones apart has the same value for every tone, and adds nothing for or against any.
+/// the tones apart has the same value for every tone: a creaky tail there adds nothing for or
+/// against any tone, and an unpitched syllable there is not scored at all, as without the section
+/// (ruling R119).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PlaceEvidence {
@@ -50,8 +52,9 @@ pub struct Calibration {
     pub temperature: f32,
     pub fusion: FusionWeights,
     pub decode: DecodeParams,
-    /// Evidence for unpitched syllables (ruling R103): `ln P(unpitched | tone)`. Without it such
-    /// a syllable's path scores `decode.unvoiced_syllable_llr`, as a missed one does, and it is
+    /// Evidence for unpitched syllables (ruling R103): `ln P(unpitched | tone)`. Without it, or at
+    /// a place whose table gives every tone the same value (ruling R119), such a syllable's path
+    /// scores `decode.unvoiced_syllable_llr`, as a missed one does, and it is
     /// `NotMeasured { Unpitched }`, which leaves the assessment's `overall` None (ruling R104).
     pub unpitched: Option<PlaceEvidence>,
     /// Evidence for creaky tails (ruling R108): `ln P(creaky tail | tone)` for a pitched syllable

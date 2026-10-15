@@ -241,7 +241,8 @@ pub enum MeasureIssue {
     /// No anchor, pitched or unpitched, could hold the syllable (R102; it was `Unvoiced` before).
     NoNucleus,
     /// Speech energy and a vowel's spectrum but no pitch: scored on the calibration's unpitched
-    /// evidence (R103), `Partial`; `NotMeasured` without that evidence (`overall` is then None).
+    /// evidence (R103), `Partial`; `NotMeasured` without that evidence, or where the table rates
+    /// every tone alike (R119): `overall` is then None.
     Unpitched,
     /// The pitch gives way to ≥ 50 ms of creak (unpitched vowel-like speech): the calibration's
     /// creaky-tail evidence is added to every tone's likelihood (R108).
@@ -536,8 +537,11 @@ Inputs: boundary candidates B (sorted frames), speech region, candidates of any 
     An extra candidate no syllable covers costs no insertion. A syllable on an unpitched
     candidate is scored on the calibration's `unpitched` evidence (R103) and is
     `Partial(Unpitched)`. Without that evidence (the compiled-in default calibration, a pack
-    whose calibration has no `unpitched` section) its path scores `unvoiced_syllable_llr` and it
-    is `NotMeasured(Unpitched)`: like a missing syllable, it leaves `overall` `None` (R104).
+    whose calibration has no `unpitched` section, or a place whose table gives every tone the same
+    value within 1e-9, which leaves every tone's LLR at 0: R119) its path scores
+    `unvoiced_syllable_llr` and it is `NotMeasured(Unpitched)`: like a missing syllable, it leaves
+    `overall` `None` (R104). The shipped `cmn` table is pooled at both places, so today every
+    unpitched syllable is `NotMeasured(Unpitched)`.
   - **Relaxed pass:** only if no such path exists and the analysis has ≥ 1 nucleus, syllables may
     hold at most one nucleus. A syllable without one (a missing syllable) scores
     `unvoiced_syllable_llr` and is `NotMeasured(NoNucleus)`: the assessment's `overall` is then
@@ -559,7 +563,9 @@ Inputs: boundary candidates B (sorted frames), speech region, candidates of any 
 - Seeds live in `cmn.calib.json`: `filler_per_frame = 0.03`, `unvoiced_syllable_llr = −3.0`,
   `insertion_llr = −2.0`, `null_bias = −2.0`. It also carries the optional `unpitched` and
   `creaky_tail` tables (ln P(observation | tone) at the end of a phrase and elsewhere), fitted by
-  `tkh fit` (R103, R108, R110), and the optional `rolling_register` parameters (R111).
+  `tkh fit` (R103, R108, R110; a place with too few observations is pooled, the same value for
+  every tone, which for `unpitched` is no evidence, R119), and the optional `rolling_register`
+  parameters (R111, R120).
 - Cost is O(|B|²·K) per candidate. With |B| ≤ 4·nuclei + 2 and up to 64 candidates, this is
   microseconds to milliseconds. That bound is the nuclei's stage only: the count stage's B is the
   nuclei's boundaries plus up to two per extra candidate (R102), so there |B| ≤ 4·nuclei + 2 +

@@ -953,6 +953,48 @@ fn an_unpitched_syllable_with_no_evidence_leaves_the_reading_unscored() {
 }
 
 #[test]
+fn an_unpitched_syllable_scored_on_evidence_counts_in_overall() {
+    // A table that tells the tones apart (ruling R103) makes the creaky vowel `Partial
+    // [Unpitched]`: it is measured, so it joins the minimum like any other syllable. Only a
+    // syllable with no such evidence (no table, or a flat one: ruling R119) is `NotMeasured` and
+    // leaves the reading unscored.
+    let partial = Measured::Partial {
+        issues: vec![MeasureIssue::Unpitched],
+    };
+    let r = decoded(
+        vec![cand(
+            "a",
+            1.0,
+            vec![
+                fit(logit(0.9), Measured::Full),
+                fit(logit(0.3), partial.clone()),
+            ],
+        )],
+        0.0,
+    );
+    let out = run(&r, "a", &[]).unwrap();
+    assert_abs_diff_eq!(out.overall.unwrap(), 0.3, epsilon = 1e-5);
+    assert_eq!(out.syllables[1].measured, partial);
+    let unscored = decoded(
+        vec![cand(
+            "a",
+            1.0,
+            vec![
+                fit(logit(0.9), Measured::Full),
+                fit(
+                    -3.0,
+                    Measured::NotMeasured {
+                        issue: MeasureIssue::Unpitched,
+                    },
+                ),
+            ],
+        )],
+        0.0,
+    );
+    assert_eq!(run(&unscored, "a", &[]).unwrap().overall, None);
+}
+
+#[test]
 fn a_confusion_hit_on_a_missing_syllable_still_counts() {
     // A hit is a specific miss (R19): the reading is graded, and fails.
     let r = decoded(
