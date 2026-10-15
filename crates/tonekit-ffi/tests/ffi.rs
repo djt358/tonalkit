@@ -13,7 +13,7 @@ use tonekit::{
     Lect, MeasureIssue, Measured, Register, RegisterSource, RollingParams, ToneId, ToneTarget,
     UtteranceAssessment, POOL_BINS, POOL_BIN_ST,
 };
-use tonekit_ffi::{analyze, assess, decode, lattice, roll_register, Pack};
+use tonekit_ffi::{analyze, assess, decode, lattice, roll_register, roll_register_lite, Pack};
 
 const CMN_TOML: &str = include_str!("../../../packs/cmn/cmn.toml");
 const CMN_CALIB: &str = include_str!("../../../packs/cmn/cmn.calib.json");
@@ -356,6 +356,45 @@ fn a_register_rolls_from_utterance_to_utterance() {
     };
     assert!(matches!(
         roll_register(None, cold, graded, pack(), Some(bad)),
+        Err(AssessError::InvalidRequest { .. })
+    ));
+}
+
+/// Ruling R120: the lite register crosses the boundary as a plain `Register`; without decay it is
+/// `register_update`.
+#[test]
+fn a_lite_register_rolls_from_utterance_to_utterance() {
+    let cold = analyze(fixture_pcm(), RATE, None, None).unwrap();
+    let graded = assess(cold.clone(), pack(), request_413()).unwrap();
+    let first = roll_register_lite(None, cold.clone(), graded.clone(), pack(), None).unwrap();
+    assert_eq!(first.n_syllables, 3);
+    assert_eq!(first, graded.register_update); // a cold start is the cold-start register
+
+    let warm = analyze(fixture_pcm(), RATE, Some(first.clone()), None).unwrap();
+    let again = assess(warm.clone(), pack(), request_413()).unwrap();
+    let second = roll_register_lite(
+        Some(first.clone()),
+        warm.clone(),
+        again.clone(),
+        pack(),
+        None,
+    )
+    .unwrap();
+    assert_eq!(second.n_syllables, 6);
+    let pooled = roll_register_lite(
+        Some(first),
+        warm,
+        again.clone(),
+        pack(),
+        Some(RollingParams::POOLED),
+    );
+    assert_eq!(pooled, Ok(again.register_update));
+    let bad = RollingParams {
+        half_life_s: None,
+        max_share: Some(0.03),
+    };
+    assert!(matches!(
+        roll_register_lite(None, cold, graded, pack(), Some(bad)),
         Err(AssessError::InvalidRequest { .. })
     ));
 }

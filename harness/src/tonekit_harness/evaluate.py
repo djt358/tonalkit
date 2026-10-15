@@ -348,12 +348,15 @@ def speaker_registers(clips: list[Clip], grader: Grader) -> dict[str, str | None
     return _chain_registers(clips, grader)[0]
 
 
-REGISTER_FROM = ("drill", "speaker", "rolling")
+REGISTER_FROM = ("drill", "speaker", "rolling", "rolling-lite")
 REGISTER_HELP = {
     "drill": "each speaker's register drill clips (R46)",
     "speaker": "each clip's speaker's other clips, pooled (R107)",
     "rolling": "the drill, then the speaker's earlier clips in reading order, time-weighted (R111)",
+    "rolling-lite": "the drill, then the speaker's earlier clips in reading order, time-weighted on "
+    "the register's four numbers alone (R120)",
 }
+ROLLING = ("rolling", "rolling-lite")  # the register sources that roll under `rolling_register`
 
 
 def clip_registers(
@@ -364,9 +367,9 @@ def clip_registers(
     graded on the way. `speaker` (ruling R107): each clip's from the same speaker's other clips,
     pooled (`speaker_register.leave_one_out_registers`). `rolling` (ruling R111): each clip's
     rolled from the drill and the speaker's earlier clips only (`rolling_register`), every clip
-    graded on the way."""
-    if register_from == "rolling":
-        return rolling_register.rolling_registers(clips, grader)
+    graded on the way; `rolling-lite` (ruling R120) the same with the four-number register."""
+    if register_from in ROLLING:
+        return rolling_register.rolling_registers(clips, grader, lite=register_from == "rolling-lite")
     if register_from == "speaker":
         registers = speaker_register.leave_one_out_registers(
             clips, lambda c: json.loads(grader.analysis(c, None))
@@ -429,9 +432,9 @@ def run(
 
 
 def register_context(register_from: str, pack_toml: str, calib_json: str | None) -> str:
-    """What a report says about where each clip's register came from; for `rolling`, with the
-    calibration's parameters."""
-    if register_from != "rolling":
+    """What a report says about where each clip's register came from; for `rolling` and
+    `rolling-lite`, with the calibration's parameters."""
+    if register_from not in ROLLING:
         return REGISTER_HELP[register_from]
     p = json.loads(tonekit_py.rolling_params(pack_toml, calib_json))
     half_life = "no decay" if p["half_life_s"] is None else f"half-life {p['half_life_s']:g} s of voiced speech"
@@ -549,7 +552,8 @@ def register(subparsers) -> None:
         help="where a clip's register comes from: the speaker's register drill clips (drill, R46, "
         "the default), all of the speaker's other clips, pooled (speaker, R107), or the drill and "
         "the speaker's earlier clips in reading order, time-weighted under the calibration's "
-        "rolling_register (rolling, R111)",
+        "rolling_register (rolling, R111; rolling-lite keeps only the register's four numbers, "
+        "R120)",
     )
     p.add_argument(
         "--speaker",

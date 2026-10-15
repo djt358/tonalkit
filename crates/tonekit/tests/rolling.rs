@@ -1,10 +1,12 @@
-//! `roll_register` through the facade (ruling R111): synthetic speech analysed, assessed and
-//! rolled in, utterance after utterance, by a speaker who starts 3 st high and settles.
+//! `roll_register` (ruling R111) and `roll_register_lite` (ruling R120) through the facade:
+//! synthetic speech analysed, assessed and rolled in, utterance after utterance, by a speaker who
+//! starts 3 st high and settles.
 
 use tonekit::{
-    analyze, assess, roll_register, AccentId, Analysis, AnalyzeOptions, AssessError, AssessRequest,
-    Candidate, CandidateId, GradingTarget, LanguagePack, MeasureIssue, Register, RegisterSource,
-    RollingParams, RollingRegister, ToneId, ToneTarget, UtteranceAssessment,
+    analyze, assess, roll_register, roll_register_lite, AccentId, Analysis, AnalyzeOptions,
+    AssessError, AssessRequest, Candidate, CandidateId, GradingTarget, LanguagePack, MeasureIssue,
+    Register, RegisterSource, RollingParams, RollingRegister, ToneId, ToneTarget,
+    UtteranceAssessment,
 };
 use tonekit_testkit::{synth, SynthSpec, SynthSyllable};
 
@@ -247,10 +249,150 @@ fn unusable_parameters_are_an_invalid_request() {
             matches!(r, Err(AssessError::InvalidRequest { ref message }) if message.contains("rolling register")),
             "{params:?}: {r:?}"
         );
+        let r = roll_register_lite(None, &a, &graded, &params);
+        assert!(
+            matches!(r, Err(AssessError::InvalidRequest { ref message }) if message.contains("rolling register")),
+            "{params:?}: {r:?}"
+        );
     }
 }
 
 #[test]
 fn the_pack_carries_the_default_parameters() {
     assert_eq!(cmn().calibration().rolling_register, RollingParams::DEFAULT);
+}
+
+// ---- the lite register (ruling R120) ------------------------------------------------------------
+
+/// The drill and 12 phrases 3 st up, then 24 settled phrases, each graded with the lite register
+/// rolled from what came before. Returns the lite register at the end, today's merge (the lite
+/// register without decay) at the end, the register after the drill alone, and the truth (the
+/// settled phrases' frames, pooled).
+fn settle_lite(params: &RollingParams) -> (Register, Register, Register, Register) {
+    let up = 2f32.powf(0.25);
+    let (mut lite, mut merged, mut settled) = (None, None, None);
+    for k in 0..4 {
+        let tones = ["1", "2", "3", "4"];
+        let pcm = spoken(&tones, 100.0 * up, 200.0 * up, 0.0, k);
+        let a = analyze(&pcm, RATE, lite.as_ref(), &AnalyzeOptions::default()).unwrap();
+        let graded = assess(&a, &cmn(), &request(&tones)).unwrap();
+        lite = Some(roll_register_lite(lite.as_ref(), &a, &graded, params).unwrap());
+        let m = roll_register_lite(merged.as_ref(), &a, &graded, &RollingParams::POOLED);
+        merged = Some(m.unwrap());
+    }
+    let drill = merged.clone().unwrap();
+    for k in 0..36 {
+        let tones = PHRASES[k % 4];
+        let (floor, ceil) = if k < 12 {
+            (100.0 * up, 200.0 * up)
+        } else {
+            (100.0, 200.0)
+        };
+        let pcm = spoken(&tones, floor, ceil, 0.0, 10 + k as u64);
+        let a = analyze(&pcm, RATE, lite.as_ref(), &AnalyzeOptions::default()).unwrap();
+        let graded = assess(&a, &cmn(), &request(&tones)).unwrap();
+        assert!(graded.overall.is_some());
+        lite = Some(roll_register_lite(lite.as_ref(), &a, &graded, params).unwrap());
+        let m = roll_register_lite(merged.as_ref(), &a, &graded, &RollingParams::POOLED);
+        merged = Some(m.unwrap());
+        if k >= 12 {
+            roll_in(&mut settled, &a, &graded, &RollingParams::POOLED);
+        }
+    }
+    (
+        lite.unwrap(),
+        merged.unwrap(),
+        drill,
+        settled.unwrap().register,
+    )
+}
+
+/// The largest of the floor, median and ceiling errors of `r` against `truth`.
+fn off(r: &Register, truth: &Register) -> f32 {
+    [
+        (r.floor_st - truth.floor_st).abs(),
+        (r.median_st - truth.median_st).abs(),
+        (r.ceil_st - truth.ceil_st).abs(),
+    ]
+    .into_iter()
+    .fold(0.0, f32::max)
+}
+
+#[test]
+fn the_lite_register_follows_a_speaker_who_settles_and_todays_merge_lags() {
+    let params = RollingParams {
+        half_life_s: Some(5.0),
+        max_share: None,
+    };
+    let (lite, merged, drill, truth) = settle_lite(&params);
+    assert_eq!(lite.n_syllables, 16 + 108);
+    assert!(
+        off(&lite, &truth) < 0.5 * off(&merged, &truth) && off(&merged, &truth) > 0.5,
+        "truth {truth:?} lite {lite:?} merged {merged:?}"
+    );
+    assert!(off(&drill, &truth) > 2.0, "truth {truth:?} drill {drill:?}");
+}
+
+#[test]
+fn without_decay_the_lite_register_is_register_update() {
+    // With no decay and no cap, rolling the lite register is exactly what `assess` reports as
+    // `register_update`, from a cold start on (ruling R120).
+    let mut lite: Option<Register> = None;
+    for k in 0..6 {
+        let tones = PHRASES[k % 4];
+        let pcm = spoken(&tones, 100.0, 200.0, 0.0, 20 + k as u64);
+        let a = analyze(&pcm, RATE, lite.as_ref(), &AnalyzeOptions::default()).unwrap();
+        let graded = assess(&a, &cmn(), &request(&tones)).unwrap();
+        let rolled = roll_register_lite(lite.as_ref(), &a, &graded, &RollingParams::POOLED);
+        assert_eq!(
+            rolled.as_ref(),
+            Ok(&graded.register_update),
+            "utterance {k}"
+        );
+        lite = rolled.ok();
+    }
+}
+
+#[test]
+fn the_lite_register_learns_nothing_from_a_whisper_and_restarts_from_a_corrupt_one() {
+    let pcm = spoken(&["4", "1", "3"], 100.0, 200.0, 0.0, 2);
+    let a = analyze(&pcm, RATE, None, &AnalyzeOptions::default()).unwrap();
+    let graded = assess(&a, &cmn(), &request(&["4", "1", "3"])).unwrap();
+    let p = RollingParams::DEFAULT;
+    let first = roll_register_lite(None, &a, &graded, &p).unwrap();
+    assert_eq!(first.n_syllables, 3);
+    let whisper = spoken(&["4", "1", "3"], 100.0, 200.0, 250.0, 3);
+    let w = analyze(&whisper, RATE, Some(&first), &AnalyzeOptions::default()).unwrap();
+    let hushed = assess(&w, &cmn(), &request(&["4", "1", "3"])).unwrap();
+    assert_eq!(
+        roll_register_lite(Some(&first), &w, &hushed, &p),
+        Ok(first.clone())
+    );
+    // A stored register that cannot be graded against is started afresh, as `analyze` does.
+    let corrupt = Register {
+        median_st: f32::NAN,
+        ..first.clone()
+    };
+    assert_eq!(
+        roll_register_lite(Some(&corrupt), &a, &graded, &p),
+        Ok(first)
+    );
+}
+
+#[test]
+fn a_lite_register_is_the_four_number_register_json() {
+    let pcm = spoken(&["2", "4"], 100.0, 200.0, 0.0, 5);
+    let a = analyze(&pcm, RATE, None, &AnalyzeOptions::default()).unwrap();
+    let graded = assess(&a, &cmn(), &request(&["2", "4"])).unwrap();
+    let lite = roll_register_lite(None, &a, &graded, &RollingParams::DEFAULT).unwrap();
+    let json = serde_json::to_value(&lite).unwrap();
+    let keys: Vec<&str> = json
+        .as_object()
+        .unwrap()
+        .keys()
+        .map(String::as_str)
+        .collect();
+    assert_eq!(keys, ["ceil_st", "floor_st", "median_st", "n_syllables"]);
+    let back: Register = serde_json::from_value(json).unwrap();
+    assert_eq!(back, lite);
 }

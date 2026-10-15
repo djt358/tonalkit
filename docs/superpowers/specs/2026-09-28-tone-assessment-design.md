@@ -121,9 +121,12 @@ to know *which* syllables were said before it can judge them.
    │        = decode([intended] ∪ distractors) + diagnostics + fusion
    │        → UtteranceAssessment (xiuzhen/Bendy grading)
    │
-   └── roll_register(previous, analysis, assessment, params)          (R111)
-            → RollingRegister: the register to carry to the next utterance, following the
-              speaker's drift (its `register` goes to the next analyze())
+   ├── roll_register(previous, analysis, assessment, params)          (R111)
+   │        → RollingRegister: the register to carry to the next utterance, following the
+   │          speaker's drift (its `register` goes to the next analyze())
+   │
+   └── roll_register_lite(previous, analysis, assessment, params)     (R120)
+            → Register: the same, keeping only the register's four numbers
 ```
 
 `tonekit` holds no policy. It reports likelihoods, probabilities, distances and diagnostics.
@@ -205,7 +208,8 @@ pub struct Register { pub floor_st: f32, pub median_st: f32, pub ceil_st: f32, p
 // `pool`: seconds of voiced speech (after decay) per 0.1 st bin from −6 st, 540 bins (to 48 st).
 pub struct RollingRegister { pub register: Register, pub pool: Vec<f64> }
 // None = no decay / no cap (both None: plain pooling, R107). Default 30 s and 0.03 (calib
-// `rolling_register`, optional; when present both keys are required, null for none).
+// `rolling_register`, optional; when present both keys are required, null for none). The lite
+// form (R120) rolls a plain `Register` under the same parameters.
 pub struct RollingParams { pub half_life_s: Option<f32>, pub max_share: Option<f32> }
 
 // style.rs: an individual's realisation within an accent (imprint). No timbre, no embedding.
@@ -707,6 +711,16 @@ to a literal GAN.
     ceiling are the pool's weighted p5/p50/p95, widened by `2 st · (1 − min(n, 30)/30)` while
     cold, at least 4 st wide. Without decay or cap a warm rolling register is the pooled
     percentiles of every frame (R107). `register_update` is unchanged.
+  - **Lite rolling register (R120).** For an app that won't store a histogram,
+    `roll_register_lite(previous, analysis, assessment, params)` rolls the four-number `Register`
+    itself: each utterance moves floor, median and ceiling
+    `w = min(0.5, max(u/(n+u), 1 − 2^(−counted/half_life_s)))` of the way to its own
+    p5/p50/p95, with `counted` capped as above. Once warm an older utterance halves in weight
+    after `half_life_s` of newer speech and no utterance moves a number more than `max_share` of
+    the way; until then (and always, without decay or cap) it is `register_update`'s merge. It
+    averages per-utterance percentiles, so it is narrower than the pooled register (by about 1 st
+    on the calibration corpus), and one far-off utterance moves all three numbers by up to
+    `max_share` of its distance, where a pool's percentiles move a bounded amount.
   - It's never inferred from anything but the user's own f0.
 
 ---
@@ -762,7 +776,8 @@ with the download date next to the data, so the provenance claim can be shown la
 - No speaker embeddings, ever. `Register` is four numbers, and `StyleProfile` is per-tone mean
   contours in normalised space: pitch-shape statistics, not timbre. A `RollingRegister` (R111)
   adds the user's pitch distribution (a 540-bin histogram of their voiced semitones, decayed):
-  still pitch statistics, not timbre, kept on the device like the register.
+  still pitch statistics, not timbre, kept on the device like the register. The lite form (R120)
+  keeps only the register's four numbers.
 - Common Voice's no-re-identification term is honoured.
 
 ### 11.4 Imprints and voice likeness: resolved (DJ, v2.1)

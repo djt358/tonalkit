@@ -1,5 +1,6 @@
-"""Registers that follow the speaker (ruling R111): `tkh eval --register-from rolling` grades each
-clip with the register rolled from the drill and the speaker's earlier clips only."""
+"""Registers that follow the speaker (rulings R111, R120): `tkh eval --register-from rolling` (and
+`rolling-lite`) grades each clip with the register rolled from the drill and the speaker's earlier
+clips only."""
 
 from __future__ import annotations
 
@@ -35,8 +36,9 @@ def test_the_drill_comes_first_then_the_rest_in_reading_order(tmp_path):
     assert [c.card for c in causal_order(clips, tmp_path)] == ["r01", "g01-e", "g01-c"]
 
 
+@pytest.mark.parametrize("register_from", ["rolling", "rolling-lite"])
 def test_each_clip_is_graded_with_the_register_of_the_clips_before_it_only(
-    tmp_path, pack_toml, calib_json, monkeypatch
+    tmp_path, pack_toml, calib_json, monkeypatch, register_from
 ):
     # Two speakers, interleaved in the manifest; each has a drill clip listed last.
     clips = [
@@ -54,7 +56,9 @@ def test_each_clip_is_graded_with_the_register_of_the_clips_before_it_only(
         return real_analyze(pcm, sample_rate, register_json, f0_json)
 
     monkeypatch.setattr(evaluate.tonekit_py, "analyze", spy)
-    got = evaluate.run(clips, pack_toml, calib_json, None, root=tmp_path, use_cache=False, register_from="rolling")
+    got = evaluate.run(
+        clips, pack_toml, calib_json, None, root=tmp_path, use_cache=False, register_from=register_from
+    )
 
     assert [r.id for r in got] == [c.id for c in clips]  # results in manifest order
     assert len(calls) == len(clips)  # each clip analysed once, with its own register
@@ -103,4 +107,37 @@ def test_tkh_eval_reports_the_rolling_parameters(tmp_path, capsys):
     assert code == 0, capsys.readouterr().err
     text = report.read_text(encoding="utf-8")
     assert "earlier clips in reading order, time-weighted (R111)" in text
+    assert "half-life 30 s of voiced speech, at most 0.03 of a full pool per clip" in text
+
+
+def test_without_decay_the_lite_register_is_the_register_update_chain(tmp_path, pack_toml, calib_json):
+    # Ruling R120: the lite register with no decay or cap is what the drill chain persists
+    # (`register_update`, utterance after utterance from a cold start).
+    clips = [make_clip(tmp_path, f"c{i}", t, seed=i) for i, t in enumerate([["4", "1", "3"], ["1", "2", "4"]] * 3)]
+    grader = evaluate.Grader(pack_toml, calib_json, "cmn-standard", tmp_path, None)
+    lite: str | None = None
+    for clip in clips:
+        analysis = grader.analysis(clip, lite)
+        _, assessment = grader.assess(clip, analysis)
+        lite = tonekit_py.roll_register_lite(
+            lite, analysis, json.dumps(assessment), pack_toml, calib_json,
+            json.dumps({"half_life_s": None, "max_share": None}),
+        )  # fmt: skip
+        assert json.loads(lite) == assessment["register_update"], clip.id
+
+
+def test_tkh_eval_reports_the_lite_registers_parameters(tmp_path, capsys):
+    from tonekit_harness import cli
+
+    clips = gate_corpus(tmp_path)
+    manifest = tmp_path / "manifest.jsonl"
+    manifest.write_text("".join(c.model_dump_json() + "\n" for c in clips), encoding="utf-8")
+    report = tmp_path / "report.md"
+    code = cli.main([
+        "eval", "--manifest", str(manifest), "--pack", str(PACKS / "cmn.toml"), "--report", str(report),
+        "--no-cache", "--register-from", "rolling-lite",
+    ])  # fmt: skip
+    assert code == 0, capsys.readouterr().err
+    text = report.read_text(encoding="utf-8")
+    assert "time-weighted on the register's four numbers alone (R120)" in text
     assert "half-life 30 s of voiced speech, at most 0.03 of a full pool per clip" in text

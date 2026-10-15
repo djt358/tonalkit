@@ -101,6 +101,17 @@ pub(crate) fn fallback_register() -> Register {
 ///
 /// The result is at least 4 st wide. With no voiced frames only the count changes.
 pub fn merge_register(r: &Register, voiced_st: &[f32], syllables: u32) -> Register {
+    merge_at_least(r, voiced_st, syllables, 0.0)
+}
+
+/// [`merge_register`] with `w` at least `min_weight` (and still at most 0.5): how the lite rolling
+/// register forgets (ruling R120).
+pub(crate) fn merge_at_least(
+    r: &Register,
+    voiced_st: &[f32],
+    syllables: u32,
+    min_weight: f64,
+) -> Register {
     let n_syllables = r.n_syllables.saturating_add(syllables);
     let Some((p5, p50, p95)) = p5_p50_p95(voiced_st) else {
         return Register {
@@ -109,11 +120,12 @@ pub fn merge_register(r: &Register, voiced_st: &[f32], syllables: u32) -> Regist
         };
     };
     let total = f64::from(r.n_syllables) + f64::from(syllables);
-    let w = if total > 0.0 {
-        (f64::from(syllables) / total).min(MAX_MERGE_WEIGHT)
+    let running = if total > 0.0 {
+        f64::from(syllables) / total
     } else {
-        MAX_MERGE_WEIGHT
+        1.0
     };
+    let w = running.max(min_weight).min(MAX_MERGE_WEIGHT);
     let toward = |old: f32, new: f64| (f64::from(old) + w * (new - f64::from(old))) as f32;
     at_least_min_span(Register {
         floor_st: toward(r.floor_st, p5),

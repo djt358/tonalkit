@@ -67,6 +67,8 @@ have tonekit_ffi.swift 'func inventory\(\)[[:space:]]*-> \[ToneId\]'
 # The rolling register (ruling R111): carried from utterance to utterance by the app.
 have tonekit_ffi.swift 'public func rollRegister\(previous: RollingRegister\?, analysis: Analysis, assessment: UtteranceAssessment, pack: Pack, params: RollingParams\? = nil\)[[:space:]]*throws[[:space:]]*-> RollingRegister'
 have tonekit_ffi.swift 'func rollingParams\(\)[[:space:]]*-> RollingParams'
+# Its four-number form (ruling R120): the app keeps only a Register.
+have tonekit_ffi.swift 'public func rollRegisterLite\(previous: Register\?, analysis: Analysis, assessment: UtteranceAssessment, pack: Pack, params: RollingParams\? = nil\)[[:space:]]*throws[[:space:]]*-> Register'
 
 # The request (tonekit.swift).
 have tonekit.swift '^public struct AssessRequest'

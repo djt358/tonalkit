@@ -66,5 +66,19 @@ def roll_register(
     unusable parameters, a bad pack, or JSON that does not parse.
     """
 
+def roll_register_lite(
+    previous_json: str | None,
+    analysis_json: str,
+    assessment_json: str,
+    pack_toml: str,
+    calib_json: str | None,
+    params_json: str | None = None,
+) -> str:
+    """Roll a graded utterance into a four-number Register (R120); returns the Register JSON.
+
+    previous_json is a Register (or None). Same half-life and cap as roll_register; without decay
+    or cap it is register_update. Raises ValueError as roll_register does.
+    """
+
 def rolling_params(pack_toml: str, calib_json: str | None) -> str:
     """The pack calibration's rolling_register parameters (or tonekit's default) as JSON."""

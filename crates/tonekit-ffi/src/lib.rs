@@ -185,3 +185,28 @@ pub fn roll_register(
     let params = params.unwrap_or_else(|| pack.rolling_params());
     tonekit::roll_register(previous.as_ref(), &analysis, &assessment, &params)
 }
+
+/// [`roll_register`] for an app that keeps only the four numbers of a `Register` between
+/// utterances, not a pitch histogram (ruling R120): the same half-life and per-utterance cap, but
+/// each utterance moves floor, median and ceiling part of the way to its own percentiles. It is
+/// narrower than the full register, and one far-off utterance moves all three numbers in
+/// proportion to how far off it is. Pass the result to the next `analyze`; persist it only if
+/// `nSyllables > 0`. With [`RollingParams::POOLED`] it equals `register_update`.
+///
+/// `previous` is `nil` for a speaker with nothing rolled in yet (or one that cannot be graded
+/// against, which starts afresh); `params` default to the pack's ([`Pack::rolling_params`]).
+///
+/// # Errors
+///
+/// [`AssessError::InvalidRequest`] for unusable `params`.
+#[uniffi::export(default(params = None))]
+pub fn roll_register_lite(
+    previous: Option<Register>,
+    analysis: Analysis,
+    assessment: UtteranceAssessment,
+    pack: Arc<Pack>,
+    params: Option<RollingParams>,
+) -> Result<Register, AssessError> {
+    let params = params.unwrap_or_else(|| pack.rolling_params());
+    tonekit::roll_register_lite(previous.as_ref(), &analysis, &assessment, &params)
+}

@@ -7,7 +7,7 @@ use crate::pool::{bin_of, weighted_percentile};
 use crate::register::{at_least_min_span, fallback_register, COLD_MARGIN_ST, WARM_SYLLABLES};
 
 /// Seconds of speech one voiced frame stands for.
-const FRAME_S: f64 = HOP as f64 / SAMPLE_RATE as f64;
+pub(crate) const FRAME_S: f64 = HOP as f64 / SAMPLE_RATE as f64;
 /// A bin that decays below this many seconds is emptied, which keeps a stored pool tidy.
 const NEGLIGIBLE_S: f64 = 1e-6;
 
@@ -79,12 +79,12 @@ pub fn utterance_cap_s(params: &RollingParams) -> Option<f64> {
 }
 
 /// How many seconds an utterance with `seconds` of voiced speech counts as.
-fn counted_seconds(seconds: f64, params: &RollingParams) -> f64 {
+pub(crate) fn counted_seconds(seconds: f64, params: &RollingParams) -> f64 {
     utterance_cap_s(params).map_or(seconds, |cap| seconds.min(cap))
 }
 
 /// What the pool keeps of its weight when `counted` seconds are added: `2^(−counted/half_life)`.
-fn decay(counted: f64, params: &RollingParams) -> f64 {
+pub(crate) fn decay(counted: f64, params: &RollingParams) -> f64 {
     params
         .half_life_s
         .map_or(1.0, |h| (-counted / f64::from(h)).exp2())

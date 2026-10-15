@@ -1,8 +1,11 @@
-//! The rolling register (ruling R111) on simulated speakers: it follows a learner whose register
-//! settles, one odd utterance moves it only a bounded amount, and it is deterministic.
+//! The rolling register (ruling R111) and its lite form (ruling R120) on simulated speakers: they
+//! follow a learner whose register settles, one odd utterance moves them only a bounded amount,
+//! and they are deterministic.
 
 use tonekit_core::{Register, RollingParams, RollingRegister, POOL_BINS};
-use tonekit_shape::{roll_register, utterance_cap_s};
+use tonekit_shape::{
+    cold_register, merge_register, roll_register, roll_register_lite, utterance_cap_s,
+};
 use tonekit_testkit::Rng;
 
 /// Standard normal quantiles: at 0.95, and at 0.95 / (1 − 0.032), where a pool's p95 can go
@@ -58,6 +61,10 @@ struct Tracks {
     rolling: Vec<f64>,
     pooled: Vec<f64>,
     drill: Vec<f64>,
+    /// The lite register under the same parameters (ruling R120), and today's merge
+    /// (`register_update`, which is the lite register with no decay or cap).
+    lite: Vec<f64>,
+    merged: Vec<f64>,
 }
 
 /// The drill (8 utterances in the starting state), then the phrases. Each phrase is graded with
@@ -66,11 +73,20 @@ fn simulate(params: &RollingParams) -> Tracks {
     let mut rng = Rng::new(11);
     let mut rolling: Option<RollingRegister> = None;
     let mut pooled: Option<RollingRegister> = None;
+    let mut lite: Option<Register> = None;
+    let mut merged: Option<Register> = None;
     for _ in 0..8 {
         let frames = utterance(&mut rng, DRILL_FRAMES, START.0, START.1);
         rolling = Some(roll_register(rolling.as_ref(), &frames, 4, params));
         pooled = Some(roll_register(
             pooled.as_ref(),
+            &frames,
+            4,
+            &RollingParams::POOLED,
+        ));
+        lite = Some(roll_register_lite(lite.as_ref(), &frames, 4, params));
+        merged = Some(roll_register_lite(
+            merged.as_ref(),
             &frames,
             4,
             &RollingParams::POOLED,
@@ -81,6 +97,8 @@ fn simulate(params: &RollingParams) -> Tracks {
         rolling: Vec::new(),
         pooled: Vec::new(),
         drill: Vec::new(),
+        lite: Vec::new(),
+        merged: Vec::new(),
     };
     for k in 0..SETTLE + AFTER {
         let (mean, sd) = state(k);
@@ -92,9 +110,18 @@ fn simulate(params: &RollingParams) -> Tracks {
             .pooled
             .push(error(&pooled.as_ref().unwrap().register, want));
         tracks.drill.push(error(&drill, want));
+        tracks.lite.push(error(lite.as_ref().unwrap(), want));
+        tracks.merged.push(error(merged.as_ref().unwrap(), want));
         let frames = utterance(&mut rng, PHRASE_FRAMES, mean, sd);
         rolling = Some(roll(rolling.as_ref(), &frames, params));
         pooled = Some(roll(pooled.as_ref(), &frames, &RollingParams::POOLED));
+        lite = Some(roll_register_lite(lite.as_ref(), &frames, 3, params));
+        merged = Some(roll_register_lite(
+            merged.as_ref(),
+            &frames,
+            3,
+            &RollingParams::POOLED,
+        ));
     }
     tracks
 }
@@ -282,4 +309,183 @@ fn pitches_off_the_grid_count_in_the_end_bins_and_the_register_stays_usable() {
         g.floor_st >= -6.0 && g.ceil_st <= 48.0 && g.floor_st < g.ceil_st,
         "{g:?}"
     );
+}
+
+// ---- the lite register (ruling R120) ------------------------------------------------------------
+
+/// A lite register that has heard `n` phrases of the settled speaker, under `params`.
+fn settled_lite(rng: &mut Rng, n: usize, params: &RollingParams) -> Register {
+    let mut r = None;
+    for _ in 0..n {
+        let frames = utterance(rng, PHRASE_FRAMES, SETTLED.0, SETTLED.1);
+        r = Some(roll_register_lite(r.as_ref(), &frames, 3, params));
+    }
+    r.unwrap()
+}
+
+#[test]
+fn the_lite_register_follows_a_learner_who_settles() {
+    let t = simulate(&RollingParams::DEFAULT);
+    let n = t.lite.len();
+    let settling = mean(&t.lite[SETTLE..SETTLE + 20]);
+    let late = mean(&t.lite[n - 20..]);
+    assert!(late < 0.5 * settling, "lite: {settling:.2} then {late:.2}");
+    assert!(late < 0.6, "lite ends {late:.2} st off");
+    // Today's merge (the lite register without decay) lags, and the drill is far off. (These
+    // simulated utterances each sample the whole register, so averaging their percentiles is
+    // unbiased here; real phrases cover a few tones each, which makes the lite register narrow.)
+    let merged = mean(&t.merged[n - 20..]);
+    assert!(merged > 1.5 * late, "merged {merged:.2} vs lite {late:.2}");
+    assert!(mean(&t.drill[n - 20..]) > 2.5);
+}
+
+#[test]
+fn without_decay_the_lite_register_is_todays_merge_from_a_cold_start() {
+    // Ruling R120: with no decay and no cap the lite register is `register_update`'s chain, bit
+    // for bit: the first utterance's cold-start register, then `merge_register` for each.
+    let mut rng = Rng::new(12);
+    let mut lite: Option<Register> = None;
+    let mut merged: Option<Register> = None;
+    for k in 0..40 {
+        let frames = utterance(&mut rng, 30 + k, 18.0 + (k % 3) as f64, 2.0);
+        let syllables = 1 + (k % 4) as u32;
+        lite = Some(roll_register_lite(
+            lite.as_ref(),
+            &frames,
+            syllables,
+            &RollingParams::POOLED,
+        ));
+        merged = Some(match &merged {
+            None => cold_register(&frames, syllables),
+            Some(r) => merge_register(r, &frames, syllables),
+        });
+        assert_eq!(lite, merged, "utterance {k}");
+    }
+}
+
+#[test]
+fn the_lite_register_forgets_with_the_same_half_life() {
+    // A warm register (so many syllables behind it that the running mean has no say) hears
+    // utterances of one pitch, 1 s of voice each (under the 1.32 s cap): after 30 s, one
+    // half-life, its median is half as far from that pitch as it was.
+    let warm = Register {
+        floor_st: 10.0,
+        median_st: 14.0,
+        ceil_st: 18.0,
+        n_syllables: 1_000_000,
+    };
+    let frames = vec![20.0f32; 100];
+    let mut r = warm.clone();
+    for _ in 0..30 {
+        r = roll_register_lite(Some(&r), &frames, 3, &RollingParams::DEFAULT);
+    }
+    let left = f64::from(20.0 - r.median_st) / f64::from(20.0 - warm.median_st);
+    assert!(
+        (left - 0.5).abs() < 1e-5,
+        "{left} of the distance left: {r:?}"
+    );
+}
+
+#[test]
+fn one_odd_utterance_moves_a_warm_lite_register_at_most_max_share_of_its_distance() {
+    let params = RollingParams::DEFAULT;
+    let share = f64::from(params.max_share.unwrap());
+    let mut rng = Rng::new(5);
+    // 300 phrases: 900 syllables, so the running mean's say (3/903) is under the cap's 3%.
+    let b = settled_lite(&mut rng, 300, &params);
+    // A 5 s shout an octave up, and one two octaves up.
+    let shout = utterance(&mut rng, 500, SETTLED.0 + 12.0, 1.0);
+    let high = utterance(&mut rng, 500, SETTLED.0 + 24.0, 1.0);
+    let moves = |frames: &[f32]| {
+        let a = roll_register_lite(Some(&b), frames, 3, &params);
+        [
+            a.floor_st - b.floor_st,
+            a.median_st - b.median_st,
+            a.ceil_st - b.ceil_st,
+        ]
+    };
+    // Each number moves at most 3% of the way to the shout's own percentile (+ f32 rounding).
+    let pct = |v: &[f32], p: usize| {
+        let mut v = v.to_vec();
+        v.sort_by(f32::total_cmp);
+        f64::from(v[p * (v.len() - 1) / 100])
+    };
+    let levels = [b.floor_st, b.median_st, b.ceil_st];
+    for (m, (level, p)) in moves(&shout).iter().zip(levels.iter().zip([5, 50, 95])) {
+        let distance = pct(&shout, p) - f64::from(*level);
+        assert!(
+            f64::from(*m) <= share * distance + 0.02,
+            "{m} of {distance}"
+        );
+        assert!(*m > 0.0);
+    }
+    // The weaker bound: unlike a pool's percentiles, all three numbers move, and the farther off
+    // the utterance, the farther they move (the full register's median moved 0.1 st, here 0.36).
+    let (near, far) = (moves(&shout), moves(&high));
+    assert!(near[1] > 0.3, "{near:?}");
+    for (n, f) in near.iter().zip(far) {
+        assert!(f > 1.8 * n, "near {near:?} far {far:?}");
+    }
+}
+
+#[test]
+fn a_long_utterance_counts_as_the_cap_in_the_lite_register() {
+    // A 20 s monologue one octave up moves the warm median exactly the cap's 3% of the way.
+    let warm = Register {
+        floor_st: 10.0,
+        median_st: 14.0,
+        ceil_st: 18.0,
+        n_syllables: 1_000_000,
+    };
+    let frames = vec![26.0f32; 2000];
+    let r = roll_register_lite(Some(&warm), &frames, 3, &RollingParams::DEFAULT);
+    assert!(
+        (f64::from(r.median_st) - (14.0 + 0.03 * 12.0)).abs() < 1e-5,
+        "{r:?}"
+    );
+    // Without a cap the decay alone sets the say: 1 − 2^(−20/30) ≈ 0.37, then at most a half.
+    let uncapped = RollingParams {
+        half_life_s: Some(30.0),
+        max_share: None,
+    };
+    let r = roll_register_lite(Some(&warm), &frames, 3, &uncapped);
+    let w = 1.0 - (-20.0f64 / 30.0).exp2();
+    assert!(
+        (f64::from(r.median_st) - (14.0 + w * 12.0)).abs() < 1e-4,
+        "{r:?}"
+    );
+}
+
+#[test]
+fn the_lite_register_learns_nothing_from_nothing_and_starts_cold() {
+    let mut rng = Rng::new(4);
+    let before = settled_lite(&mut rng, 10, &RollingParams::DEFAULT);
+    let frames = utterance(&mut rng, 80, 30.0, 1.0);
+    let params = RollingParams::DEFAULT;
+    assert_eq!(
+        roll_register_lite(Some(&before), &frames, 0, &params),
+        before
+    );
+    let nothing = roll_register_lite(None, &frames, 0, &params);
+    assert_eq!(nothing.n_syllables, 0);
+    // From nothing learnt (no register, or one counting no syllables): the cold start.
+    let cold = cold_register(&frames, 3);
+    assert_eq!(roll_register_lite(None, &frames, 3, &params), cold);
+    assert_eq!(
+        roll_register_lite(Some(&nothing), &frames, 3, &params),
+        cold
+    );
+    // Measured syllables without pitch only count.
+    let after = roll_register_lite(Some(&before), &[f32::NAN], 2, &params);
+    assert_eq!(after.n_syllables, before.n_syllables + 2);
+    assert_eq!(after.median_st, before.median_st);
+}
+
+#[test]
+fn the_lite_register_is_deterministic() {
+    let x = settled_lite(&mut Rng::new(3), 50, &RollingParams::DEFAULT);
+    let y = settled_lite(&mut Rng::new(3), 50, &RollingParams::DEFAULT);
+    let bits = |r: &Register| [r.floor_st, r.median_st, r.ceil_st].map(f32::to_bits);
+    assert_eq!(bits(&x), bits(&y));
+    assert_eq!(x, y);
 }

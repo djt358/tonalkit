@@ -1,5 +1,6 @@
-"""`tonekit_py.roll_register` and `tonekit_py.rolling_params` (ruling R111): the rolling register
-in JSON, as Rust and Swift see it."""
+"""`tonekit_py.roll_register`, `tonekit_py.roll_register_lite` and `tonekit_py.rolling_params`
+(rulings R111, R120): the rolling register and its four-number form in JSON, as Rust and Swift see
+them."""
 
 from __future__ import annotations
 
@@ -77,3 +78,24 @@ def test_bad_parameters_and_bad_json_are_value_errors(graded, pack_toml, calib_j
     calib["rolling_register"] = {"half_life_s": 30.0}
     with pytest.raises(ValueError, match="max_share"):
         tonekit_py.rolling_params(pack_toml, json.dumps(calib))
+
+
+def test_the_lite_register_is_four_numbers_and_without_decay_is_register_update(
+    pcm, graded, pack_toml, calib_json
+):
+    analysis, assessment = graded
+    first = tonekit_py.roll_register_lite(None, analysis, assessment, pack_toml, calib_json)
+    assert set(json.loads(first)) == {"floor_st", "median_st", "ceil_st", "n_syllables"}
+    assert json.loads(first) == json.loads(assessment)["register_update"]  # the cold start
+    warm = tonekit_py.analyze(pcm, RATE, first)
+    again = tonekit_py.assess(warm, pack_toml, calib_json, json.dumps(request_413()))
+    second = json.loads(tonekit_py.roll_register_lite(first, warm, again, pack_toml, calib_json))
+    assert second["n_syllables"] == 6
+    pooled = tonekit_py.roll_register_lite(first, warm, again, pack_toml, calib_json, POOLED)
+    assert json.loads(pooled) == json.loads(again)["register_update"]
+    with pytest.raises(ValueError, match="invalid previous_json"):
+        tonekit_py.roll_register_lite("{}", analysis, assessment, pack_toml, calib_json)
+    with pytest.raises(ValueError, match="rolling register parameters: max_share"):
+        tonekit_py.roll_register_lite(
+            None, analysis, assessment, pack_toml, calib_json, json.dumps({"half_life_s": None, "max_share": 0.1})
+        )
