@@ -1,6 +1,6 @@
 # Decisions
 
-The choices that shaped tonekit's behaviour, data and build, numbered `R1` to `R120`. Code comments
+The choices that shaped tonekit's behaviour, data and build, numbered `R1` to `R121`. Code comments
 and tests cite them as "ruling R27" or just `R27`; this is where they are written down. Each entry
 says what was decided, why, and what it costs if it turns out wrong. The spec
 ([`docs/superpowers/specs/`](superpowers/specs/2026-09-28-tone-assessment-design.md)) says what
@@ -1032,6 +1032,25 @@ session's entries in `relabels.jsonl` and any relabel manifest a killed run left
 reminder names exported `relabels-*.json` files. On load, a review page drops the decisions the
 browser kept about sessions its corpus no longer has. **Why.** Contracts §6 reserved review pages
 for purge, and the log names clips. **Cost if wrong.** After any purge DJ runs `tkh review` again.
+
+## Public corpora (S0.5)
+
+### R121: A public corpus's sentences are their own clip set
+
+**Decision.** Manifest rows from public corpora (`tkh adapt`) have `set = "sentence"`: label
+`correct`, `produced_tones` equal to `intended.tones` (the transcript's spoken tones) and no pair
+(the model refuses anything else); the adapters write no distractors and no deck card. `sentence`
+is a manifest `ClipSet` value only: it is not a deck
+`CardSet`, so no gate file can select it (a gate's `select.sets` are deck sets) and
+`kit/schema` is unchanged. `tkh fit` reads sentences like any `correct` clip of a calib speaker.
+`tkh eval` over a manifest with no gate clips issues no S1 verdict ("No S1 verdict"), counts
+`diag_count` only by rank (there is no threshold), and reports a sentence diagnostic: the share
+of syllables tonekit heard as the transcript's tone, and the sentences with no score. A relabel
+of a sentence that heard other tones makes them its intended and produced tones (it stays one
+correct reading). **Why.** Public sentences are neither gate pairs nor diagnostic cards: they are
+fitting data with a known spoken reading, and the gate's verdict must never rest on them.
+**Cost if wrong.** A gate that should measure on public sentences needs a new set in the deck
+vocabulary and a gate rule for unpaired clips.
 
 ## Process
 

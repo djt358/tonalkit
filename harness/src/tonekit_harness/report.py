@@ -13,7 +13,7 @@ if TYPE_CHECKING:
 
     from .clearance import Clearance
     from .evaluate import Result
-    from .metrics import Failure, GateMetrics
+    from .metrics import Failure, GateMetrics, SentenceAccuracy
 
 _MS_DELTAS = {"TurnEarlier", "TurnLater"}  # the other kinds are in Chao units
 
@@ -53,7 +53,15 @@ def _deltas(deltas: Sequence[tuple[str, float]]) -> str:
     return ", ".join(_delta(kind, amount) for kind, amount in deltas) or "none"
 
 
-def _headline(gate: GateMetrics, clearance: Clearance) -> str:
+NO_GATE = (
+    "**No S1 verdict**: this run has no gate clips. A public corpus's sentences are never gate "
+    "clips (R121); S1 is measured on the gate pairs of real recordings (spec §9, §13)."
+)
+
+
+def _headline(gate: GateMetrics | None, clearance: Clearance) -> str:
+    if gate is None:
+        return NO_GATE
     n = len(gate.thresholds)
     if not clearance.verdict:
         return (
@@ -77,6 +85,34 @@ def _headline(gate: GateMetrics, clearance: Clearance) -> str:
     return text
 
 
+def _sentence_rows(sentences: SentenceAccuracy | None) -> list[list[str]]:
+    """The sentence diagnostic (R121): syllables heard as the transcript's tone, and clips with no
+    score."""
+    if sentences is None:
+        return []
+    return [
+        [
+            "Sentence tone accuracy (sentence; heard syllables)",
+            rate(sentences.accuracy, sentences.heard, missing="n/a (no syllable heard)"),
+            "diagnostic",
+            "-",
+        ],
+        ["Sentences with no score", f"{sentences.unscored}/{sentences.clips}", "diagnostic", "-"],
+    ]
+
+
+def _no_gate_table(
+    cand_acc: float | None, n_minimal: int | None, sentences: SentenceAccuracy | None
+) -> list[str]:
+    rows = [
+        ["Correct-accept (leave-one-pair-out)", "n/a (no gate pairs)", f"at least {float(CA_MIN):.2f}", "n/a"],
+        ["Wrong-accept (leave-one-pair-out)", "n/a (no gate pairs)", f"at most {float(WA_MAX):.2f}", "n/a"],
+        ["Candidate-ID accuracy (diag_minimal)", rate(cand_acc, n_minimal), "diagnostic", "-"],
+        *_sentence_rows(sentences),
+    ]
+    return table(["Metric", "Value", "Requirement", "Result"], rows)
+
+
 def _metrics_table(
     gate: GateMetrics,
     cand_acc: float | None,
@@ -84,6 +120,7 @@ def _metrics_table(
     n_minimal: int | None,
     n_count: int | None,
     clearance: Clearance,
+    sentences: SentenceAccuracy | None = None,
 ) -> list[str]:
     n = len(gate.thresholds)
     # without a verdict the bounds are not applied: a pass or fail here would be one
@@ -111,6 +148,7 @@ def _metrics_table(
             "diagnostic",
             "-",
         ],
+        *_sentence_rows(sentences),
     ]
     return table(["Metric", "Value", "Requirement", "Result"], rows)
 
@@ -223,7 +261,7 @@ def _failure(f: Failure) -> list[str]:
 
 def write(
     path: str | Path,
-    gate: GateMetrics,
+    gate: GateMetrics | None,
     cand_acc: float | None,
     count_rob: float | None,
     failures: Sequence[Failure],
@@ -233,6 +271,7 @@ def write(
     n_count: int | None = None,
     context: Mapping[str, str] | None = None,
     results: Sequence[Result] = (),
+    sentences: SentenceAccuracy | None = None,
 ) -> None:
     """Write the gate report to `path` (parent directories are created).
 
@@ -240,14 +279,22 @@ def write(
     (None when the corpus has no such clips); `n_minimal` and `n_count` are those sets' clip counts,
     shown beside them. `failures` is `metrics.failures(...)`, listed in the order given.
     `clearance` (`clearance.assess`) decides whether the headline is an S1 verdict or says why it
-    is not one. `context` (label to text) is printed as a "Run" section. The output depends only
-    on the arguments: no timestamps.
+    is not one. `context` (label to text) is printed as a "Run" section. `gate` is None for a run
+    with no gate clips (a public corpus's sentences, R121): no verdict, no pairs. `sentences` is
+    `metrics.sentence_accuracy` (None without sentence clips). The output depends only on the
+    arguments: no timestamps.
     """
     lines = ["# P0 gate report", "", _headline(gate, clearance), ""]
     if context:
         lines += ["## Run", ""] + [f"- {label}: {value}" for label, value in context.items()]
         lines.append("")
-    lines += ["## Metrics", ""] + _metrics_table(gate, cand_acc, count_rob, n_minimal, n_count, clearance)
+    if gate is None:
+        lines += ["## Metrics", ""] + _no_gate_table(cand_acc, n_minimal, sentences) + [""]
+        lines += _failures_section(failures)
+        _write_lines(path, lines)
+        return
+    lines += ["## Metrics", ""]
+    lines += _metrics_table(gate, cand_acc, count_rob, n_minimal, n_count, clearance, sentences)
     lines += ["", "## Gate pairs", ""]
     lines += ["Each pair is judged at the threshold fitted on the other pairs.", ""]
     lines += _pair_table(gate) + [""]
@@ -262,12 +309,20 @@ def write(
             "",
         ]
         lines += [f"- {cid}" for cid in gate.rejected_none] + [""]
-    lines += ["## Failures", ""]
-    if failures:
-        for f in failures:
-            lines += _failure(f)
-    else:
-        lines += ["None.", ""]
+    lines += _failures_section(failures)
+    _write_lines(path, lines)
+
+
+def _failures_section(failures: Sequence[Failure]) -> list[str]:
+    lines = ["## Failures", ""]
+    if not failures:
+        return lines + ["None.", ""]
+    for f in failures:
+        lines += _failure(f)
+    return lines
+
+
+def _write_lines(path: str | Path, lines: list[str]) -> None:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("\n".join(lines).rstrip("\n") + "\n", encoding="utf-8")

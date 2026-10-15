@@ -442,6 +442,13 @@ def register_context(register_from: str, pack_toml: str, calib_json: str | None)
     return f"{REGISTER_HELP[register_from]}: {half_life}, {cap}"
 
 
+def sentence_note(sentences: metrics.SentenceAccuracy | None) -> str:
+    """`, sentence tone accuracy 0.812 (n heard syllables)` for the summary line, or nothing."""
+    if sentences is None or sentences.accuracy is None:
+        return ""
+    return f", sentence tone accuracy {sentences.accuracy:.3f} ({sentences.heard} heard syllables)"
+
+
 def _run(args: argparse.Namespace) -> int:
     manifest_path = Path(args.manifest)
     try:
@@ -462,8 +469,10 @@ def _run(args: argparse.Namespace) -> int:
             use_cache=not args.no_cache,
             register_from=args.register_from,
         )
-        gate = metrics.loo_gate(results)
-        theta = gate.median_threshold
+        # No gate clips (a public corpus's sentences, R121): no pairs, so no verdict and no θ.
+        gate = metrics.loo_gate(results) if metrics.has_gate_clips(results) else None
+        theta = None if gate is None else gate.median_threshold
+        sentences = metrics.sentence_accuracy(results)
         sets = list(dict.fromkeys(c.set for c in clips))
         per_set = {name: sum(c.set == name for c in clips) for name in sets}
         report.write(
@@ -476,6 +485,7 @@ def _run(args: argparse.Namespace) -> int:
             n_minimal=per_set.get("diag_minimal", 0),
             n_count=per_set.get("diag_count", 0),
             results=results,
+            sentences=sentences,
             context={
                 "manifest": str(args.manifest),
                 "data register": str(args.register or clearance.default_register()),
@@ -501,6 +511,11 @@ def _run(args: argparse.Namespace) -> int:
     ) as e:
         print(f"error: {e}", file=sys.stderr)
         return 1
+    if gate is None:
+        print(f"S1: no verdict (no gate clips){sentence_note(sentences)}; report written to {args.report}")
+        if args.results:
+            print(f"per-clip results written to {args.results}")
+        return 0
     numbers = f"CA {gate.ca:.3f}, WA {gate.wa:.3f}"
     if cleared.verdict:
         verdict = "PASS" if gate.passed else "FAIL"
