@@ -109,9 +109,9 @@ def _clips(args: argparse.Namespace) -> tuple[list, Path, list[str]]:
         return fit_clips(clips, calib_speakers(corpus_toml, args.pack), args.speaker), manifest_path.parent, []
     if args.corpus:
         raise FitError("--corpus names the corpus.toml of a --manifest; with --select the data root has them")
-    selection = selection_from(args.select, root_from(args), args.pack, default_splits=("calib",))
+    selection = selection_from(args.select, root_from(args), args.pack, default_splits=("calib",), speakers=args.speaker)
     checked = selection.for_fitting(register)
-    return selection_clips(checked, args.speaker), checked.audio_root, list(checked.corpora)
+    return selection_clips(checked), checked.audio_root, list(checked.corpora)
 
 
 def _run(args: argparse.Namespace) -> int:

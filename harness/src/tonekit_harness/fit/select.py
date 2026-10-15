@@ -36,12 +36,11 @@ def fit_clips(clips: Sequence[Clip], allowed: Sequence[str], wanted: Sequence[st
     return out
 
 
-def selection_clips(selection: FittingSelection, wanted: Sequence[str] | None) -> list[Clip]:
+def selection_clips(selection: FittingSelection) -> list[Clip]:
     """The grading clips of a selection the registry has cleared for fitting (no gate or heldout
-    speaker, every source cleared), of `wanted` speakers (`corpus/speaker`; default: all). A fit
-    reads `calib` speakers only, as from a manifest: a `dev` speaker in the selection is refused,
-    never dropped quietly."""
+    speaker, every source cleared). A fit reads `calib` speakers only, as from a manifest: a `dev`
+    speaker in the selection is refused, never dropped quietly."""
     dev = sorted(q for q, s in selection.speakers.items() if s.split != "calib")
     if dev:
         raise FitError(f"speaker(s) {', '.join(dev)} are not in the calib split; only calib speakers are fitted on")
-    return fit_clips(selection.grading_clips(), list(selection.speakers), wanted)
+    return selection.grading_clips()
