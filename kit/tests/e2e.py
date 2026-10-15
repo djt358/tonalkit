@@ -7,6 +7,7 @@ on the stand-in deck:
   (a reload, an interruption, a skip and a redo on the way), the download, then the share sheet,
   "Send again" and "Delete from this phone" (R77, R90), card notes in the reader's script (R88);
 - finishing early after one card;
+- takes with no sound (zeros, or nothing above the room) are refused and leave the card as it was;
 - a blocked microphone, an in-app browser (R84), declining consent, and volunteer mode.
 Every request must go to the test server, the microphone is never asked for before consent,
 nothing may break the page's Content-Security-Policy, and no screen has a text field. The bundles are checked against the
@@ -146,11 +147,16 @@ def serve(directory: Path) -> http.server.ThreadingHTTPServer:
     return server
 
 
-def record(page, seconds: float = TAKE_S) -> None:
-    page.click("#card-record")
+def take(page, start: str = "#card-record", seconds: float = TAKE_S) -> None:
+    """Start a take with `start` (Record, or Record again), let it run, tap Stop."""
+    page.click(start)
     expect(page.locator("#card-record")).to_have_class(re.compile(r"\brecording\b"))
     page.wait_for_timeout(seconds * 1000)
     page.click("#card-record")
+
+
+def record(page, seconds: float = TAKE_S) -> None:
+    take(page, "#card-record", seconds)
     expect(page.locator("#card-next")).to_be_enabled(timeout=10_000)
     expect(page.locator("#card-play")).to_be_visible()
 
@@ -310,6 +316,24 @@ MediaStreamTrack.prototype.getSettings = function () {
   const { noiseSuppression, autoGainControl, ...reported } = getSettings.call(this);
   return reported;
 };
+"""
+
+# A microphone the test can turn down: `window.__micGain(g)` scales what the kit hears, in the kit's
+# own audio context (so it takes effect at once). 0 is the digital silence iOS hands over after a
+# route change or an interruption.
+TURNABLE_MIC = """
+(() => {
+  let level = 1;
+  const create = AudioContext.prototype.createMediaStreamSource;
+  AudioContext.prototype.createMediaStreamSource = function (stream) {
+    const source = create.call(this, stream);
+    const gain = new GainNode(this, { gain: level });
+    window.__micGain = (g) => { level = g; gain.gain.value = g; };
+    const connect = source.connect.bind(source);
+    source.connect = (to, ...rest) => { connect(gain); return gain.connect(to, ...rest); };
+    return source;
+  };
+})();
 """
 
 # Simulates the screen locking / switching apps: the page becomes hidden.
@@ -622,6 +646,62 @@ def finish_early(browser, base: str, tmp: Path, problems: list[str]) -> Path:
     return bundle
 
 
+def turn_mic(page, gain: float) -> None:
+    """Sets the microphone's level, then waits out the capture's 0.3 s of pre-roll, which still
+    holds what was heard before."""
+    page.evaluate(f"window.__micGain({gain})")
+    page.wait_for_timeout(600)
+
+
+def silent_takes(browser, base: str, problems: list[str]) -> None:
+    """A take with no sound is not kept: zeros, or nothing above the room (-70 dB), on a card that
+    was never recorded and on a Record again that would have replaced a good take. The card says
+    so, stays as it was and counts no take; the next take with sound is kept."""
+    context = new_context(browser, base, problems, before=(TURNABLE_MIC,))
+    page = context.new_page()
+    watch(page, problems)
+    start_session(page, base)
+    page.click("#background-next")
+    check_microphone(page)
+    status = page.locator("#card-status")
+    state = stored_session(page)
+    card = state["order"][state["index"]]
+
+    def stored() -> dict | None:
+        return stored_session(page)["cards"].get(card)
+
+    for gain in (0, 0.0003):
+        turn_mic(page, gain)
+        take(page)
+        expect(status).to_have_text(copy_text("card.no_sound"))
+        expect(page.locator("#card-record")).to_have_text(copy_text("card.record"))
+        expect(page.locator("#card-record")).to_be_enabled()
+        expect(page.locator("#card-record")).not_to_have_class(re.compile(r"\brecording\b"))
+        expect(page.locator("#card-next")).to_be_disabled()
+        expect(page.locator("#card-play")).to_be_hidden()
+        assert stored() is None, stored()
+
+    turn_mic(page, 1)
+    take(page)
+    expect(page.locator("#card-next")).to_be_enabled(timeout=10_000)
+    expect(status).to_have_text(copy_text("card.saved"))
+    assert (stored()["takes"], stored()["kept"]) == (1, True), stored()
+
+    turn_mic(page, 0)
+    take(page, "#card-redo")
+    expect(status).to_have_text(copy_text("card.no_sound"))
+    expect(page.locator("#card-play")).to_be_enabled()
+    expect(page.locator("#card-next")).to_be_enabled()
+    assert (stored()["takes"], stored()["kept"]) == (1, True), stored()
+
+    turn_mic(page, 1)
+    take(page, "#card-redo")
+    expect(status).to_have_text(copy_text("card.saved"))
+    assert stored()["takes"] == 2, stored()
+    page_clean(page, problems)
+    context.close()
+
+
 def blocked_microphone(browser, base: str, problems: list[str]) -> None:
     """A refused microphone shows the how-to-allow message and lets the volunteer try again."""
     refuse = (
@@ -744,6 +824,7 @@ def run(tmp: Path) -> tuple[list[Path], list[str], list[str]]:
             )
             bundle, shown = volunteer_session(browser, base, tmp, problems)
             early = finish_early(browser, base, tmp, problems)
+            silent_takes(browser, base, problems)
             blocked_microphone(browser, base, problems)
             in_app_browser(browser, base, problems)
             declined(browser, base, problems)

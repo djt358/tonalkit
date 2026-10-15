@@ -1,6 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { micVerdict, percentile, MIC_CHECK_S, NOISY_FLOOR_DB, LOW_SPEECH_DB, WARMUP_FRAMES } from "../../app/miccheck.js";
+import {
+  micVerdict, liveVerdict, percentile, MIC_CHECK_S, NOISY_FLOOR_DB, LOW_SPEECH_DB, WARMUP_FRAMES, SPEECH_WAIT_S,
+} from "../../app/miccheck.js";
 
 // 3 s of 50 ms level frames (dBFS RMS): `speech` of them at the speech level, the rest at the
 // room's level, in a deterministic interleaving (talking in bursts, with pauses between words).
@@ -21,7 +23,18 @@ function trace(roomDb, speechDb, speechFraction = 0.5) {
 test("the check listens for about three seconds; thresholds as the brief sets them", () => {
   assert.ok(MIC_CHECK_S >= 2.5 && MIC_CHECK_S <= 3.5);
   assert.equal(NOISY_FLOOR_DB, -45);
-  assert.equal(LOW_SPEECH_DB, -40);
+  assert.equal(LOW_SPEECH_DB, -38);
+});
+
+// A voice whose loud end sits between the old line (-40) and the new one (-38): a quiet speaker at arm's
+// length. They are asked to come closer now; a voice just over the line is not.
+const flat = (room, speech) => [...Array(30).fill(room), ...Array(30).fill(speech)];
+
+test("a quiet voice (loud end at -39 dB) is asked to come closer; one at -37 dB is fine", () => {
+  assert.equal(micVerdict(flat(-62, -39)).verdict, "low");
+  assert.equal(micVerdict(flat(-62, -37)).verdict, "ok");
+  assert.equal(liveVerdict(flat(-62, -39), SPEECH_WAIT_S).verdict, "low");
+  assert.equal(liveVerdict(flat(-62, -37), 1).verdict, "ok");
 });
 
 test("percentile: nearest-rank on a sorted copy, input untouched", () => {

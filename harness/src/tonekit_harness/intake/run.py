@@ -21,6 +21,7 @@ from .errors import IntakeError
 from .manifest_lines import appended
 from .packs import pack_path
 from .rows import Joined, join_session
+from .silence import silent_cards
 from .stage import Staged, clear_leftovers, stage
 from .trace import find_session, manifest_text
 
@@ -50,6 +51,7 @@ class IntakeResult:
     pack: Path
     per_set: dict[str, int]  # clips kept per set, in deck order
     skipped: list[str]
+    silent: list[str]  # recorded cards with no sound: no row, no audio
     kept_out: dict[str, str]
 
 
@@ -134,9 +136,12 @@ def _plan(path: Path, opts: IntakeOptions) -> _Plan:
         found.deck,
         source=updated.corpus.source,
         path_of=lambda card: layout.manifest_relpath(corpus, manifest, code, card),
+        silent=silent_cards(bundle),
     )
     if not joined.rows:
-        raise IntakeError(f"session {code} has no clip to keep (every card skipped or kept out); nothing written")
+        raise IntakeError(
+            f"session {code} has no clip to keep (every card skipped, silent or kept out); nothing written"
+        )
     old = manifest_text(manifest)
     manifest_ids(manifest, opts.register)  # refuse a corpus manifest that is already broken
     return _Plan(
@@ -183,6 +188,7 @@ def _result(path: Path, plan: _Plan) -> IntakeResult:
         pack=plan.pack,
         per_set=dict(Counter(r.set for r in plan.joined.rows)),
         skipped=list(session.skipped),
+        silent=plan.joined.silent,
         kept_out=plan.joined.kept_out,
     )
 

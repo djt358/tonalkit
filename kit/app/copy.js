@@ -19,7 +19,7 @@ export const COPY_KEYS = [
   "background.script.label", "background.script.simplified", "background.script.traditional",
   "mic.title", "mic.body", "mic.allow", "mic.checking", "mic.level_ok", "mic.level_low", "mic.noisy", "mic.continue",
   "card.progress", "card.record", "card.stop", "card.play", "card.redo", "card.skip", "card.next",
-  "card.note", "card.isolated_hint", "card.phrase_hint", "card.saved",
+  "card.note", "card.isolated_hint", "card.phrase_hint", "card.saved", "card.no_sound",
   "card.finish_early", "card.finish_early_confirm",
   "pause.title", "pause.body", "pause.resume",
   "done.title", "done.body", "done.code_label", "done.code_note",

@@ -1,7 +1,8 @@
 """Kit bundles for the intake and purge tests: the session the kit would export for some cards of
 the real deck (kit/deck/s05-v1.json, so the deck lookup finds it by hash), as a zip or an unzipped
-folder. The clips are synthetic: a constant tiny level by default, or (`voiced=True`) the harmonic
-test voice of support.py saying each card's produced tones. No recording of anyone."""
+folder. The clips are synthetic: a constant level of -40 dBFS by default (`levels` sets a card's
+own constant sample value, 0 for digital silence), or (`voiced=True`) the harmonic test voice of
+support.py saying each card's produced tones. No recording of anyone."""
 
 from __future__ import annotations
 
@@ -24,6 +25,7 @@ DECK_JSON = repo_root() / "kit" / "deck" / f"{DECK_ID}.json"
 CARDS = {c["id"]: c for c in json.loads(DECK_JSON.read_text(encoding="utf-8"))["card"]}
 # two whole gate pairs, a register card and a minimal-set member
 SMALL = ["g01-c", "g01-e", "g02-c", "g02-e", "r01", "m01-a"]
+AUDIBLE = 328  # a constant clip at -40 dBFS: well over intake's silence line (-60 dBFS)
 
 
 def deck_sha() -> str:
@@ -37,9 +39,12 @@ def pcm16(x: np.ndarray) -> bytes:
     return buf.getvalue()
 
 
-def card_wav(card: str, *, voiced: bool, seed: int = 0) -> bytes:
+def card_wav(card: str, *, voiced: bool, seed: int = 0, level: int | None = None) -> bytes:
+    """The clip of `card`: a constant `level` if one is given, else the default constant or the test voice."""
+    if level is not None:
+        return wav_bytes(level=level)
     if not voiced:
-        return wav_bytes()
+        return wav_bytes(level=AUDIBLE)
     return pcm16(utterance(CARDS[card]["produced_tones"], seed))
 
 
@@ -68,10 +73,16 @@ def kit_bundle(
     folder: bool = False,
     voiced: bool = False,
     session: dict | None = None,
+    levels: dict[str, int] | None = None,
 ) -> Path:
-    """`where/tonekit-s05-v1-<code>.zip`, or with `folder` the folder it unzips to."""
+    """`where/tonekit-s05-v1-<code>.zip`, or with `folder` the folder it unzips to. `levels` gives
+    some cards a constant clip of that sample value instead (0: digital silence)."""
     session = session or kit_session(code, cards, skipped)
-    wavs = {c["file"]: card_wav(c["card"], voiced=voiced, seed=i) for i, c in enumerate(session["clips"])}
+    levels = levels or {}
+    wavs = {
+        c["file"]: card_wav(c["card"], voiced=voiced, seed=i, level=levels.get(c["card"]))
+        for i, c in enumerate(session["clips"])
+    }
     where.mkdir(parents=True, exist_ok=True)
     name = f"tonekit-{DECK_ID}-{code}"
     if not folder:

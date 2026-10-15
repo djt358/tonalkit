@@ -1,7 +1,7 @@
 // Auto-trim: drop leading and trailing silence from a take by frame energy, keeping 150 ms of
 // margin on each side. Only the two ends move: everything between the first and the last frame
 // that sounds like speech is kept, pauses included.
-import { rms, toDb } from "./level.js";
+import { frameDbs } from "./level.js";
 
 export const MARGIN_S = 0.15;
 export const FRAME_S = 0.01;
@@ -19,11 +19,10 @@ const BELOW_PEAK_DB = 40; // ... or within this of its loudest frame, whichever 
 export function trim(samples, rate) {
   const whole = { samples: samples.slice(), start: 0, end: samples.length };
   const frame = Math.max(1, Math.round(rate * FRAME_S));
-  const count = Math.floor(samples.length / frame);
+  const dbs = frameDbs(samples, frame);
+  const count = dbs.length;
   if (count === 0) return { ...whole, quiet: true };
 
-  const dbs = new Float64Array(count);
-  for (let f = 0; f < count; f++) dbs[f] = toDb(rms(samples, f * frame, (f + 1) * frame));
   const sorted = Float64Array.from(dbs).sort();
   const peak = sorted[count - 1];
   const floor = sorted[Math.floor(count * 0.1)];

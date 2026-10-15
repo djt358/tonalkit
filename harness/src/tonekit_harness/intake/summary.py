@@ -45,14 +45,16 @@ def bundle_lines(r: IntakeResult, register: Mapping[str, str]) -> list[str]:
         f"  clips kept: {kept} ({sets})",
         f"  skipped by the speaker: {len(r.skipped)}" + (f" ({', '.join(r.skipped)})" if r.skipped else ""),
     ]
+    lines += [f"  silent take: {card} (no row, no audio)" for card in r.silent]
     if r.kept_out:
         lines.append(f"  kept out: {_plural(len(r.kept_out), 'recorded card')}, no row and no audio")
         lines += [f"    {card}: {why}" for card, why in r.kept_out.items()]
     return lines + _accent_note(r) + _register_note(r, register)
 
 
-def eval_command(manifest: Path, pack: Path, report: Path) -> str:
+def eval_command(manifest: Path, pack: Path, report: Path, results: Path) -> str:
     args = ["uv", "run", "tkh", "eval", "--manifest", manifest, "--pack", pack, "--report", report]
+    args += ["--results", results]
     return " ".join(shlex.quote(str(a)) for a in args)
 
 
@@ -61,5 +63,6 @@ def next_lines(results: list[IntakeResult], root: Path) -> list[str]:
     by_corpus = {r.corpus_id: r for r in results}
     lines = ["", "next, from harness/ (the report goes under the data root, never the repository):"]
     for cid, r in by_corpus.items():
-        lines.append("  " + eval_command(r.manifest, r.pack, layout.report_path(root, cid)))
+        report, results = layout.report_path(root, cid), layout.results_path(root, cid)
+        lines.append("  " + eval_command(r.manifest, r.pack, report, results))
     return lines

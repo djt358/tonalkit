@@ -1,0 +1,63 @@
+:root {
+  --bg: #fbfbf9; --fg: #1d1d1b; --muted: #6b6b66; --line: #ddddd6; --focus: #2457c5;
+  --card: #ffffff; --ok: #1f7a3d; --changed: #b45309; --unclear: #6d28d9; --out: #b91c1c;
+  --sel: #2457c5; --sel-fg: #ffffff;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #161615; --fg: #ececea; --muted: #a0a09a; --line: #34342f; --focus: #7aa2ff;
+    --card: #1f1f1d; --ok: #4ade80; --changed: #fbbf24; --unclear: #c4b5fd; --out: #f87171;
+    --sel: #7aa2ff; --sel-fg: #10131a;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.4 system-ui, -apple-system, "PingFang SC", "Noto Sans CJK SC", sans-serif; }
+header { position: sticky; top: 0; z-index: 2; background: var(--bg); border-bottom: 1px solid var(--line); padding: 10px 16px; }
+@media (max-width: 700px), (max-height: 600px) { header { position: static; } }
+h1 { font-size: 18px; margin: 0 0 4px; }
+#summary, .keys { margin: 4px 0; color: var(--muted); font-size: 13px; }
+.controls { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; font-size: 14px; }
+#who { width: 6em; font: inherit; }
+#status { color: var(--muted); }
+#status.warn { color: var(--out); }
+kbd { border: 1px solid var(--line); border-radius: 3px; padding: 0 4px; font: 12px ui-monospace, monospace; }
+main { padding: 8px 16px 40vh; }
+.clip { background: var(--card); border: 1px solid var(--line); border-left: 6px solid var(--line); border-radius: 6px; padding: 8px 12px; margin: 8px 0; }
+.clip.focused { outline: 3px solid var(--focus); outline-offset: 1px; }
+.clip.as_card { border-left-color: var(--ok); }
+.clip.heard { border-left-color: var(--changed); }
+.clip.unclear { border-left-color: var(--unclear); }
+.clip.exclude { border-left-color: var(--out); opacity: 0.7; }
+.head { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; font-size: 13px; color: var(--muted); }
+.head .n { font-weight: 600; color: var(--fg); }
+.group { border-radius: 3px; padding: 0 5px; border: 1px solid var(--line); }
+.group.twin { color: var(--sel-fg); background: var(--out); border-color: var(--out); }
+.group.disagrees { color: var(--out); border-color: var(--out); }
+.group.unsure { color: var(--changed); border-color: var(--changed); }
+.verdict { margin-left: auto; font-weight: 600; }
+.verdict.as_card { color: var(--ok); } .verdict.heard { color: var(--changed); }
+.verdict.unclear { color: var(--unclear); } .verdict.exclude { color: var(--out); }
+.text { display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: baseline; margin: 4px 0; }
+.hanzi { font-size: 24px; }
+.hanzi .read { font-weight: 600; }
+.hanzi .other { color: var(--muted); font-size: 18px; }
+.pinyin { font-size: 16px; }
+.label { font-size: 14px; }
+.label.error { color: var(--changed); }
+.note, .now { font-size: 13px; color: var(--muted); margin: 2px 0; }
+.now { color: var(--changed); }
+.row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 6px; }
+audio { height: 32px; width: 260px; max-width: 100%; }
+.syls { display: flex; flex-wrap: wrap; gap: 8px; }
+.syl { border: 1px solid var(--line); border-radius: 6px; padding: 4px 6px; min-width: 9em; }
+.clip.focused .syl.focused { outline: 2px dashed var(--focus); }
+.syl .top { display: flex; gap: 6px; align-items: baseline; font-size: 13px; }
+.syl .han { font-size: 20px; }
+.syl .scorer { color: var(--muted); font-size: 12px; }
+.syl .scorer.disagree { color: var(--out); font-weight: 600; }
+.tones { display: flex; gap: 2px; margin-top: 3px; }
+.tones button { font: 13px/1.2 inherit; padding: 2px 4px; border: 1px solid var(--line); background: transparent; color: var(--fg); border-radius: 4px; cursor: pointer; min-width: 2.6em; }
+.tones button.card { text-decoration: underline; text-underline-offset: 3px; }
+.tones button.sel { background: var(--sel); color: var(--sel-fg); border-color: var(--sel); }
+.tones button.sel.changed { background: var(--changed); border-color: var(--changed); }
+.acts button { font: inherit; font-size: 13px; padding: 3px 8px; cursor: pointer; }

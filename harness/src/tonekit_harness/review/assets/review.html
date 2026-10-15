@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<!-- Opened from disk. Nothing leaves this page: no network source is allowed, and the clips play from the data root beside it. -->
+<meta http-equiv="Content-Security-Policy" content="{{CSP}}">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<meta name="referrer" content="no-referrer">
+<meta name="color-scheme" content="light dark">
+<title>{{TITLE}}</title>
+<style>{{STYLE}}</style>
+</head>
+<body>
+<header id="top">
+  <h1>{{TITLE}}</h1>
+  <p id="summary"></p>
+  <div class="controls">
+    <label>Your initials <input id="who" type="text" maxlength="40" autocomplete="off" spellcheck="false"></label>
+    <label><input id="autoplay" type="checkbox" checked> Play each clip when I move on to it</label>
+    <button id="export" type="button">Export decisions</button>
+    <span id="status" role="status"></span>
+  </div>
+  <p class="keys"><kbd>Space</kbd> play/pause · <kbd>1</kbd>–<kbd>5</kbd> tone of the focused syllable · <kbd>←</kbd><kbd>→</kbd> syllable · <kbd>↑</kbd><kbd>↓</kbd> clip · <kbd>Enter</kbd> as the card says (or as you set it) and next · <kbd>U</kbd> unclear · <kbd>X</kbd> bad audio, exclude · <kbd>Backspace</kbd> undecide · <kbd>R</kbd> replay from the start</p>
+  <p class="keys">Decisions stay in this browser until you export them; then run <code>tkh relabel</code> on the downloaded file.</p>
+</header>
+<main id="clips"></main>
+<script type="application/json" id="review-data">{{DATA}}</script>
+<script>{{SCRIPT}}</script>
+</body>
+</html>

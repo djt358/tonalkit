@@ -8,6 +8,8 @@ import shlex
 
 from intake_support import kit_bundle, tkh
 
+from tonekit_harness.eval_results import load_results
+
 CARDS = ["r01", "r02", "g01-c", "g01-e", "g02-c", "g02-e", "m01-a", "m01-b", "x02"]
 
 
@@ -32,3 +34,7 @@ def test_bundles_taken_in_are_graded_by_tkh_evaluate(tmp_path, capsys):
     for pair in ("K7Q2MD-g01", "K7Q2MD-g02", "ABCDEF-g01", "ABCDEF-g02"):
         assert f"| {pair} |" in text
     assert "4 gate pairs" in text and "S1: " in text
+    # and the per-clip results `tkh review` reads, beside the report
+    results = load_results(data / "reports" / "volunteers-s05-v1.results.json")
+    assert len(results.clips) == 15 and results.register_from == "drill"
+    assert {c.id for c in results.clips} >= {"K7Q2MD-g01-e", "ABCDEF-r02"}
