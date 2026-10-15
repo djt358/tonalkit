@@ -262,18 +262,20 @@ pitch kept on the device (spec §11.3; R120 is the four-number alternative).
 Python `roll_register_lite`, `tkh eval --register-from rolling-lite`) rolls a plain `Register` under
 the same parameters: each utterance moves floor, median and ceiling `w` of the way to its own p5,
 p50 and p95, where `w` is the larger of `u/(n+u)` and `1-2^(-counted/H)`, at most 0.5, and `counted`
-is its voiced seconds capped as in R111. Once warm, an older utterance halves in weight after H
-seconds of newer speech and no utterance moves a number more than max_share of the way; until then,
-and always with no decay or cap, it is `register_update`'s merge. A stored register `analyze` would
-refuse is started afresh. **Why.** DJ: the full register's 540-bin histogram is fine on Bendy (the
-user's own data), but other applications may want only the 4 numbers. The lite form tracks the
-simulated learner (0.28 st off after settling, against 0.71 for today's merge). On the calibration
-corpus it ranks gate pairs 0.713 against the full register's 0.762, with CA/WA 0.450/0.275 against
-0.450/0.300. **Cost if wrong.** It averages per-utterance percentiles, so it is narrower than the
-pooled register (about 1 st on the calibration corpus) and short utterances narrow it more. Its
-outlier bound is weaker: one far-off utterance moves all three numbers by up to max_share of its
-distance (a 5 s shout an octave up moved floor, median and ceiling 0.3 to 0.4 st, where the pool's
-ceiling moved 1 st and its median 0.1). While cold one utterance can move it half way.
+is its voiced seconds capped as in R111. Once `u/(n+u)` falls below `max_share` (after about
+`u/max_share` syllables, some 100 for three-syllable phrases), no utterance moves a number more than
+max_share of the way, and once the decay term is the larger an older utterance halves in weight
+after H seconds of newer speech; before that, and always with no decay or cap, it is
+`register_update`'s merge. A stored register `analyze` would refuse is started afresh. **Why.** DJ:
+the full register's 540-bin histogram is fine on Bendy (the user's own data), but other applications
+may want only the 4 numbers. The lite form tracks the simulated learner (0.28 st off after settling,
+against 0.71 for today's merge). On the calibration corpus it ranks gate pairs 0.713 against the
+full register's 0.762, with CA/WA 0.450/0.275 against 0.450/0.300. **Cost if wrong.** It averages
+per-utterance percentiles, so it is narrower than the pooled register (about 1 st on the calibration
+corpus) and short utterances narrow it more. Its outlier bound is weaker: one far-off utterance
+moves all three numbers by up to max_share of its distance (a 5 s shout an octave up moved floor,
+median and ceiling 0.3 to 0.4 st, where the pool's ceiling moved 1 st and its median 0.1). While
+cold one utterance can move it half way.
 
 ## Decoding
 

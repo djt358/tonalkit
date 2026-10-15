@@ -715,9 +715,10 @@ to a literal GAN.
     `roll_register_lite(previous, analysis, assessment, params)` rolls the four-number `Register`
     itself: each utterance moves floor, median and ceiling
     `w = min(0.5, max(u/(n+u), 1 − 2^(−counted/half_life_s)))` of the way to its own
-    p5/p50/p95, with `counted` capped as above. Once warm an older utterance halves in weight
-    after `half_life_s` of newer speech and no utterance moves a number more than `max_share` of
-    the way; until then (and always, without decay or cap) it is `register_update`'s merge. It
+    p5/p50/p95, with `counted` capped as above. Once `u/(n+u)` is below `max_share` (after about
+    `u/max_share` syllables) no utterance moves a number more than `max_share` of the way, and
+    once the decay term is the larger an older utterance halves in weight after `half_life_s` of
+    newer speech; before that (and always, without decay or cap) it is `register_update`'s merge. It
     averages per-utterance percentiles, so it is narrower than the pooled register (by about 1 st
     on the calibration corpus), and one far-off utterance moves all three numbers by up to
     `max_share` of its distance, where a pool's percentiles move a bounded amount.

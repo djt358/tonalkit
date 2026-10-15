@@ -7,14 +7,17 @@
 //! utterance's counted speech would take: `w = min(0.5, max(u/(n+u), 1 − 2^(−counted/H)))`, with
 //! `counted` its voiced seconds capped at `−H·log2(1 − max_share)` as in the full register. So:
 //!
-//! - **Same half-life.** Once warm, an older utterance's say shrinks by `2^(−c/H)` for every `c`
-//!   seconds counted after it: it weighs half after `H` seconds of newer speech.
-//! - **Same cap.** `1 − 2^(−counted/H)` is at most `max_share`: once warm, no utterance moves a
-//!   number more than `max_share` (3%) of the way to its own percentile.
-//! - **Until warm** it is today's `register_update` merge (`u/(n+u)`, at most one half), which
-//!   weighs every syllable alike; with no decay and no cap it is exactly that merge, utterance after
-//!   utterance from a cold start. The decay takes over once `u/(n+u)` falls below it (after about
-//!   200 syllables at the default), about when the full register's pool fills.
+//! - **Same half-life.** Once the decay term is the larger, an older utterance's say shrinks by
+//!   `2^(−c/H)` for every `c` seconds counted after it: it weighs half after `H` seconds of newer
+//!   speech.
+//! - **Same cap.** `1 − 2^(−counted/H)` is at most `max_share`, so once `u/(n+u)` is below it too
+//!   (for an utterance of `u` syllables, once the register counts about `u/max_share`: some 100
+//!   syllables for a three-syllable phrase at the default 3%) no utterance moves a number more than
+//!   `max_share` of the way to its own percentile.
+//! - **Before that** it is today's `register_update` merge (`u/(n+u)`, at most one half), which
+//!   weighs every syllable alike; with no decay and no cap it is exactly that merge, utterance
+//!   after utterance from a cold start. For short phrases the decay takes over after a few hundred
+//!   syllables at the default, about when the full register's pool fills.
 //!
 //! How it differs from the full register's weighted percentiles:
 //!
