@@ -14,7 +14,7 @@ REPO = Path(__file__).resolve().parents[2]
 DECISIONS = REPO / "docs" / "decisions.md"
 SKIPPED_DIRS = {"target", "build", "node_modules", "__pycache__"}
 SOURCE_SUFFIXES = {".rs", ".py", ".swift", ".sh", ".toml", ".yml", ".md", ".csv"}
-CITATION = re.compile(r"\bR(\d{1,2})\b")
+CITATION = re.compile(r"\bR(\d{1,3})\b")
 ENTRY = re.compile(r"^### R(\d+): .*?(?=^## |^### |\Z)", re.S | re.M)
 
 
@@ -178,7 +178,13 @@ def test_entries_are_not_repeated_and_the_process_section_does_not_duplicate_the
 
 
 def test_every_ruling_is_either_an_entry_or_a_process_line():
-    assert set(range(1, 58)) <= set(entries()) | process_ids()
+    assert set(range(1, 121)) <= set(entries()) | process_ids()
+
+
+def test_the_header_names_the_last_ruling():
+    text = DECISIONS.read_text(encoding="utf-8")
+    last = max(set(entries()) | process_ids())
+    assert f"numbered `R1` to `R{last}`" in text
 
 
 def test_the_readme_points_at_the_decisions():

@@ -1,6 +1,6 @@
 # Decisions
 
-The choices that shaped tonekit's behaviour, data and build, numbered `R1` to `R92`. Code comments
+The choices that shaped tonekit's behaviour, data and build, numbered `R1` to `R120`. Code comments
 and tests cite them as "ruling R27" or just `R27`; this is where they are written down. Each entry
 says what was decided, why, and what it costs if it turns out wrong. The spec
 ([`docs/superpowers/specs/`](superpowers/specs/2026-09-28-tone-assessment-design.md)) says what
@@ -200,6 +200,80 @@ syllable (`an_external_track_locked_on_the_subharmonic_is_doubled`); an external
 estimates are better than this check would be overruled where the signal repeats at half its
 period. It can change frames in runs of any length, so spec §12's "runs under 5 frames untouched"
 now holds for octave repair only.
+
+### R105: pYIN repairs: recovered islands and dropped creak
+
+**Decision.** A pitch is recovered for islands of loud, vowel-like, clearly periodic speech that
+pYIN left unvoiced (NSDF at least 0.6, 70-500 Hz, at least 3 frames, clear of pYIN's own pitch), and
+pYIN pitches under 70 Hz at which the signal repeats worse than NSDF 0.5 (creak, or noise at the
+floor) are dropped. External tracks are not touched. **Why.** pYIN's HMM drops whole quiet syllables
+and tracks noise at 50 to 65 Hz. **Cost if wrong.** A speaker whose modal voice goes below 70 Hz and
+is aperiodic loses those frames.
+
+### R106: Registers read speech frames only
+
+**Decision.** The cold-start register and `voiced_st` (what `register_update` and the rolling
+registers read) count only the voiced frames that are speech. **Why.** Even after R105, 10% of
+voiced frames were not speech, and in 30 of 214 clips they pulled the floor down by more than 1 st
+(24 st at most). **Cost if wrong.** The fixture moved by 5e-3 st. A clip with no speech frame gets
+the fixed fallback register.
+
+### R108: A creaky tail is evidence for the tone
+
+**Decision.** A pitched syllable whose last pitched frame is followed by at least 5 frames (50 ms)
+of unpitched vowel-like speech is flagged `CreakyTail`, unless that run goes on into the next
+syllable's pitch or anchor (a dropout at the join). The calibration's `creaky_tail` table (`ln
+P(tail|tone,place)`) is then added to every tone's log-likelihood; without a tail nothing is added.
+**Why.** In the calibration speakers' correct readings under this rule, a tail follows phrase-final
+tone 4 in 17 of 29, tone 3 in 8 of 25, tone 2 in 4 of 21 and tone 1 in 1 of 20; elsewhere tone 4 in
+9 of 48, nearly all from the non-native speaker. The native speaker's creaky tone 4s measure as
+level-high, and the tail is the evidence that remains. **Cost if wrong.** Two speakers. A speaker
+who creaks on every syllable shifts toward tones 3 and 4, and breath or whisper after a syllable
+reads as a tail. A 30 ms rule made the fluent sweep test grade 4-1-3 as 4-2-3 too well, hence 50 ms
+and no join. The spec reserves `ToneShape.phonation` behind a `phonation` capability, where this may
+move.
+
+### R111: A rolling register follows the learner
+
+**Decision.** tonekit has a rolling register (`RollingRegister`, `tonekit::roll_register`, Swift
+`rollRegister`, Python `roll_register`) that an app carries between utterances. It pools each graded
+utterance's speech-only voiced semitones (R106) in 0.1 st bins (540, from -6 st). An utterance
+counts as its voiced seconds, capped at `-H·log2(1-max_share)`; older evidence decays with half-life
+H in seconds of voiced speech, and the clock runs on counted speech. Floor, median and ceiling are
+the pool's weighted p5, p50 and p95, widened by `2 st·(1-n/30)` while cold, at least 4 st wide. The
+default is H = 30 s and max_share = 0.03 (1.32 s); the calibration's optional `rolling_register`
+sets them (both keys required when present), and so can a per-call override. With no decay and no
+cap it is R107's pooling, and `register_update` is unchanged. `tkh eval --register-from rolling` is
+causal: the drill first, then reading order from `sessions/<CODE>.json`, each clip graded with the
+register of earlier clips only. **Why.** Learners drift: they often start higher and more variable
+and settle (DJ). A 30 s half-life follows a simulated 3 st settle to 0.36 st within 150 phrases,
+where pooling stays 1.8 st off and the drill 5.7 st. On the calibration corpus causal rolling ranks
+gate pairs 0.700, against 0.625 for the drill and 0.725 for non-causal pooling (0.762, 0.688 and
+0.738 after R119). Shorter half-lives followed tone content and ranked worse. A 3% share keeps one
+shout or creaky run within about 1 st of a full register's ceiling or floor. **Cost if wrong.** The
+half-life is chosen on synthetic drift and two single-session speakers; it is a calibration field,
+refitted without code. Until the pool holds about a half-life of speech, one odd take can hold more
+than 5% of it. The persisted register grows from 4 numbers to 4 + 540, a histogram of the user's
+pitch kept on the device (spec §11.3; R120 is the four-number alternative).
+
+### R120: A lite rolling register keeps four numbers
+
+**Decision.** Beside the full rolling register, `roll_register_lite` (Swift `rollRegisterLite`,
+Python `roll_register_lite`, `tkh eval --register-from rolling-lite`) rolls a plain `Register` under
+the same parameters: each utterance moves floor, median and ceiling `w` of the way to its own p5,
+p50 and p95, where `w` is the larger of `u/(n+u)` and `1-2^(-counted/H)`, at most 0.5, and `counted`
+is its voiced seconds capped as in R111. Once warm, an older utterance halves in weight after H
+seconds of newer speech and no utterance moves a number more than max_share of the way; until then,
+and always with no decay or cap, it is `register_update`'s merge. A stored register `analyze` would
+refuse is started afresh. **Why.** DJ: the full register's 540-bin histogram is fine on Bendy (the
+user's own data), but other applications may want only the 4 numbers. The lite form tracks the
+simulated learner (0.28 st off after settling, against 0.71 for today's merge). On the calibration
+corpus it ranks gate pairs 0.713 against the full register's 0.762, with CA/WA 0.450/0.275 against
+0.450/0.300. **Cost if wrong.** It averages per-utterance percentiles, so it is narrower than the
+pooled register (about 1 st on the calibration corpus) and short utterances narrow it more. Its
+outlier bound is weaker: one far-off utterance moves all three numbers by up to max_share of its
+distance (a 5 s shout an octave up moved floor, median and ceiling 0.3 to 0.4 st, where the pool's
+ceiling moved 1 st and its median 0.1). While cold one utterance can move it half way.
 
 ## Decoding
 
@@ -431,6 +505,56 @@ Synthetic 一 + measure word + noun phrases reach the floor exactly where such a
 dip and no pitch break (一条鱼, 一辆车 and 一个人 at 0 dB: 48 of 384 clips, the same on main;
 `fluent_phrases.rs`).
 
+### R102: A count stage places syllables the nuclei miss
+
+**Decision.** The analysis carries a sonority track (`Analysis.sonority`: per frame, the share of
+energy between 150 Hz and 2 kHz). When the nuclei cannot place the card's syllables, the decoder
+runs the strict and then the relaxed pass again over the nuclei plus extra candidates: unpitched,
+vowel-like energy peaks, and a second syllable where a voiced run's spectrum changes. An extra
+candidate no syllable covers costs no insertion. The "no nucleus" issue, formerly `Unvoiced`, is the
+new variant `NoNucleus`; `Unvoiced` still parses, and the harness reads a legacy `Partial
+[Unvoiced]` as a fallback. **Why.** On the calibration corpus 48 of 240 gate syllables had speech
+energy but no pitched nucleus, and were scored at a flat prior. **Cost if wrong.** An extra
+candidate could place a syllable on a breath. They are used only when the nuclei fail, and
+fricatives (sonority under 0.2) never qualify.
+
+### R103: Unpitched syllables are scored on calibrated evidence, or not at all
+
+**Decision.** An unpitched syllable the count stage places is scored on the calibration's
+`unpitched` evidence (`ln P(unpitched|tone)`, at the end of a phrase and elsewhere) and reported
+`Partial [Unpitched]`. Without that evidence (the compiled-in default, a calibration with no
+`unpitched` section, or a place whose table rates every tone alike, R119) it is `NotMeasured {
+Unpitched }` and `overall` is None, as for a missed syllable (R104). In the fit, a place with fewer
+than 10 unpitched syllables gets the pooled rate for every tone. Isolated syllables and clips with
+no pitched nucleus never reach this rule (no decode stage runs without a nucleus): they are
+`NotMeasured { Unvoiced }`. **Why.** Creak is named as a tone-3 cue, but the calibration speakers'
+correct readings barely show it: 3 unpitched of 98 phrase-final syllables and 3 of 150 elsewhere. At
+the end of a phrase what there is favours tone 4, as creaky tails do (R108). Both places were
+pooled, so the shipped table rates every tone alike and scores no syllable (R119). **Cost if
+wrong.** Until a fit has enough unpitched syllables, a creaky syllable is never credited and its
+clip is unscored. Breath or whisper (aperiodic, vowel-like, at speech level) reads as creak and can
+be placed as an unpitched syllable.
+
+### R104: A syllable with no nucleus leaves the clip unscored
+
+**Decision.** An assessment with a `NotMeasured { NoNucleus }` syllable and no confusion hit on it
+has `overall` None: the clip is not scored, and is a reject at every threshold. **Why.** A prior is
+not evidence about the tone. **Cost if wrong.** Correct clips that a missed syllable used to pass at
+the fallback probability (two on the calibration corpus) are now rejects.
+
+### R119: A table that rates every tone alike is no evidence
+
+**Decision.** Where a place's `unpitched` values all lie within 1e-9 of each other (a pooled place),
+the table is treated as absent at that place: the syllable is `NotMeasured { Unpitched }` and the
+clip's `overall` None, as with no table (R103, R104). A place whose values differ still scores.
+**Why.** DJ: a table that does not tell the tones apart is not evidence. It gives every tone LLR 0
+and p_correct 0.5, and as `Partial` that 0.5 decided the overall of 6 calibration clips, one of them
+an accepted tone-error clip. The shipped table is pooled at both places. On the calibration corpus
+(drill register) wrong-accept fell from 0.175 to 0.100 and rank rose from 0.625 to 0.688, with
+correct-accept 0.500 to 0.475. **Cost if wrong.** Unscored gate clips rose from 5 to 16 (4 correct,
+7 tone-error), each a reject. No creaky syllable is credited until a fit has at least 10 unpitched
+syllables at its place.
+
 ## Packs and calibration
 
 ### R16: The seed pack is audited at P1
@@ -498,6 +622,36 @@ seed calibration (a perfect synthetic tone 1 scores 0.71 cold), so absolute shar
 calibration's job. **Cost if wrong.** The T2/T3 diagnostic shows weak tone-3-for-tone-2 detection
 in the P0 gate, and the fix moves to P1 calibration or a confusion rule, not to pack weights.
 
+### R109: `tkh fit` fits templates, not shipped yet
+
+**Decision.** `tkh fit --out-pack` fits per-tone, per-place templates and spreads: each template is
+the median of clean, correct, non-creaky syllables, optionally shrunk toward the seed (`--shrink` κ)
+or added beside the seed's shape as a mixture component (`--as-component`). It fits only speakers in
+the `calib` split. **Why.** A fitting script, not hand-tuning. **Cost if wrong.** None while no
+fitted template ships (R110).
+
+### R110: The shipped calibration is a two-speaker fit to iterate on
+
+**Decision.** The shipped `cmn.toml` stays the seed. The shipped `cmn.calib.json` is the seed plus
+`unpitched` and `creaky_tail` fitted on both calibration speakers (`tkh fit --register-from
+speaker`, 2 rounds, from the seed); its `PROVENANCE.toml` lists `volunteer-corpus` and `corpora =
+["volunteers-s05-v1"]`. **Why.** DJ chose to ship the two-speaker calibration so the next speakers
+iterate on it. Fitted templates did not transfer between the two speakers (held-out nearest-template
+tone identification 0.40 to 0.58 for every κ, against 0.45 and 0.40 for the seed), so the templates
+stay the seed's. **Cost if wrong.** The only per-tone evidence shipped is the creaky-tail table, a
+training fit on two speakers, one of them non-native; the unpitched table is pooled and carries none
+(R119). A purge of either speaker makes `tkh provenance` refuse it (R113).
+
+### R113: A stale calibration can't ship
+
+**Decision.** A pack fitted on corpora lists them in its `PROVENANCE.toml` (`corpora = [...]`), and
+`tkh provenance` fails while the data root (`--data`, else `$TONEKIT_DATA`) marks any of them stale;
+a data root that does not exist (CI) marks none. The failure counts the marker's reasons and never
+prints them, since they name sessions. **Why.** Contracts §6: after a purge, a calibration fitted on
+that corpus must not ship until it is refitted (PROMISES row 35). **Cost if wrong.** Nothing clears
+a marker yet and `tkh fit` does not write `corpora`: after a refit the marker is removed by hand,
+and a pack whose manifest omits `corpora` escapes the check.
+
 ## Data, licensing and the gate
 
 ### R11: The gate is measured on real recordings
@@ -518,6 +672,16 @@ is `verify`, with the note that the training data's licences (the `swift-f0-trai
 are unchecked and must be cleared before the weights ship (spec §11.2). The code licence stays
 `allow` (MIT). **Why.** The model's own licence does not cover the data it was trained on.
 **Cost if wrong.** None: the row is conservative.
+
+### R107: The drill stays the gate's register; production pools
+
+**Decision.** The harness can grade each clip with a register pooled from the same speaker's other
+clips (`tkh eval --register-from speaker`, leave-one-out). The gate default stays the drill (R46).
+For production DJ chose pooling every utterance the app hears, with a time-weighted pool (R111).
+**Why.** One calibration speaker read the drill several semitones below their phrases. Pooled
+registers lift the gate rank from 0.625 to 0.725 on the shipped files (0.688 to 0.738 after R119;
+training numbers). The drill is a good start, fine for the trials, but not a good finish (DJ).
+**Cost if wrong.** None in the library: it is a harness option and a recommendation.
 
 ## Platform, trust boundary and limits
 
@@ -751,6 +915,121 @@ wrong.** An edited card needs approving again.
 **Decision.** R84's stop screen also matches RedNote, Douyin and TikTok, LinkedIn and Snapchat.
 **Why.** RedNote in particular is a likely way Bay Area Mandarin speakers pass a link on. **Cost
 if wrong.** None.
+
+### R93: A manifest pair belongs to one speaker
+
+**Decision.** Intake writes each row's `pair` as `<CODE>-<deck pair>` (and its `id` as `<CODE>-<card
+id>`); the deck's own pair is the row's `card`. **Why.** `loo_gate` groups gate clips by pair id, so
+two sessions' `g01` would collide ("more than one correct"): a gate pair is one speaker's two
+readings. **Cost if wrong.** A cross-speaker analysis of one deck pair reads `card` instead.
+
+### R94: A gate card whose twin was skipped is kept out
+
+**Decision.** A recorded `gate` or `diag_t23` card whose twin was skipped gets no manifest row and
+no audio copy; intake prints it as "kept out". **Why.** `loo_gate` refuses half pairs, and pairs are
+graded whole (R81). **Cost if wrong.** A few clips per partial session go unused.
+
+### R95: Volunteer clips are recorded as uncontrolled and handheld
+
+**Decision.** Every volunteer row's `condition` is `{"noise": "uncontrolled", "distance":
+"handheld"}` and `needs_listen` is false. **Why.** Nobody measured the conditions, and they are not
+DJ's controlled cafe, quiet and arm values. A deliberate error read wrongly shows up as an accepted
+tone-error failure in the report, which is the listening list (R112 and `tkh review` act on it).
+**Cost if wrong.** A per-condition analysis needs finer values, set by relabelling.
+
+### R96: Volunteer audio is kept as the kit wrote it
+
+**Decision.** Intake copies the kit's 16 kHz mono PCM16 WAVs byte for byte, and `tkh eval` reads
+int16 and converts to float itself. **Why.** There is no conversion step to get wrong, and a copy
+can be checked against its bundle. **Cost if wrong.** None.
+
+### R97: One corpus per deck
+
+**Decision.** The default corpus id is `volunteers-<deck id>` (`tkh intake --corpus` names another),
+so everyone who read the same cards is graded together. **Why.** Speakers are compared on the same
+cards, and one manifest serves the gate. **Cost if wrong.** Another grouping needs an explicit
+corpus id.
+
+### R98: Purge clears the whole analysis cache
+
+**Decision.** `tkh purge` deletes the whole analysis cache, not only the session's entries. **Why.**
+Cache keys hash the WAV, the register and the build, so an entry cannot be traced back to a session.
+**Cost if wrong.** Every clip is analysed again on the next run.
+
+### R99: A deck is used only on a hash match
+
+**Decision.** Intake joins clips to a deck's cards only when the deck's sha256 matches the one the
+session recorded, `--deck` included; it looks for that version in the repository's history. **Why.**
+A deck edited since the session would attach the wrong cards to the recordings. **Cost if wrong.** A
+session whose deck version cannot be found is not taken in until it is.
+
+### R100: One reviewed exception to the network tripwire
+
+**Decision.** `intake/deck_history.py` imports `subprocess` to run `git log` and `git show` (no
+fetch), and is listed in `test_kit_network.py`'s `ALLOWED`: the one exception to R71's scan.
+**Why.** Finding the deck version a session used needs the repository's history. **Cost if wrong.**
+The tripwire is weaker in that one file.
+
+### R101: The purge log counts the session's own files
+
+**Decision.** `files_removed` in `purge-log.jsonl` counts the session's files (audio, its session
+copy, staging, inbox), not analysis-cache entries. **Why.** The cache is cleared whole (R98), and
+its entries are not the session's. **Cost if wrong.** The count understates what a purge deleted.
+
+### R112: Relabelled rows, and gate clips with no pair
+
+**Decision.** `tkh relabel` rebuilds each decided clip's row from the row intake wrote: "as the card
+says" keeps it; heard tones equal to the intended reading make it `correct`, other heard tones
+`tone_error`, with `produced_tones` what was heard; "unclear" sets `needs_listen`; "exclude" removes
+the row. A `gate` or `diag_t23` pair that is no longer one `correct` and one `tone_error` row loses
+its `pair` on both rows, which stay for fitting. The gate skips and lists gate clips with no pair
+(before, such a clip was a `MetricsError`), and candidate-ID accuracy counts only `correct`
+minimal-set clips. **Why.** Half pairs leave the gate but stay for fitting, with no new set value,
+and a misread minimal-set clip's intended reading is not what was said. **Cost if wrong.** A
+hand-made manifest that loses a gate pair id is no longer refused; the report lists it under "Gate
+clips outside the pairs".
+
+### R114: Relabel precedence is per clip, by decision time
+
+**Decision.** A clip's latest decision (`decided_at`) wins: an older one is skipped, the same
+verdict again changes nothing, and rows are always rebuilt from the row intake wrote, so applying a
+file twice is a no-op and a newer export replaces older decisions. **Why.** Idempotence, and an old
+export applied late must not undo newer listening. **Cost if wrong.** It relies on the browser's
+clock; a badly skewed clock could keep an old decision.
+
+### R115: The review page lists the likeliest wrong labels first
+
+**Decision.** `tkh review` orders clips in five groups: twin (on a syllable where the card and its
+twin differ, the scorer heard the twin's tone, or gives an error card's intended tone at least even
+odds), disagrees (another tone heard confidently), unsure, not graded, agrees. Within a group the
+most doubtful come first: `1-p` on syllables where the card asks for the intended tone, p on error
+syllables. **Why.** The scorer disagrees with most clips (103 of 152) through its known weaknesses
+(creaky final tone 4, shallow reduced tone 4); the twin contrast is the specific sign of a wrong
+label. **Cost if wrong.** Only the order.
+
+### R116: Enter keeps what was typed
+
+**Decision.** On the review page `Enter` means "as selected, then next". The card's tones are
+preselected, so with no edits it is "as the card says"; after a syllable is set with a digit,
+`Enter` keeps those tones. The "As the card says" button always resets to the card. **Why.**
+Otherwise typing 1, 2, 3 then `Enter` would throw away what was just typed. **Cost if wrong.** One
+key's meaning.
+
+### R117: The review page is one self-contained file
+
+**Decision.** The page is a single HTML file: its data is an inline JSON block, its script and style
+are pinned by hash in the CSP (`default-src 'none'`, `connect-src 'none'`, `media-src 'self'
+file:`), and audio is linked relatively, only under the data root. **Why.** In Chromium a page
+opened from disk cannot fetch a file beside it, and the page must make no network request. **Cost if
+wrong.** The page is about 150 KB.
+
+### R118: Purge removes review pages and relabel entries
+
+**Decision.** `tkh purge` removes every `review/<corpus>/` page that mentions the session, the
+session's entries in `relabels.jsonl` and any relabel manifest a killed run left; its closing
+reminder names exported `relabels-*.json` files. On load, a review page drops the decisions the
+browser kept about sessions its corpus no longer has. **Why.** Contracts §6 reserved review pages
+for purge, and the log names clips. **Cost if wrong.** After any purge DJ runs `tkh review` again.
 
 ## Process
 
