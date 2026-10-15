@@ -18,7 +18,6 @@ import os
 import struct
 import sys
 import tomllib
-import warnings
 from dataclasses import dataclass, field
 from functools import cache
 from importlib import metadata
@@ -40,7 +39,7 @@ from . import (
     rolling_register,
     speaker_register,
 )
-from .ingest import TARGET_SR, to_float32
+from .ingest import TARGET_SR, strict_wav_warnings, to_float32
 from .manifest import Clip, ManifestError, to_candidate_json
 from .register_json import register_json as canonical_register
 from .session_order import SessionOrderError
@@ -131,15 +130,7 @@ def read_wav(path: Path, name: str) -> tuple[bytes, np.ndarray]:
     except OSError as e:
         raise EvalError(f"{name}: cannot read {path}: {e.strerror or e}") from e
     try:
-        with warnings.catch_warnings():
-            # scipy only warns about a file cut short ("Reached EOF prematurely") and returns
-            # fewer samples: that is an error here. Only a skipped unknown chunk is harmless.
-            warnings.simplefilter("error", wavfile.WavFileWarning)
-            warnings.filterwarnings(
-                "ignore",
-                message=r"Chunk \(non-data\) not understood",
-                category=wavfile.WavFileWarning,
-            )
+        with strict_wav_warnings():
             rate, samples = wavfile.read(io.BytesIO(data))
     except (ValueError, struct.error, wavfile.WavFileWarning) as e:
         raise EvalError(f"{name}: {path} is not a readable WAV file: {e}") from e

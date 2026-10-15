@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 import argparse
+import io
 import sys
+import warnings
+from collections.abc import Iterator
+from contextlib import contextmanager
 from math import gcd
 from pathlib import Path
 
@@ -23,8 +27,18 @@ def to_float32(data: np.ndarray) -> np.ndarray:
     return data.astype(np.float32)
 
 
-def to_16k_mono(in_path: str | Path, out_path: str | Path) -> None:
-    """Read `in_path`, mix down to mono, resample to 16 kHz, write float32 WAV to `out_path`."""
+@contextmanager
+def strict_wav_warnings() -> Iterator[None]:
+    """Inside, scipy's warning about a file cut short ("Reached EOF prematurely", after which it
+    returns fewer samples) is raised as an error; only a skipped unknown chunk is harmless."""
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", wavfile.WavFileWarning)
+        warnings.filterwarnings("ignore", message=r"Chunk \(non-data\) not understood", category=wavfile.WavFileWarning)
+        yield
+
+
+def read_16k_mono(in_path: str | Path) -> np.ndarray:
+    """The samples of the WAV file `in_path` as float32, mixed down to mono and resampled to 16 kHz."""
     sr, data = wavfile.read(in_path)
     x = to_float32(data)
     if x.ndim > 1:
@@ -32,9 +46,23 @@ def to_16k_mono(in_path: str | Path, out_path: str | Path) -> None:
     if sr != TARGET_SR:
         g = gcd(sr, TARGET_SR)
         x = resample_poly(x.astype(np.float64), TARGET_SR // g, sr // g).astype(np.float32)
+    return x
+
+
+def to_16k_mono(in_path: str | Path, out_path: str | Path) -> None:
+    """Read `in_path`, mix down to mono, resample to 16 kHz, write float32 WAV to `out_path`."""
+    x = read_16k_mono(in_path)
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     wavfile.write(out_path, TARGET_SR, x)
+
+
+def pcm16_wav(x: np.ndarray) -> bytes:
+    """16 kHz mono 16-bit PCM WAV bytes of float samples (clipped to [-1, 1]), as the kit writes
+    its clips."""
+    buf = io.BytesIO()
+    wavfile.write(buf, TARGET_SR, np.round(np.clip(x, -1.0, 1.0) * 32767.0).astype(np.int16))
+    return buf.getvalue()
 
 
 def _output_clashes(wavs: list[Path]) -> list[list[Path]]:
