@@ -3,8 +3,13 @@
 The rules, on cmn pack tone ids:
 - 一 (yī, tone 1): yí (2) before a tone 4, yì (4) before a 1, 2 or 3, yī (1) alone or last.
 - 不 (bù, tone 4): bú (2) before a tone 4, otherwise bù.
+- 一 after 第 is an ordinal and stays yī (1): 第一次 is 4-1-4, not 4-2-4. The hanzi must show 第
+  right before 一, so this needs `text`.
 - Third tones: a 3 before a 3 becomes 2. A run of three or more 3s is grouped by the reader, so
   every grouping is accepted: 展览馆 is 2-2-3 or 3-2-3.
+- A neutral syllable written as neutral (5) keeps the 3 before it: 你们 nǐ men and 姐姐 jiě jie are
+  3-5, 哪里 nǎ li is 3-5, never 2-5. Words whose neutral syllable is underlyingly a 3 (哪里 ná li,
+  小姐, 想想) have two native readings and stay out of decks (R89).
 Both 一 and 不 follow the *citation* tone of the next syllable. Neither changes before a neutral
 tone (5), which has no underlying tone to follow; write the underlying tone in the pinyin.
 """
@@ -39,7 +44,10 @@ def surface_options(
         return {citation}
     hanzi = _hanzi_per_syllable(text, len(citation))
     fixed = _yi_and_bu(citation, syllables, hanzi)
-    return {_assemble(fixed, runs) for runs in product(*(_run_options(n) for _, n in _runs(fixed)))}
+    return {
+        _assemble(fixed, runs)
+        for runs in product(*(_run_options(n) for _, n in _runs(fixed)))
+    }
 
 
 def _check_input(citation_tones: Sequence[str], syllables: Sequence[str], context: str) -> None:
@@ -69,7 +77,8 @@ def _yi_and_bu(
         nxt = citation[i + 1] if i + 1 < len(citation) else None
         word = hanzi[i] if hanzi else None
         if syllables[i] == "yi" and tone == "1" and word in (None, "一"):
-            out[i] = {"4": "2", "1": "4", "2": "4", "3": "4"}.get(nxt or "", tone)
+            ordinal = i > 0 and hanzi is not None and hanzi[i - 1] == "第"
+            out[i] = tone if ordinal else {"4": "2", "1": "4", "2": "4", "3": "4"}.get(nxt or "", tone)
         elif syllables[i] == "bu" and tone == "4" and word in (None, "不"):
             out[i] = "2" if nxt == "4" else tone
         elif tone == "3":

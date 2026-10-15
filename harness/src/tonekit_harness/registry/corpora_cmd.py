@@ -5,7 +5,10 @@ from __future__ import annotations
 import argparse
 import sys
 
-from .options import data_root_from
+from ..contracts.pack import PackError
+from ..contracts.registry import RegistryError
+from ..data_option import add_data_option, root_from
+from .root import DataRoot
 from .summary import CorpusSummary, summarise
 
 HEADER = ["corpus", "kind", "source", "speakers", "clips", "stale"]
@@ -32,7 +35,12 @@ def _counts(counts: dict[str, int], error: str | None) -> str:
 
 
 def _run(args: argparse.Namespace) -> int:
-    root = data_root_from(args)
+    try:
+        root = DataRoot(root_from(args), pack=args.pack)
+        root.pack  # noqa: B018 (read it now: a pack that cannot be read is no one corpus's fault)
+    except (RegistryError, PackError, OSError) as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 1
     if not root.path.is_dir():
         print(
             f"error: the data root {root.path} does not exist (set TONEKIT_DATA or pass --data)",
@@ -58,5 +66,9 @@ def register(subparsers) -> None:
     p = subparsers.add_parser(
         "corpora",
         help="list the corpora under the data root: kind, source, speakers per split, clips per set, stale",
+    )
+    add_data_option(p)
+    p.add_argument(
+        "--pack", metavar="PATH", help="the pack whose accents the speakers are checked against (default: packs/cmn/cmn.toml)"
     )
     p.set_defaults(func=_run)

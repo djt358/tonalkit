@@ -46,9 +46,17 @@
       "additionalProperties": false,
       "properties": {
         "accent": {
-          "minLength": 1,
-          "title": "Accent",
-          "type": "string"
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Accent"
         },
         "background": {
           "anyOf": [
@@ -115,7 +123,6 @@
       },
       "required": [
         "id",
-        "accent",
         "split"
       ],
       "title": "Speaker",

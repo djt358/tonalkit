@@ -64,6 +64,11 @@ have tonekit_ffi.swift 'public static func fromToml\(packToml: String, calibJson
 have tonekit_ffi.swift 'func lect\(\)[[:space:]]*-> Lect'
 have tonekit_ffi.swift 'func baseAccent\(\)[[:space:]]*-> AccentId'
 have tonekit_ffi.swift 'func inventory\(\)[[:space:]]*-> \[ToneId\]'
+# The rolling register (ruling R111): carried from utterance to utterance by the app.
+have tonekit_ffi.swift 'public func rollRegister\(previous: RollingRegister\?, analysis: Analysis, assessment: UtteranceAssessment, pack: Pack, params: RollingParams\? = nil\)[[:space:]]*throws[[:space:]]*-> RollingRegister'
+have tonekit_ffi.swift 'func rollingParams\(\)[[:space:]]*-> RollingParams'
+# Its four-number form (ruling R120): the app keeps only a Register.
+have tonekit_ffi.swift 'public func rollRegisterLite\(previous: Register\?, analysis: Analysis, assessment: UtteranceAssessment, pack: Pack, params: RollingParams\? = nil\)[[:space:]]*throws[[:space:]]*-> Register'
 
 # The request (tonekit.swift).
 have tonekit.swift '^public struct AssessRequest'
@@ -71,9 +76,12 @@ have tonekit.swift 'public var compareAccents: \[AccentId\]'
 
 # The shared types, the error and the four ids (tonekit_core.swift).
 for name in Analysis F0Track F0Frame Register Candidate ToneTarget GradingTarget \
-    UtteranceAssessment SyllableAssessment DecodeResult ToneLattice; do
+    UtteranceAssessment SyllableAssessment DecodeResult ToneLattice RollingRegister RollingParams; do
     have tonekit_core.swift "^public struct $name: "
 done
+have tonekit_core.swift 'public var pool: \[Double\]'
+have tonekit_core.swift 'public var halfLifeS: Float\?'
+have tonekit_core.swift 'public var maxShare: Float\?'
 for name in Measured MeasureIssue DeltaKind Evidence EvidenceKind RegisterSource; do
     have tonekit_core.swift "^public enum $name: "
 done
@@ -86,6 +94,22 @@ have tonekit_core.swift 'case TooLong\(seconds: Float, max: Float'
 # The two issues a caller sees for input that was not usable as given.
 have tonekit_core.swift 'case invalidRegister'
 have tonekit_core.swift 'case invalidEvidence'
+# A syllable nothing could hold, one with no pitch, and one whose pitch gives way to creak
+# (rulings R102, R103, R108): an exhaustive Swift `switch` over MeasureIssue must handle them (the
+# smoke test has one).
+have tonekit_core.swift 'case noNucleus'
+have tonekit_core.swift 'case unpitched'
+have tonekit_core.swift 'case creakyTail'
+# The analysis's sonority track (ruling R102).
+have tonekit_core.swift 'public var sonority: \[Float\]'
+# The smoke test's exhaustive switch handles every MeasureIssue case the bindings have. Swift does
+# not compile here, so this is the check that runs on every push.
+smoke=swift/TonekitSmoke/Tests/TonekitSmokeTests/SmokeTests.swift
+issues=$(awk '/^public enum MeasureIssue: /{on=1; next} on && /^}/{exit} on && /^ *case [a-zA-Z]+ *$/{print $2}' "$out/tonekit_core.swift")
+[ -n "$issues" ] || fail "tonekit_core.swift: no MeasureIssue cases found"
+for issue in $issues; do
+    grep -Eq "case \.$issue:" "$smoke" || fail "$smoke: the MeasureIssue switch lacks case .$issue"
+done
 for id in Lect AccentId ToneId CandidateId; do
     have tonekit_core.swift "^public typealias $id = String\$"
 done

@@ -1,8 +1,10 @@
-"""`tkh corpora`: one row per corpus, and `tkh --data PATH` choosing the data root."""
+"""`tkh corpora`: one row per corpus, and `--data DIR` (before or after the command) choosing the
+data root."""
 
 from __future__ import annotations
 
 import re
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from registry_support import add_corpus, build_composed_root, speaker, speaker_clips
@@ -60,7 +62,7 @@ def test_a_stale_corpus_is_flagged_and_its_reasons_follow_the_table(root, capsys
 def test_clearing_the_marker_clears_the_flag(root, capsys):
     data = DataRoot(root)
     data.mark_stale("dj-2026-10", "x")
-    data.clear_stale("dj-2026-10")
+    data.clear_stale("dj-2026-10", marked_before=datetime.now(UTC) + timedelta(seconds=1))
     _, out, _ = run(capsys, "--data", str(root), "corpora")
     assert "STALE" not in out and "stale:" not in out
 
@@ -118,12 +120,49 @@ def test_a_directory_without_corpus_toml_is_a_broken_corpus_not_a_missing_one(ro
     assert f"error: {root}/corpora/half-made/corpus.toml: no corpus.toml" in err
 
 
-def test_the_data_option_comes_before_the_command_and_is_in_the_help(capsys):
-    with pytest.raises(SystemExit) as stop:
-        cli.main(["--help"])
-    assert stop.value.code == 0
-    out = capsys.readouterr().out
-    assert "--data PATH" in out and "corpora" in out
-    with pytest.raises(SystemExit):
-        cli.main(["corpora", "--data", "x"])  # a flag of the whole tool, not of the command
-    assert "unrecognized arguments: --data x" in capsys.readouterr().err
+def test_the_data_option_is_in_the_help_of_the_tool_and_of_the_command(capsys):
+    for argv in (["--help"], ["corpora", "--help"]):
+        with pytest.raises(SystemExit) as stop:
+            cli.main(argv)
+        assert stop.value.code == 0
+        assert "--data DIR" in capsys.readouterr().out
+
+
+def test_the_data_option_may_follow_the_command_and_then_wins(root, tmp_path_factory, capsys):
+    other = tmp_path_factory.mktemp("other")
+    code, out, _ = run(capsys, "corpora", "--data", str(root))
+    assert code == 0 and f"data root: {root}" in out
+    _, out, _ = run(capsys, "--data", str(other), "corpora", "--data", str(root))
+    assert f"data root: {root}" in out
+
+
+@pytest.mark.parametrize("argv", [["--data", "", "corpora"], ["corpora", "--data", " "]])
+def test_an_empty_data_option_is_refused_not_the_current_directory(tmp_path, monkeypatch, capsys, argv):
+    monkeypatch.chdir(tmp_path)
+    code, out, err = run(capsys, *argv)
+    assert code == 1 and out == ""
+    assert err == "error: --data is empty; give a directory, or leave it out for $TONEKIT_DATA\n"
+
+
+def test_a_symlinked_corpus_is_listed_and_one_whose_disk_is_gone_is_an_error(root, tmp_path_factory, capsys):
+    elsewhere = tmp_path_factory.mktemp("external")
+    add_corpus(elsewhere, "aishell3-ext", kind="recorded", source="dj-corpus", speakers=[speaker("dj")],
+               clips=speaker_clips("dj", "dj-corpus"))  # fmt: skip
+    (root / "corpora" / "aishell3-ext").symlink_to(elsewhere / "corpora" / "aishell3-ext")
+    (root / "corpora" / "unmounted").symlink_to(elsewhere / "no-such-disk")
+    code, out, err = run(capsys, "--data", str(root), "corpora")
+    rows = {r[0]: r for r in table(out)}
+    assert rows["aishell3-ext"] == ["aishell3-ext", "recorded", "dj-corpus", "gate 1", "gate 2", "no"]
+    assert code == 1 and rows["unmounted"][1:] == ["?", "?", "?", "?", "-"]
+    assert f"corpora/unmounted: a symlink to {elsewhere / 'no-such-disk'}, which is not a directory" in err
+
+
+def test_intakes_staging_areas_are_not_corpora(root, capsys):
+    (root / "corpora" / ".intake-K7Q2MD-123").mkdir()
+    code, out, _ = run(capsys, "--data", str(root), "corpora")
+    assert code == 0 and ".intake" not in out
+
+
+def test_a_pack_that_cannot_be_read_is_one_error_not_a_broken_row_per_corpus(root, tmp_path, capsys):
+    code, out, err = run(capsys, "--data", str(root), "corpora", "--pack", str(tmp_path / "nope.toml"))
+    assert code == 1 and out == "" and "nope.toml" in err

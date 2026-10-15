@@ -22,14 +22,15 @@ def select(
     root: DataRoot,
     corpora: Sequence[str] = ("*",),
     *,
-    kinds: Collection[str] | None = None,
-    splits: Collection[str] | None = None,
-    sets: Collection[str] | None = None,
+    kinds: Collection[Kind] | None = None,
+    splits: Collection[Split] | None = None,
+    sets: Collection[ClipSet] | None = None,
 ) -> Selection:
     """The clips of the corpora matching `corpora` (ids or globs) whose corpus kind is in `kinds`,
     whose speaker's split is in `splits` and whose set is in `sets`; None means no filter. A
     union across every corpus that matches. Raises `SelectionError` for an empty or unknown filter
-    value or a corpus id that is not there, and `RegistryError` for a corpus that cannot be loaded."""
+    value or a corpus id that is not there (the values are checked at run time too: a gate file's
+    come from TOML), and `RegistryError` for a corpus that cannot be loaded."""
     patterns = _values("corpora", corpora)
     kinds = _choice("kinds", kinds, get_args(Kind))
     splits = _choice("splits", splits, get_args(Split))

@@ -8,7 +8,7 @@ from registry_support import add_corpus, build_composed_root, clip, speaker, wri
 
 from tonekit_harness.contracts.registry import RegistryError
 from tonekit_harness.registry import DataRoot
-from tonekit_harness.registry.rows import MAX_PROBLEMS_SHOWN
+from tonekit_harness.registry.errors import MAX_PROBLEMS_SHOWN
 
 V = "volunteer-corpus"
 
@@ -61,7 +61,7 @@ def test_a_corpus_loads_with_its_meta_and_speakers(data):
     corpus = data.corpus("volunteers-2026-10")
     assert (corpus.meta.kind, corpus.meta.source, corpus.meta.lect) == ("recorded", V, "cmn")
     assert list(corpus.speakers) == ["v-k7q2md", "v-abcde2"]
-    assert corpus.speakers["v-k7q2md"].accent == "cmn-TW"
+    assert corpus.speakers["v-k7q2md"].accent is None  # as intake writes it: the default applies (R82)
 
 
 def test_clips_are_joined_to_their_speaker_and_corpus(data):

@@ -14,13 +14,10 @@ from pydantic import Field, StringConstraints, ValidationError, ValidationInfo, 
 from ..manifest import Candidate, CardLabel, CardSet, Context
 from .base import StrictModel, format_validation_error
 from .deck_rules import deck_problems, fmt
+from .deck_sets import CORRECT_ONLY_SETS, PAIR_SETS
+from .ids import CARD_ID_PATTERN, CardId
 from .pack import PackInfo, load_pack_info
 
-# Sets whose cards come in correct/tone_error pairs, so every card names its pair; the other sets
-# may use `pair` too (a quiet re-record of a gate pair), and then it must be complete as well.
-PAIR_SETS = frozenset({"gate", "diag_t23", "diag_minimal"})
-
-_ID = r"^[a-z0-9-]+$"
 _Text = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
 
 
@@ -29,18 +26,19 @@ class DeckError(ValueError):
 
 
 class DeckMeta(StrictModel):
-    id: str = Field(pattern=_ID)
+    id: str = Field(pattern=CARD_ID_PATTERN)  # the deck id, same characters as a card id
     lect: str = Field(min_length=1)
     version: int = Field(ge=1)
     title: _Text
 
 
 class Card(StrictModel):
-    id: str = Field(pattern=_ID)  # unique in the deck
+    id: CardId  # unique in the deck
     set: CardSet
-    pair: str | None = Field(default=None, pattern=_ID)
+    pair: CardId | None = None
     label: CardLabel
-    text: _Text  # what the card shows
+    text: _Text  # what the card shows (simplified)
+    text_traditional: _Text | None = None  # shown instead when the speaker reads traditional (R74)
     pinyin: _Text  # the surface (spoken) form, sandhi applied
     citation_pinyin: _Text  # the dictionary form, for the sandhi check
     context: Context
@@ -48,6 +46,8 @@ class Card(StrictModel):
     produced_tones: list[str]  # what the card asks to be said
     distractors: list[Candidate] = []
     prompt_note: str = ""
+    # shown instead of `prompt_note` when the speaker reads traditional (R88); "" counts as unset
+    prompt_note_traditional: str | None = None
     status: Literal["unverified", "approved"] = "unverified"  # `approved` is DJ's audit only
 
     @model_validator(mode="after")
@@ -67,6 +67,13 @@ class Card(StrictModel):
             if len(c.tones) != len(c.labels):
                 name = "intended" if c is self.intended else f"distractor {c.id!r}"
                 problems.append(f"{name} has {len(c.tones)} tones but {len(c.labels)} labels")
+        if self.text_traditional is not None and len(self.text_traditional) != len(self.text):
+            problems.append(
+                f"text_traditional has {len(self.text_traditional)} characters "
+                f"but text has {len(self.text)}"
+            )
+        if (self.prompt_note_traditional or "").strip() and not self.prompt_note.strip():
+            problems.append("prompt_note_traditional is set but prompt_note is empty")
         if len(self.produced_tones) != len(self.intended.tones):
             problems.append(
                 f"produced_tones has {len(self.produced_tones)} tones "
@@ -75,6 +82,8 @@ class Card(StrictModel):
         return problems
 
     def _label_problems(self) -> list[str]:
+        if self.set in CORRECT_ONLY_SETS and self.label != "correct":
+            return [f"set {self.set!r} cards must be correct readings, not {self.label}"]
         if len(self.produced_tones) != len(self.intended.tones):
             return []
         differing = sum(p != i for p, i in zip(self.produced_tones, self.intended.tones, strict=True))

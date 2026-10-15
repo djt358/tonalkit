@@ -7,3 +7,4 @@ from typing import Literal
 
 Background = Literal["native", "heritage", "learner", "prefer_not"]
 GrewUpHearing = Literal["mainland", "taiwan", "singapore_malaysia", "hong_kong_macau", "other", "prefer_not"]
+Script = Literal["simplified", "traditional"]  # which characters the speaker reads (R74)

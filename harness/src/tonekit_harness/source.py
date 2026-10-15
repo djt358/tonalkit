@@ -20,11 +20,13 @@ import tonekit_py
 from . import calibration, evaluate, manifest, world
 from .family import SynthError
 from .manifest import Clip
+from .speaker_register import register_bounds
 from .voice import PackTones, Voice
 
 MIN_VOICED_FRAMES = 5  # a syllable needs this many voiced frames to be redrawn (50 ms)
 MAX_GAP_FRAMES = 2  # unvoiced frames a voiced core tolerates inside itself (20 ms)
-MIN_REGISTER_ST = 4.0  # tonekit's minimum register width, expanded symmetrically
+# The data-register id of the volunteers' recordings, which are never resynthesised (R80).
+NEVER_RESYNTHESISED = "volunteer-corpus"
 
 
 @dataclass(frozen=True)
@@ -41,20 +43,20 @@ class Source:
     register_json: str | None  # the speaker's register from their register clips; None: cold
 
 
+def refuse_volunteer_audio(clip: Clip) -> None:
+    """Resynthesis would imitate a volunteer's voice, which the consent promises never to do (R80).
+    A clip from the volunteer corpus is refused here, at the door every perturbation comes through."""
+    if clip.source == NEVER_RESYNTHESISED:
+        raise SynthError(
+            f"{clip.id}: volunteers' recordings are never resynthesised (the consent says we never "
+            f"imitate a voice); perturb clips from DJ's own or public corpora instead"
+        )
+
+
 def _semitones(hz: np.ndarray) -> np.ndarray:
     """Semitones re 55 Hz, NaN where unvoiced (hz == 0)."""
     voiced = hz > 0
     return np.where(voiced, 12.0 * np.log2(np.where(voiced, hz, 55.0) / 55.0), np.nan)
-
-
-def register_bounds(voiced_st: np.ndarray) -> tuple[float, float]:
-    """The speaker's register as (floor, ceil) semitones: p5 and p95 of the voiced semitones, at
-    least `MIN_REGISTER_ST` wide (expanded symmetrically), Chao 1 and Chao 5."""
-    floor, ceil = (float(x) for x in np.percentile(voiced_st, [5, 95]))
-    if ceil - floor < MIN_REGISTER_ST:
-        mid = (floor + ceil) / 2.0
-        floor, ceil = mid - MIN_REGISTER_ST / 2.0, mid + MIN_REGISTER_ST / 2.0
-    return floor, ceil
 
 
 def voiced_core(voiced: np.ndarray, max_gap: int = MAX_GAP_FRAMES) -> tuple[int, int] | None:
@@ -131,7 +133,9 @@ def prepare(
     are decoded with it, and `adversary.search` grades the clip's perturbations with it.
 
     Only correct, non-synthetic clips can be perturbed: the label of a perturbed clip comes from
-    the family, and would be wrong for a clip that is already wrong or already synthetic."""
+    the family, and would be wrong for a clip that is already wrong or already synthetic. Clips
+    whose `source` is the volunteer corpus are refused outright (`refuse_volunteer_audio`)."""
+    refuse_volunteer_audio(clip)
     if clip.set == "synthetic":
         raise SynthError(f"{clip.id}: a synthetic clip cannot be perturbed again")
     if clip.label != "correct":
@@ -187,9 +191,13 @@ def load_sources(
 
     A clip with nothing to perturb is skipped with a warning on stderr; its message is appended to
     `skipped`, if given, so the caller can report how many. It is an error (`SynthError`, raised
-    when the generator is exhausted) if no clip could be perturbed."""
+    when the generator is exhausted) if no clip could be perturbed. A manifest holding any clip
+    from the volunteer corpus is refused whole, before anything is analysed: dropping those clips
+    quietly would let a mixed selection look as if it had worked (R80)."""
     manifest_path = Path(manifest_path)
     clips = manifest.load(manifest_path)
+    for clip in clips:
+        refuse_volunteer_audio(clip)
     files = calibration.load(pack, calib)
     pack_toml, calib_json = files.pack_toml, files.calib_json
     grader = evaluate.Grader(

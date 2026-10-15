@@ -105,6 +105,12 @@ def _metrics_table(
         ["Candidate-ID accuracy (diag_minimal)", rate(cand_acc, n_minimal), "diagnostic", "-"],
         ["Count robustness (diag_count)", rate(count_rob, n_count), "diagnostic", "-"],
         ["Median threshold over the held-out pairs", num(gate.median_threshold), "-", "-"],
+        [
+            "Rank (correct clip outscores its error clip, ties ½)",
+            "n/a" if gate.rank is None else f"{gate.rank:.3f} ({gate.ranked:g}/{n})",
+            "diagnostic",
+            "-",
+        ],
     ]
     return table(["Metric", "Value", "Requirement", "Result"], rows)
 
@@ -125,6 +131,67 @@ def _pair_table(gate: GateMetrics) -> list[str]:
     return table(header, rows)
 
 
+def _unpaired_section(gate: GateMetrics) -> list[str]:
+    """The gate clips `tkh relabel` took out of their pair (R112)."""
+    if not gate.unpaired:
+        return []
+    lines = [
+        "## Gate clips outside the pairs",
+        "",
+        (
+            "A listener's relabel left these clips' pairs without one correct and one tone-error "
+            "reading (`tkh relabel`, ruling R112). They stay in the corpus for fitting and are not "
+            "counted in correct-accept or wrong-accept."
+        ),
+        "",
+    ]
+    return lines + [f"- {cid}" for cid in gate.unpaired] + [""]
+
+
+def _fallback_section(results: Sequence[Result]) -> list[str]:
+    """The gate clips with a syllable no nucleus could hold, per speaker: unscored since ruling
+    R104 (a reject at every threshold), or, in results from before it, decided by a fallback
+    prior."""
+    gate = [r for r in results if r.set == "gate"]
+    listed = [r for r in gate if r.missing and (r.overall is None or r.decided_by_fallback)]
+    if not listed:
+        return []
+    lines = [
+        "## Syllables with no nucleus",
+        "",
+        (
+            "A syllable the card has but the utterance shows nothing for (no nucleus, pitched or "
+            "unpitched) has no tone evidence. Such a clip is not scored: it counts as a reject at "
+            "every threshold and is never accepted at a prior (ruling R104; before it, the clip's "
+            "overall was a fixed fallback p_correct, which said nothing about the tone)."
+        ),
+        "",
+    ]
+    for speaker in dict.fromkeys(r.speaker for r in gate):
+        mine = [r for r in gate if r.speaker == speaker]
+        syllables = [s for r in mine for s in r.syllables]
+        missed = sum(s.fallback for s in syllables)
+        clips = sum(r in listed for r in mine)
+        lines.append(
+            f"- {speaker}: {missed} of {len(syllables)} gate syllables had no nucleus; "
+            f"{clips} of {len(mine)} clips rest on one"
+        )
+    return lines + [""] + [f"- {r.id}" for r in listed] + [""]
+
+
+def _measured_label(s) -> str:
+    """How a syllable was measured, for the failure tables."""
+    if s.fallback:
+        return "no nucleus (fallback)"
+    if s.unpitched:
+        # Without the calibration's unpitched evidence (no table, or one that rates every tone
+        # alike at the syllable's place) nothing was measured (rulings R103, R119).
+        return "unpitched (no evidence)" if s.measured == "NotMeasured" else "unpitched (creak evidence)"
+    if "CreakyTail" in s.issues:
+        return f"{s.measured} (creaky tail)"
+    return s.measured
+
+
 def _failure(f: Failure) -> list[str]:
     r: Result = f.result
     lines = [
@@ -132,8 +199,7 @@ def _failure(f: Failure) -> list[str]:
         "",
         f"- {f.reason}",
         f"- set {r.set}, pair {r.pair or 'none'}, label {r.label}, speaker {r.speaker}",
-        f"- overall {num(r.overall)}, intended rank {r.intended_rank}, "
-        f"margin_llr {num(r.margin_llr)}",
+        f"- overall {num(r.overall)}, intended rank {r.intended_rank}, margin_llr {num(r.margin_llr)}",
         f"- register {r.register_source}; signal issues: {', '.join(r.issues) or 'none'}",
         "",
     ]
@@ -145,7 +211,7 @@ def _failure(f: Failure) -> list[str]:
                 s.heard or "-",
                 num(s.p_correct),
                 num(s.distance),
-                s.measured,
+                _measured_label(s),
                 _deltas(s.deltas),
             ]
             for i, s in enumerate(r.syllables, start=1)
@@ -166,6 +232,7 @@ def write(
     n_minimal: int | None = None,
     n_count: int | None = None,
     context: Mapping[str, str] | None = None,
+    results: Sequence[Result] = (),
 ) -> None:
     """Write the gate report to `path` (parent directories are created).
 
@@ -184,9 +251,16 @@ def write(
     lines += ["", "## Gate pairs", ""]
     lines += ["Each pair is judged at the threshold fitted on the other pairs.", ""]
     lines += _pair_table(gate) + [""]
+    lines += _unpaired_section(gate)
+    lines += _fallback_section(results)
     if gate.rejected_none:
         lines += ["## Clips with no score", ""]
-        lines += ["Tone not checked (no syllable measured); each counts as a reject.", ""]
+        lines += [
+            "Tone not checked (no syllable measured, a syllable with no nucleus (see above), or an "
+            "unpitched one the calibration has no evidence for: no table, or one that rates every "
+            "tone alike, R119); each counts as a reject.",
+            "",
+        ]
         lines += [f"- {cid}" for cid in gate.rejected_none] + [""]
     lines += ["## Failures", ""]
     if failures:

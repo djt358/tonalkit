@@ -8,6 +8,9 @@
 //! - [`lattice`] gives per-syllable tone likelihoods with no candidates at all (open set).
 //! - [`assess`] grades an intended reading: `decode` of the intended candidate and its
 //!   distractors, fused with any external evidence, plus accent fit and the updated register.
+//! - [`roll_register`] carries a speaker's register from utterance to utterance, following them
+//!   as their register drifts (a time-weighted pool of their voiced speech, ruling R111), and
+//!   [`roll_register_lite`] does so keeping only the register's four numbers (ruling R120).
 //!
 //! The facade holds no policy. It reports likelihoods, probabilities and diagnostics; thresholds,
 //! mastery scaling and UI belong to the consumer.
@@ -37,9 +40,11 @@ uniffi::setup_scaffolding!();
 
 mod analyze;
 mod assess;
+mod roll;
 
 pub use analyze::{analyze, AnalyzeOptions, F0Choice};
 pub use assess::{assess, AssessRequest};
+pub use roll::{roll_register, roll_register_lite};
 pub use tonekit_core::*;
 pub use tonekit_decode::{decode, lattice};
 pub use tonekit_pack::LanguagePack;

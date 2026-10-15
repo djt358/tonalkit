@@ -1,4 +1,6 @@
-//! Plain-data types shared by every tonekit crate (spec §5). No logic lives here.
+//! Plain-data types shared by every tonekit crate (spec §5). The only logic here is definitions
+//! every crate must agree on: what a voiced run is ([`voiced_runs`]), and which long voiced runs
+//! make up one syllable's voiced part ([`syllable_runs`]).
 
 #![forbid(unsafe_code)]
 
@@ -15,9 +17,11 @@ mod ids;
 mod judgement;
 mod lattice;
 mod register;
+mod rolling;
 mod shape;
 mod signal;
 mod style;
+mod syllable_runs;
 mod target;
 
 pub use analysis::*;
@@ -28,7 +32,9 @@ pub use ids::*;
 pub use judgement::*;
 pub use lattice::*;
 pub use register::*;
+pub use rolling::*;
 pub use shape::*;
 pub use signal::*;
 pub use style::*;
+pub use syllable_runs::*;
 pub use target::*;

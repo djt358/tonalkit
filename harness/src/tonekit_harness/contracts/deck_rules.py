@@ -7,6 +7,7 @@ from collections import defaultdict
 from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
+from .deck_sets import PAIR_SETS
 from .lects import LectError, LectRules, lect_rules
 from .pack import PackInfo
 
@@ -30,7 +31,7 @@ def deck_problems(deck: Deck, pack: PackInfo) -> list[str]:
         return [*problems, str(e)]
     for card in deck.card:
         problems += _reading_problems(card, rules)
-    return problems + _pair_problems(deck.card)
+    return problems + _pair_problems(deck.card) + _minimal_problems(deck.card)
 
 
 def _duplicate_ids(cards: Sequence[Card]) -> list[str]:
@@ -82,7 +83,20 @@ def _reading_problems(card: Card, rules: LectRules) -> list[str]:
     options = rules.surface_options(citation_tones, [s.base for s in citation], card.context, card.text)
     if tuple(card.produced_tones) not in options:
         problems.append(_sandhi_problem(card, citation_tones, options))
+    problems += _native_reading_problems(card, options)
     return problems
+
+
+def _native_reading_problems(card: Card, options: set[tuple[str, ...]]) -> list[str]:
+    """A correct phrase card has one native reading (R89): one `produced_tones` list would grade
+    the other native readings wrong. An error card is unaffected: its twin carries the guarantee."""
+    if card.label != "correct" or card.context != "phrase" or len(options) < 2:
+        return []
+    readings = ", ".join(fmt(o) for o in sorted(options))
+    return [
+        f"card {card.id!r}: has {len(options)} native readings ({readings}); "
+        "a correct card needs one (R89)"
+    ]
 
 
 def _sandhi_problem(card: Card, citation_tones: list[str], options: set[tuple[str, ...]]) -> str:
@@ -100,10 +114,11 @@ def _sandhi_problem(card: Card, citation_tones: list[str], options: set[tuple[st
 
 
 def _pair_problems(cards: Sequence[Card]) -> list[str]:
-    """Each pair (within a set) is one correct and one tone_error card of the same intended tones."""
+    """Each pair of a pair set (within the set) is one correct and one tone_error card of the same
+    intended tones. Elsewhere `pair` only groups (R81)."""
     pairs: dict[tuple[str, str], list[Card]] = defaultdict(list)
     for card in cards:
-        if card.pair is not None:
+        if card.pair is not None and card.set in PAIR_SETS:
             pairs[(card.set, card.pair)].append(card)
     problems = []
     for (set_, pair), members in pairs.items():
@@ -122,5 +137,22 @@ def _pair_problems(cards: Sequence[Card]) -> list[str]:
             problems.append(
                 f"{where}: {errors[0].id} intends {fmt(errors[0].intended.tones)} "
                 f"but {correct[0].id} intends {fmt(correct[0].intended.tones)}"
+            )
+    return problems
+
+
+def _minimal_problems(cards: Sequence[Card]) -> list[str]:
+    """A `diag_minimal` card names, as a distractor, the intended reading of another member of the
+    deck's minimal sets: the candidates a recording of it is decoded against (R76, R81)."""
+    members = [c for c in cards if c.set == "diag_minimal"]
+    problems = []
+    for card in members:
+        others = {m.intended.id for m in members if m.intended.id != card.intended.id}
+        if not others.intersection(d.id for d in card.distractors):
+            listed = ", ".join(repr(d.id) for d in card.distractors) or "none"
+            problems.append(
+                f"card {card.id!r}: a diag_minimal card needs a distractor that is another "
+                f"diag_minimal card's intended id (its distractors: {listed}; "
+                f"the other cards intend: {', '.join(sorted(map(repr, others))) or 'nothing'})"
             )
     return problems

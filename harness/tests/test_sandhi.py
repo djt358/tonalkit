@@ -38,6 +38,20 @@ def test_yi_at_the_end_stays_yi1():  # 第一 dì yī
     assert opts("dì yī") == seq("41")
 
 
+def test_an_ordinal_yi_after_di_stays_yi1():  # 第一次 dì yī cì, not dì yí cì
+    assert opts("dì yī cì", text="第一次") == seq("414")
+    assert opts("dì yī gè", text="第一个") == seq("414")
+
+
+def test_the_ordinal_needs_the_hanzi_to_show_di():
+    assert opts("dì yī cì") == seq("424")  # no text: yi before a 4 is yí
+    assert opts("dì yī cì", text="地一次") == seq("424")  # 地 is not 第
+
+
+def test_yi_after_di_is_ordinal_only_when_di_is_the_syllable_before_it():
+    assert opts("dì wǔ yī cì", text="第五一次") == seq("4324")  # not ordinal: 第 is two syllables back
+
+
 def test_yi_before_a_neutral_tone_is_not_changed():
     assert opts("yī ge") == seq("15")
 
@@ -81,7 +95,6 @@ def test_four_third_tones_accept_every_bracketing():
 
 def test_a_third_tone_before_another_tone_is_unchanged():
     assert opts("lǎo hǔ chī ròu") == seq("2314")
-    assert opts("nǐ men") == seq("35")
 
 
 def test_runs_are_independent_and_mix_with_bu():  # 好久不见 hǎo jiǔ bú jiàn
@@ -90,6 +103,33 @@ def test_runs_are_independent_and_mix_with_bu():  # 好久不见 hǎo jiǔ bú j
 
 def test_one_third_tone_alone_is_unchanged():
     assert opts("hǎo") == seq("3")
+
+
+# ---- a neutral syllable written as neutral keeps the third tone before it (R89) ----------------
+
+@pytest.mark.parametrize("pinyin,text", [
+    ("nǎ li", "哪里"), ("jiě jie", "姐姐"), ("nǎi nai", "奶奶"), ("nǐ men", "你们"),
+])
+def test_a_third_tone_before_a_written_neutral_syllable_stays_3(pinyin, text):
+    assert opts(pinyin, text=text) == seq("35")  # exactly one reading: never 2-5
+
+
+def test_the_underlying_third_tone_of_a_neutral_word_gives_the_regular_sandhi():
+    assert opts("nǎ lǐ", text="哪里") == seq("23")  # written 3-3: 2-3, not ná li or nǎ li
+
+
+def test_a_neutral_reading_is_not_a_citation_reading():
+    assert opts("nǎ li", "isolated") == seq("35")
+    assert opts("nǎ lǐ", "isolated") == seq("33")
+
+
+def test_a_neutral_syllable_ends_a_third_tone_run():  # 我们 wǒ men; 你好吗 ní hǎo ma
+    assert opts("wǒ men") == seq("35")
+    assert opts("nǐ hǎo ma") == seq("235")
+
+
+def test_other_tones_do_not_neutralise():  # only T3 runs: 大家 dà jiā stays 4-1
+    assert opts("dà jiā") == seq("41")
 
 
 # ---- the isolated (citation) reading --------------------------------------------------------

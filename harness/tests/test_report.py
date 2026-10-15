@@ -53,6 +53,7 @@ def render(results, tmp_path, **kw) -> str:
     theta = gate.median_threshold
     out = tmp_path / "gate.md"
     kw.setdefault("clearance", Clearance("gate"))
+    kw.setdefault("results", results)
     report.write(
         out,
         gate,
@@ -117,10 +118,7 @@ def bound_results(wrong_accepted: int):
 def result_cells(text: str) -> dict[str, str]:
     """Metric name to its Result cell (the last column of the metrics table)."""
     rows = [line for line in text.splitlines() if line.startswith("| ")]
-    return {
-        cells[0]: cells[-1]
-        for cells in ([c.strip() for c in line.strip("| ").split(" | ")] for line in rows)
-    }
+    return {cells[0]: cells[-1] for cells in ([c.strip() for c in line.strip("| ").split(" | ")] for line in rows)}
 
 
 def test_a_gate_exactly_on_both_bounds_passes_and_the_report_agrees(tmp_path):
@@ -160,6 +158,7 @@ def test_the_metrics_table_has_counts_diagnostics_and_the_median_threshold(tmp_p
     assert "0.500 (1/2)" in text  # candidate-ID accuracy
     assert "1.000 (1/1)" in text  # count robustness
     assert "Median threshold" in text
+    assert "| Rank (correct clip outscores its error clip, ties ½) | 1.000 (20/20) | diagnostic | - |" in text
 
 
 def test_diagnostics_without_clips_read_n_a(tmp_path):
@@ -305,9 +304,7 @@ def eval_args(corpus: Path, tmp_path: Path, *extra: str) -> list[str]:
     ]  # fmt: skip
 
 
-def test_tkh_eval_writes_the_report_and_exits_zero_whatever_the_gate_says(
-    recorded, tmp_path, capsys
-):
+def test_tkh_eval_writes_the_report_and_exits_zero_whatever_the_gate_says(recorded, tmp_path, capsys):
     code = cli.main(eval_args(recorded, tmp_path))
     assert code == 0
     text = (tmp_path / "reports" / "p0-gate.md").read_text(encoding="utf-8")
@@ -436,10 +433,94 @@ def test_tkh_eval_with_fewer_than_two_gate_pairs_is_an_error(corpus, tmp_path, c
     assert "at least 2 gate pairs" in capsys.readouterr().err
 
 
-def test_clip_paths_are_relative_to_the_manifest_directory(
-    corpus, tmp_path, monkeypatch
-):
+def test_clip_paths_are_relative_to_the_manifest_directory(corpus, tmp_path, monkeypatch):
     elsewhere = tmp_path / "elsewhere"
     elsewhere.mkdir()
     monkeypatch.chdir(elsewhere)  # the clips are not below the working directory
     assert cli.main(eval_args(corpus, tmp_path)) == 0
+
+
+def fallback_pair(i, *, speaker="v-a", error_fallback=True, scored=False):
+    """A gate pair whose error clip had a syllable with no nucleus: unscored (R104), or with
+    `scored` its overall the fallback prior (results from before R104)."""
+    pair = f"gate-{i:02d}"
+    measured = Syllable("4", "4", 0.9, 0.4, "Full", [])
+    missed = Syllable("3", None, 0.5, None, "NotMeasured", [], ["NoNucleus"])
+    if scored:
+        missed = Syllable("3", None, 0.047, None, "Partial", [], ["Unvoiced"])
+    correct = res(f"{pair}-correct", 0.9, pair=pair, label="correct", syllables=[measured])
+    error = res(
+        f"{pair}-error",
+        (0.047 if scored else None) if error_fallback else 0.001,
+        pair=pair,
+        label="tone_error",
+        syllables=[measured, missed if error_fallback else Syllable("3", "2", 0.001, 3.0, "Full", [])],
+    )
+    correct.speaker = error.speaker = speaker
+    return [correct, error]
+
+
+def test_a_syllable_with_no_nucleus_leaves_its_clip_unscored(tmp_path):
+    results = fallback_pair(1) + fallback_pair(2) + fallback_pair(3, error_fallback=False)
+    text = render(results, tmp_path)
+    table_text = "\n".join(report._failure(metrics.Failure(result=results[1], reason="x")))
+    assert "no nucleus (fallback)" in table_text
+    section = text.split("## Syllables with no nucleus\n", 1)[1].split("\n## ", 1)[0]
+    assert "- v-a: 2 of 9 gate syllables had no nucleus; 2 of 6 clips rest on one" in section
+    assert "- gate-01-error" in section and "- gate-02-error" in section and "gate-03-error" not in section
+    assert "- gate-01-error" in text.split("## Clips with no score\n", 1)[1]
+
+
+def test_results_from_before_r104_still_show_the_fallback(tmp_path):
+    results = fallback_pair(1, scored=True) + fallback_pair(2, scored=True)
+    assert results[1].decided_by_fallback and results[1].missing
+    section = render(results, tmp_path).split("## Syllables with no nucleus\n", 1)[1]
+    assert "- gate-01-error" in section and "- gate-02-error" in section
+
+
+def test_an_unpitched_syllable_is_evidence_not_a_fallback(tmp_path):
+    # R103: a creaky vowel is scored on the calibration's unpitched evidence: it has no distance,
+    # but it is a measurement, and the report says which.
+    results = fallback_pair(1, error_fallback=False) + fallback_pair(2, error_fallback=False)
+    creaky = Syllable("3", "3", 0.7, None, "Partial", [], ["Unpitched"])
+    results[1].syllables[1] = creaky
+    assert not creaky.fallback and creaky.unpitched
+    assert "Syllables with no nucleus" not in render(results, tmp_path)
+    table_text = "\n".join(report._failure(metrics.Failure(result=results[1], reason="x")))
+    assert "unpitched (creak evidence)" in table_text
+
+
+def test_an_unpitched_syllable_without_evidence_is_named_as_such(tmp_path):
+    # R103: with no unpitched evidence in the calibration nothing was measured, and the clip has
+    # no score (R104), so the label must not claim creak evidence.
+    results = fallback_pair(1, error_fallback=False) + fallback_pair(2, error_fallback=False)
+    bare = Syllable("3", None, 0.047, None, "NotMeasured", [], ["Unpitched"])
+    results[1].syllables[1] = bare
+    results[1].overall = None
+    assert not bare.fallback and bare.unpitched
+    table_text = "\n".join(report._failure(metrics.Failure(result=results[1], reason="x")))
+    assert "unpitched (no evidence)" in table_text and "creak evidence" not in table_text
+    assert "- gate-01-error" in render(results, tmp_path).split("## Clips with no score\n", 1)[1]
+
+
+def test_a_creaky_tail_is_named_in_the_failure_table():
+    # R108: a shape whose pitch gives way to creak is measured, and its tail is evidence.
+    results = fallback_pair(1, error_fallback=False) + fallback_pair(2, error_fallback=False)
+    results[1].syllables[1] = Syllable("4", "4", 0.6, 1.2, "Partial", [], ["CreakyTail"])
+    table_text = "\n".join(report._failure(metrics.Failure(result=results[1], reason="x")))
+    assert "Partial (creaky tail)" in table_text
+    # The name a miss had before R102 still reads as one.
+    assert Syllable("3", None, 0.047, None, "Partial", [], ["Unvoiced"]).fallback
+
+
+def test_no_fallback_no_section(tmp_path):
+    results = fallback_pair(1, error_fallback=False) + fallback_pair(2, error_fallback=False)
+    assert "Syllables with no nucleus" not in render(results, tmp_path)
+
+
+def test_tkh_eval_grades_only_the_speakers_asked_for(corpus, tmp_path, capsys):
+    # A fit is scored on the speakers it was not fitted on (ruling R109).
+    assert cli.main(eval_args(corpus, tmp_path, "--speaker", "dj")) == 0
+    capsys.readouterr()
+    assert cli.main(eval_args(corpus, tmp_path, "--speaker", "nobody")) == 1
+    assert "no clips for speaker(s) nobody" in capsys.readouterr().err

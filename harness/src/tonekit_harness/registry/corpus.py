@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from functools import cached_property
 from pathlib import Path
 
+from ..contracts.pack import PackInfo
 from ..contracts.registry import CorpusFile, CorpusMeta, RegistryError, Speaker, load_corpus_file
 from .errors import reason
 from .items import CorpusClip
@@ -38,15 +39,16 @@ class Corpus:
         return corpus_clips(self.meta, self.speakers, self.manifest_path)
 
 
-def load_corpus(directory: Path) -> Corpus:
-    """Read `<directory>/corpus.toml`. Raises `RegistryError` naming the file if it is missing,
-    unreadable or invalid, or if its id is not the name of the directory it is in (the directory
-    is how a corpus is found, and the id is what a selection and a gate name it by)."""
+def load_corpus(directory: Path, pack: PackInfo | None = None) -> Corpus:
+    """Read `<directory>/corpus.toml`, its speakers' accents checked against `pack` (default:
+    packs/cmn/cmn.toml). Raises `RegistryError` naming the file if it is missing, unreadable or
+    invalid, or if its id is not the name of the directory it is in (the directory is how a corpus
+    is found, and the id is what a selection and a gate name it by)."""
     path = directory / "corpus.toml"
     if not path.is_file():
         raise RegistryError(f"{path}: no corpus.toml (every directory under corpora/ is a corpus)")
     try:
-        file = load_corpus_file(path)
+        file = load_corpus_file(path, pack=pack)
     except (OSError, UnicodeDecodeError) as e:
         raise RegistryError(f"{path}: cannot read the corpus file: {reason(e)}") from e
     if file.corpus.id != directory.name:

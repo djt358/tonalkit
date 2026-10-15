@@ -7,7 +7,7 @@ import difflib
 import tomllib
 from collections import Counter
 from collections.abc import Collection
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 from textwrap import indent
 from typing import Annotated, Literal
 
@@ -16,6 +16,7 @@ from pydantic import Field, ValidationError, ValidationInfo, model_validator
 from ..manifest import CardSet
 from .base import StrictModel, format_validation_error
 from .registry import Kind, Split
+from .relpath import is_relative_inside
 
 _ID = r"^[a-z0-9][a-z0-9-]*$"
 _Nonempty = Annotated[str, Field(min_length=1)]
@@ -52,8 +53,9 @@ class Thresholds(StrictModel):
 
 class Criterion(StrictModel):
     metric: str = Field(min_length=1)
-    min: float | None = None
-    max: float | None = None
+    # Finite only: a nan bound compares false, so a gate with one would pass or fail by accident.
+    min: float | None = Field(default=None, allow_inf_nan=False)
+    max: float | None = Field(default=None, allow_inf_nan=False)
 
     @model_validator(mode="after")
     def _one_bound(self) -> Criterion:
@@ -67,8 +69,8 @@ class Criterion(StrictModel):
 
 
 class Requires(StrictModel):
+    # First-language requirements wait for P1's contract (R73): there is no Speaker.l1 yet.
     speakers_min: int = Field(default=1, ge=1)
-    l1_min: int = Field(default=1, ge=1)
 
 
 class Report(StrictModel):
@@ -86,8 +88,7 @@ class GateInput(StrictModel):
 
     @model_validator(mode="after")
     def _file_is_relative(self) -> GateInput:
-        path = PurePosixPath(self.file)
-        if not self.file or path.is_absolute() or ".." in path.parts:
+        if not is_relative_inside(self.file):
             raise ValueError(f"input {self.metric!r}: file {self.file!r} must be a relative path with no '..'")
         return self
 

@@ -1,5 +1,5 @@
-"""What the contracts need to know of a language pack: its lect and tone ids. The tone inventory
-comes from the pack TOML (`[[tone]] id`), never from a list in code."""
+"""What the contracts need to know of a language pack: its lect, tone ids and accent ids. They come
+from the pack TOML (`[[tone]] id`, `[[accent]] id`), never from a list in code."""
 
 from __future__ import annotations
 
@@ -18,6 +18,7 @@ class PackError(ValueError):
 class PackInfo:
     lect: str
     tone_ids: frozenset[str]
+    accent_ids: frozenset[str]
 
 
 def default_pack_path() -> Path:
@@ -25,7 +26,7 @@ def default_pack_path() -> Path:
 
 
 def load_pack_info(pack: str | Path | None) -> PackInfo:
-    """The lect and tone ids of the pack TOML at `pack` (default: packs/cmn/cmn.toml)."""
+    """The lect, tone ids and accent ids of the pack TOML at `pack` (default: packs/cmn/cmn.toml)."""
     path = Path(pack) if pack is not None else default_pack_path()
     try:
         doc = tomllib.loads(path.read_text(encoding="utf-8"))
@@ -34,13 +35,19 @@ def load_pack_info(pack: str | Path | None) -> PackInfo:
     lect = doc.get("pack", {}).get("lect")
     if not isinstance(lect, str) or not lect:
         raise PackError(f"{path}: the pack has no [pack] lect")
-    ids: list[str] = []
-    for tone in doc.get("tone", []):
-        if "id" not in tone:
-            raise PackError(f"{path}: a [[tone]] without an id")
-        if tone["id"] in ids:
-            raise PackError(f"{path}: duplicate tone id {tone['id']!r}")
-        ids.append(tone["id"])
-    if not ids:
+    tones = _ids(doc, "tone", path)
+    if not tones:
         raise PackError(f"{path}: the pack has no [[tone]] entries")
-    return PackInfo(lect=lect, tone_ids=frozenset(ids))
+    return PackInfo(lect=lect, tone_ids=frozenset(tones), accent_ids=frozenset(_ids(doc, "accent", path)))
+
+
+def _ids(doc: dict, table: str, path: Path) -> list[str]:
+    """The `id` of each `[[table]]` entry; a missing or repeated id is an error."""
+    ids: list[str] = []
+    for entry in doc.get(table, []):
+        if "id" not in entry:
+            raise PackError(f"{path}: a [[{table}]] without an id")
+        if entry["id"] in ids:
+            raise PackError(f"{path}: duplicate {table} id {entry['id']!r}")
+        ids.append(entry["id"])
+    return ids

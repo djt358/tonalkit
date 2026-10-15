@@ -8,6 +8,7 @@ from pathlib import Path
 
 from support import candidate
 
+from tonekit_harness.contracts.registry import hashed_split
 from tonekit_harness.manifest import Clip, Condition
 
 # What the tests treat as the data register: the checkout's real ids for the datasets, and the
@@ -21,19 +22,32 @@ REGISTER = {
     "synthetic-world": "deny",
 }
 
-# Their splits are the pinned hashed ones (test_registry.GOLDEN_SPLITS).
+# Their splits are the pinned hashed ones (test_registry.GOLDEN_SPLITS): a public or synthetic
+# corpus must store a speaker's hash split (R82).
 CALIB, DEV, HELDOUT = "SSB0001", "SSB0002", "SSB0004"
+SYNTHETIC_CALIB = "s2"  # hashed_split("s2") == "calib"
 
 
-def speaker(speaker_id: str, split: str = "gate", accent: str = "cmn-standard", **extra) -> dict:
+def ids_in_split(split: str, n: int, prefix: str = "h") -> list[str]:
+    """The first `n` ids `<prefix><i>` whose hash split is `split`, for public corpora of many
+    speakers."""
+    out, i = [], 0
+    while len(out) < n:
+        if hashed_split(f"{prefix}{i}") == split:
+            out.append(f"{prefix}{i}")
+        i += 1
+    return out
+
+
+def speaker(speaker_id: str, split: str = "gate", accent: str | None = None, **extra) -> dict:
+    """A `[[speaker]]`; with no `accent` it is graded against the default for its
+    `grew_up_hearing` (R82)."""
     return {"id": speaker_id, "accent": accent, "split": split} | extra
 
 
 def volunteer(code: str, hearing: str, split: str = "gate") -> dict:
-    accent = "cmn-TW" if hearing == "taiwan" else "cmn-standard"
-    return speaker(
-        f"v-{code.lower()}", split, accent, background="native", grew_up_hearing=hearing, sessions=[code]
-    )
+    """A volunteer as intake writes one: no stored accent (R82)."""
+    return speaker(f"v-{code.lower()}", split, background="native", grew_up_hearing=hearing, sessions=[code])
 
 
 def clip(
@@ -107,9 +121,11 @@ def build_composed_root(root: Path) -> Path:
     """A data root with the four kinds of corpus the registry composes:
 
     - `volunteers-2026-10` (recorded, volunteer-corpus): two gate speakers, 2 gate + 1 register clips each
-    - `dj-2026-10` (recorded, dj-corpus): one gate speaker `dj`, 2 gate clips
+    - `dj-2026-10` (recorded, dj-corpus): one gate speaker `dj` (stored accent cmn-TW), 2 gate clips
     - `aishell3` (public, aishell-3): calib, dev and heldout speakers, 2 gate clips each
-    - `smoke` (synthetic, synthetic-world): one calib speaker, 2 synthetic clips
+    - `smoke` (synthetic, synthetic-world): one calib speaker `s2`, 2 synthetic clips
+
+    The volunteers store no accent (taiwan and mainland: cmn-TW and cmn-standard by default).
     """
     v = "volunteer-corpus"
     add_corpus(
@@ -122,7 +138,7 @@ def build_composed_root(root: Path) -> Path:
     )  # fmt: skip
     add_corpus(
         root, "dj-2026-10", kind="recorded", source="dj-corpus",
-        speakers=[speaker("dj", "gate", "cmn-standard")], clips=speaker_clips("dj", "dj-corpus"),
+        speakers=[speaker("dj", "gate", "cmn-TW")], clips=speaker_clips("dj", "dj-corpus"),
     )  # fmt: skip
     add_corpus(
         root, "aishell3", kind="public", source="aishell-3",
@@ -131,6 +147,7 @@ def build_composed_root(root: Path) -> Path:
     )  # fmt: skip
     add_corpus(
         root, "smoke", kind="synthetic", source="synthetic-world",
-        speakers=[speaker("s1", "calib")], clips=speaker_clips("s1", "synthetic-world", set="synthetic"),
+        speakers=[speaker(SYNTHETIC_CALIB, "calib")],
+        clips=speaker_clips(SYNTHETIC_CALIB, "synthetic-world", set="synthetic"),
     )  # fmt: skip
     return root

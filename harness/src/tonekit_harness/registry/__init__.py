@@ -12,21 +12,21 @@ from .accent import accent_for
 from .corpus import Corpus, load_corpus
 from .errors import SelectionError
 from .items import CorpusClip, qualify
-from .options import add_data_option, data_root_from
-from .refusals import RefusalError
+from .refusals import Refusal, RefusalError
 from .root import DataRoot
-from .selection import Selection
+from .selection import FittingSelection, GateSelection, Selection
 
 __all__ = [
     "Corpus",
     "CorpusClip",
     "DataRoot",
+    "FittingSelection",
+    "GateSelection",
+    "Refusal",
     "RefusalError",
     "Selection",
     "SelectionError",
     "accent_for",
-    "add_data_option",
-    "data_root_from",
     "load_corpus",
     "qualify",
 ]

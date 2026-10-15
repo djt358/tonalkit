@@ -1,18 +1,17 @@
 //! The syllable-duration prior of the closed-set DP (spec §7.2).
 
-use tonekit_core::Nucleus;
-
 /// Seconds per frame.
 pub(crate) const FRAME_S: f64 = 0.01;
 
-/// The speaking rate `r` in seconds per syllable: the median interval between consecutive nuclei
-/// if there are at least two, else `default_s`.
+/// The speaking rate `r` in seconds per syllable: the median interval between consecutive syllable
+/// anchors (nucleus frames, or in the count stage the extra candidates' too, ruling R102) if there
+/// are at least two, else `default_s`.
 ///
-/// Nuclei are taken in frame order. A median that is not a positive number (only possible with
+/// Anchors are taken in frame order. A median that is not a positive number (only possible with
 /// hand-built nuclei sharing a frame) also falls back to `default_s`, so `r` is always usable as a
 /// log-scale centre.
-pub(crate) fn rate_s(nuclei: &[Nucleus], default_s: f64) -> f64 {
-    let mut frames: Vec<u32> = nuclei.iter().map(|n| n.frame).collect();
+pub(crate) fn rate_s(frames: &[u32], default_s: f64) -> f64 {
+    let mut frames = frames.to_vec();
     frames.sort_unstable();
     let mut gaps: Vec<u32> = frames.windows(2).map(|w| w[1] - w[0]).collect();
     if gaps.is_empty() {
@@ -44,14 +43,8 @@ pub(crate) fn log_prior(d_s: f64, r_s: f64, sigma: f64) -> f64 {
 mod tests {
     use super::*;
 
-    fn nuclei(frames: &[u32]) -> Vec<Nucleus> {
-        frames
-            .iter()
-            .map(|&frame| Nucleus {
-                frame,
-                strength_db: 20.0,
-            })
-            .collect()
+    fn nuclei(frames: &[u32]) -> Vec<u32> {
+        frames.to_vec()
     }
 
     #[test]

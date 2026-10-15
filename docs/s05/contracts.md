@@ -12,6 +12,9 @@ forks a format locally.*
 | Manifest additions | `manifest.jsonl` in a corpus dir | `tonekit_harness.manifest` (extended) |
 | Gate file | `gates/*.toml` (repo) | `tonekit_harness.contracts.gate` |
 | Purge log | `$TONEKIT_DATA/purge-log.jsonl` | `tonekit_harness.contracts.registry` |
+| Eval results (per clip) | `$TONEKIT_DATA/reports/<corpus>.results.json` | `tonekit_harness.eval_results` |
+| Relabel export and log | `relabels-<corpus>.json` (the review page's download); `corpora/<id>/relabels.jsonl` | `tonekit_harness.contracts.relabel` |
+| tonekit's own JSON (analysis, assessment, registers) and pack calibration | the library's API; `packs/<lect>/<lect>.calib.json` (repo) | Rust: `tonekit_core` types, `tonekit_pack::Calibration` (§8) |
 
 All models are pydantic v2 with `extra="forbid"`, like `manifest.Clip`. `tkh schema` writes their
 JSON Schemas to `kit/schema/`, and the kit's JavaScript tests validate against those.
@@ -42,6 +45,7 @@ intended = { id = "g01", tones = ["4", "1", "3"], labels = ["yi", "bei", "shui"]
 produced_tones = ["4", "1", "3"] # what the card asks to be said
 distractors = []                 # candidates, same shape as `intended`
 prompt_note = ""                 # optional, shown under the card (see the error-card example)
+prompt_note_traditional = ""     # optional, needs prompt_note; shown instead when the speaker reads traditional (R88)
 status = "unverified"            # unverified | approved (DJ audit); the kit ships approved cards only
 
 [[card]]
@@ -56,6 +60,7 @@ context = "phrase"
 intended = { id = "g01", tones = ["4", "1", "3"], labels = ["yi", "bei", "shui"] }
 produced_tones = ["4", "1", "4"]
 prompt_note = "Read it as written: 睡 as in 睡觉."
+prompt_note_traditional = "Read it as written: 睡 as in 睡覺."
 status = "unverified"
 ```
 
@@ -66,21 +71,29 @@ Rules the model enforces:
 - `correct` ⇒ `produced_tones == intended.tones`;
 - `tone_error` ⇒ they differ in exactly one position;
 - pairs are scoped to `(set, pair)`; `pair` is required in `gate` and `diag_t23` and optional
-  elsewhere; a pair in those sets is exactly one `correct` and one `tone_error` card with equal
-  `intended.tones` (R66). `diag_minimal` cards are all `correct` readings of different words; a
-  card lists the other members of its set as `distractors`, and their `pair` (if any) only groups
-  them (R76);
+  elsewhere; a pair in those two sets is exactly one `correct` and one `tone_error` card with equal
+  `intended.tones` (R66, R81). In other sets `pair` only groups cards. `diag_minimal` cards are all `correct` readings of different words; a
+  card lists at least one other member's intended reading as a `distractor` (R76, R81);
 - `diag_context` cards contrast the citation ("solitaire", `isolated`) and sandhi (`phrase`)
-  readings of the same syllables: 一 / 一杯 / 一块, 不 / 不对, 水 / 水果 (R76);
+  readings of the same syllables: 一 / 一杯 / 一块, 不 / 不对, 水 / 水果; they are `correct`
+  readings (R76, R81);
 - `context = "phrase"` ⇒ each card's own `produced_tones` equal the sandhi of its own
-  `citation_pinyin` (一, 不, T3 runs with every binary bracketing; R63–R65), and `pinyin` shows
+  `citation_pinyin` (一, 不, T3 runs with every binary bracketing; R63–R65; a neutral syllable
+  written as neutral keeps the T3 before it, R89), and `pinyin` shows
   `produced_tones`. On a correct card that is also `intended.tones`; on an error card it is the
   erroneous surface form. An error whose changed syllable alters a neighbour's sandhi changes two
   surface tones and is refused: pick error words that change one surface tone only;
 - `context = "isolated"` ⇒ `produced_tones` equal the citation tones, no sandhi;
-- `text_traditional`, when present, has the same length as `text`.
+- a `correct` card has exactly one native reading: a phrase whose citation allows more than one
+  surface (a T3 run of three or more with two groupings, e.g. 一把雨伞) is refused, because one
+  `produced_tones` list would grade the other native reading wrong (R89);
+- `text_traditional`, when present, has the same length as `text`; `prompt_note_traditional`
+  only appears with `prompt_note`.
 
-`status = "approved"` is set by DJ's audit only.
+`status = "approved"` is set by DJ's audit only: the deck builder reads
+`kit/deck/sources/approvals.csv` (`card_id, fingerprint, decision, note`, written by `tkh deck
+approve`) and approves a card only while its fingerprint still matches; `tkh deck check --ship`
+fails unless every card is approved and every pair and minimal set is whole (R91).
 
 ## 2. Session bundle (the zip the kit exports)
 
@@ -129,7 +142,9 @@ tonekit-<deck id>-<session code>.zip
   - `script`: `simplified` or `traditional` (R74), asked with the reading question; the kit shows
     `text_traditional` where a card has one.
 - **`device`** records the actual input rate and the constraints the browser reported, not the
-  ones requested.
+  ones requested. `constraints` always has all three keys, each `true`, `false` or `null`; `null`
+  means the browser didn't report it (iOS Safari omits `noiseSuppression` and `autoGainControl`;
+  R83).
 
 ## 3. Data root and corpus registry (`$TONEKIT_DATA`)
 
@@ -141,9 +156,27 @@ $TONEKIT_DATA/
   corpora/<corpus id>/corpus.toml
   corpora/<corpus id>/manifest.jsonl
   corpora/<corpus id>/audio/...
+  corpora/<corpus id>/audio/<CODE>/<card id>.wav  # intake: a session's clips, byte for byte
+  corpora/<corpus id>/sessions/<CODE>.json        # intake: the session's session.json, byte for byte
+  corpora/<corpus id>/relabels.jsonl              # tkh relabel: append-only log of decisions and row changes (§7)
   inbox/                      # bundles waiting for intake
+  stale/<corpus id>.json      # outputs made from this corpus are stale (purge, relabel); cleared by the next run
+  reports/<corpus id>.md      # where intake tells `tkh eval` to write (reports list clips by session code)
+  reports/<corpus id>.results.json  # `tkh eval --results`: every clip's grading, which `tkh review` reads
+  review/<corpus id>/index.html     # `tkh review`: the listening page; links the audio, opened from disk (§7)
   purge-log.jsonl
 ```
+
+A stale marker (`contracts.registry.StaleMarker`) is `{"corpus": "<id>", "reasons": [{"reason":
+"purged session K7Q2MD", "marked_at": "<UTC time>"}]}`; marking again appends a reason, and a
+marker that can't be read is replaced by one that says so. A relabel that changes rows marks the
+corpus with `relabelled <n> clips (<file name>)` (no clip ids).
+
+A pack fitted on corpora lists them in its `PROVENANCE.toml` as `corpora = ["<corpus id>", ...]`
+beside its `[[source]]` rows (ruling R113). `tkh provenance` fails while
+`$TONEKIT_DATA/stale/<corpus id>.json` exists for a listed corpus; `tkh provenance --data PATH`
+names another data root, and a data root that doesn't exist (CI) holds no marker. The violation
+counts the marker's reasons and never prints them, since they name sessions.
 
 `corpus.toml`:
 
@@ -159,7 +192,7 @@ manifest = "manifest.jsonl"
 id = "v-k7q2md"                # v-<session code> for volunteers; corpus-native ids for public sets
 background = "native"
 grew_up_hearing = "taiwan"
-accent = "cmn-TW"              # the accent this speaker is graded against (pack accent id)
+accent = "cmn-TW"              # optional: the pack accent id this speaker is graded against (R82)
 split = "gate"                 # gate | dev | calib | heldout
 sessions = ["K7Q2MD"]
 ```
@@ -167,8 +200,10 @@ sessions = ["K7Q2MD"]
 - **Splits.**
   - Volunteer and DJ speakers default to `gate`.
   - Public corpora are split by speaker, deterministically by hash: calib 60%, dev 20%,
-    heldout 20%.
-- **Default `accent`.** `taiwan` maps to `cmn-TW` and everything else to `cmn-standard`.
+    heldout 20% (R69). For `public` and `synthetic` corpora the model refuses a stored split that
+    differs from the hash; `recorded` corpora can move speakers between splits (R72, R82).
+- **Default `accent`.** When a speaker has none: `taiwan` maps to `cmn-TW` and everything else to
+  `cmn-standard`. Accents are checked against the pack's accent ids at load (R82).
 - **Refusals.**
   - Anything that fits parameters refuses `gate` and `heldout` speakers.
   - Gates refuse `synthetic` corpora, plus any source not cleared in the register for the use.
@@ -188,7 +223,20 @@ context: "phrase" | "isolated" | None
 ```
 
 `speaker` refers to a `[[speaker]]` id in the clip's corpus, and graders read the accent from
-there. The CLI's `--accent` stays as an override.
+there. Intake writes each clip's `source` as its corpus's `source`: WORLD resynthesis refuses
+`volunteer-corpus` clips by that field (R80). The CLI's `--accent` stays as an override.
+
+Rows intake writes: `id` is `<CODE>-<card id>`, and `pair` is `<CODE>-<deck pair>`, since a
+manifest holds many speakers and a gate pair is one speaker's two readings (the deck's pair is
+`card`'s). `condition` is `{"noise": "uncontrolled", "distance": "handheld"}`; `needs_listen` is
+false. A recorded `gate` or `diag_t23` card whose twin was skipped gets no row (pairs are graded
+whole).
+
+Rows `tkh relabel` changes (§7, R112): `produced_tones` become what the listener heard and `label`
+follows them (`correct` when they are the intended reading, else `tone_error`); "unclear" sets
+`needs_listen`; "exclude" removes the row. When a pair of a pair set is no longer one `correct`
+and one `tone_error` row, both rows lose their `pair` (`null`): a `gate` row with no pair is kept
+for fitting and listed by the gate report, but is not in any pair. Every row still validates.
 
 ## 5. Gate file (`gates/<id>.toml`)
 
@@ -240,17 +288,131 @@ Removes, for that session:
 - the audio;
 - the manifest rows;
 - the speaker entry;
-- analysis-cache entries (keyed by WAV hash);
-- review pages that embed the audio;
-- everything intake wrote for it: the copy of `session.json`, its QC rows and QC report lines;
-- any bundle left in `inbox/`.
+- analysis-cache entries: the cache keys an entry by a hash over the WAV, the register and the
+  tonekit build, so one session's entries can't be picked out and purge clears the whole cache;
+- review pages that link the audio: every `review/<corpus>/` whose files mention the session goes
+  whole (the next `tkh review` makes a new one);
+- the session's entries in each corpus's `relabels.jsonl` (by `session`, or a clip id starting
+  `<CODE>-`), and any new manifest a killed `tkh relabel` left in the corpus directory;
+- reports under `$TONEKIT_DATA/reports/` that mention the session, the `tkh eval --results`
+  files among them (they list clips by id; the next `tkh eval` makes new ones);
+- everything intake wrote for it: the copy of `session.json` (intake keeps no QC rows yet), and
+  any staging area an interrupted intake left;
+- any bundle left in `inbox/` (by name, or by the code in its `session.json`).
 
-What the engine can't reach is DJ's: the original zip in Messages, Mail, Downloads or Files. The
-purge output ends with that reminder.
+What the engine can't reach is DJ's: the original zip in Messages, Mail, Downloads or Files, and
+any `relabels-*.json` he exported from a review page. The purge output ends with that reminder.
+A review page drops the decisions it kept in the browser about sessions its corpus no longer has
+the next time a page made after the purge is opened.
 
 Then:
 - **Stale outputs:** it marks the scoreboard and any calibration fitted on that corpus as stale.
-  The next `tkh score` re-runs, and a stale calibration can't ship.
+  The next `tkh score` re-runs, and a stale calibration can't ship: `tkh provenance` fails for a
+  pack whose `PROVENANCE.toml` lists the corpus under `corpora` until it is refitted (§3, R113).
 - **Log:** it appends `{"session", "purged_at", "files_removed", "corpora"}` to `purge-log.jsonl`;
   `files_removed` is a count, never names (R68).
 - **Repeat runs:** it is idempotent, and it reports "nothing found" for an unknown code.
+
+## 7. Listen and relabel (`tkh review`, `tkh relabel`)
+
+Labels come from the cards; a listener checks what was said. `tkh review --corpus ID` writes
+`review/<corpus>/index.html` under the data root: one self-contained page (script, style and data
+inline, so it works opened from disk; a Content-Security-Policy with no network source; audio by
+relative links under the data root). It reads the scorer's view from `tkh eval --results`
+(`tonekit.eval-results.v1`, `tonekit_harness.eval_results`: per clip `overall`, per syllable
+`expected`, `heard`, `p_correct`, `measured`, `issues`). The page keeps decisions in the browser
+(`localStorage`, per corpus) and exports them.
+
+The export, `relabels-<corpus>.json` (`contracts.relabel.RelabelExport`):
+
+```json
+{"schema": "tonekit.relabels.v1", "corpus": "volunteers-s05-v1", "who": "DJ",
+ "exported_at": "<UTC time>",
+ "decisions": [{"clip": "K7Q2MD-g01-e", "verdict": "heard", "tones": ["4", "1", "3"],
+                "decided_at": "<UTC time>"}]}
+```
+
+`verdict` is `as_card`, `heard` (with `tones`, one pack tone id per syllable), `unclear` or
+`exclude` (no tones); each clip at most once.
+
+`tkh relabel FILE --corpus ID` rebuilds each decided clip's row from the row intake wrote and its
+latest decision (§4), keeps pairs whole or takes them apart, writes the manifest in one rename,
+marks the corpus stale (§3), and appends to `corpora/<id>/relabels.jsonl`
+(`contracts.relabel.LogEntry`), one line per clip with a new decision or a changed row:
+
+```json
+{"session": "K7Q2MD", "clip": "K7Q2MD-g01-e", "applied_at": "<UTC time>",
+ "decision": {"verdict": "heard", "tones": ["4", "1", "3"], "decided_at": "<UTC time>", "who": "DJ"},
+ "row": {"before": {"...": "the manifest row"}, "after": {"...": "the new row, or null when excluded"}}}
+```
+
+`decision` is null for a row changed only because its twin's relabel broke the pair; `row` is null
+when the decision changes nothing. A clip's first `row.before` is the row intake wrote, so every
+relabel starts from the card's reading. A decision older (`decided_at`) than the one applied is
+skipped; one that says what the applied one says changes nothing, so applying a file twice is a
+no-op and a newer export replaces older decisions. Decisions for clips the corpus does not have
+are skipped; a decision that does not fit its clip (tone count, unknown tone, `as_card` with other
+tones) refuses the whole file.
+
+## 8. tonekit's formats the harness and apps read
+
+These are the library's own types (spec §5), not pydantic models: the owner is the Rust serde type
+in `tonekit-core` (`tonekit-pack` for the calibration), Swift gets them through UniFFI and Python as
+JSON (`tonekit_py`). Every change below is additive: a new field has a serde default, so JSON
+written before it still parses, and a new `MeasureIssue` case must be handled by an exhaustive Swift
+`switch` (`scripts/check-swift-bindings.sh` checks the smoke test names every case).
+
+**`Analysis.sonority`** (R102): one number per frame, on the f0 grid, in [0, 1]: the share of the
+frame's energy between 150 Hz and 2 kHz. Default `[]`: an older analysis parses, and its decode has
+no count stage candidates.
+
+**`MeasureIssue`**, new cases (JSON strings, like the old ones):
+- `NoNucleus` (R102, R104): `NotMeasured`; no anchor, pitched or unpitched, could hold the
+  syllable. The assessment's `overall` is then `null` unless the syllable has a confusion hit.
+  Replaces `Unvoiced` for that meaning; `Unvoiced` still parses and still means no voice at all,
+  and the harness reads a legacy `Partial [Unvoiced]` as a fallback.
+- `Unpitched` (R103, R119): a syllable with speech energy and a vowel's spectrum but no pitch.
+  `Partial` when the calibration's `unpitched` table tells the tones apart at its place; otherwise
+  `NotMeasured`, and `overall` is `null` as for `NoNucleus`.
+- `CreakyTail` (R108): among a pitched syllable's `Partial` issues when its pitch gives way to at
+  least 50 ms of creak.
+
+**Calibration** (`<lect>.calib.json`, `tonekit_pack::Calibration`; unknown keys are refused), three
+optional sections:
+
+```json
+{"unpitched":   {"phrase_final": {"1": -3.2189, "2": -3.2189, "3": -3.2189, "4": -3.2189, "5": -3.2189},
+                 "other":        {"1": -3.6376, "...": "every tone of the pack"}},
+ "creaky_tail": {"phrase_final": {"1": -2.3546, "...": "..."}, "other": {"...": "..."}},
+ "rolling_register": {"half_life_s": 30.0, "max_share": 0.03}}
+```
+
+- `unpitched` and `creaky_tail` (R103, R108): `ln P(observation | tone)` for the phrase's last
+  syllable (`phrase_final`) and every other one (`other`); each names every tone of the pack, each
+  value finite and at most 0. A place whose values are all within 1e-9 of each other carries no
+  evidence: an unpitched syllable there is `NotMeasured` (R119), and a creaky tail there adds the
+  same to every tone. `tkh fit` writes both (R109, R110); the shipped `unpitched` table is pooled.
+- `rolling_register` (R111): both keys required when the section is present, each a number or
+  `null` (no decay, no cap); `half_life_s` > 0, `max_share` in (0, 1) and only with a half-life.
+  Without the section: 30 s and 0.03.
+
+**Registers.** `Register` is `{"floor_st", "median_st", "ceil_st", "n_syllables"}` (semitones re
+55 Hz, unchanged). The rolling register (R111) and its four-number form (R120):
+
+| | Full (R111) | Lite (R120) |
+|---|---|---|
+| What the app keeps | `RollingRegister`: `{"register": Register, "pool": [540 numbers]}` (seconds of voiced speech per 0.1 st bin from −6 st, each finite and ≥ 0; an unusable pool starts afresh) | a `Register` (one `analyze` refuses starts afresh) |
+| Rust | `tonekit::roll_register(previous, &analysis, &assessment, &params)` | `tonekit::roll_register_lite(..)`, same arguments |
+| Swift | `rollRegister(previous:analysis:assessment:pack:params:)` (`params` default `nil`: `pack.rollingParams()`) | `rollRegisterLite(..)`, same labels |
+| Python | `roll_register(previous_json, analysis_json, assessment_json, pack_toml, calib_json, params_json=None)` | `roll_register_lite(..)`, same arguments |
+
+`RollingParams` is `{"half_life_s": number or null, "max_share": number or null}`, as in the
+calibration; Python's `rolling_params(pack_toml, calib_json)` returns a pack's. Bad parameters are
+`InvalidRequest` (Python: `ValueError`).
+
+**Where `tkh eval` takes a clip's register** (`--register-from`, also `tkh fit --register-from`;
+written to eval results as `register_from`): `drill` (the default, R46), `speaker` (the speaker's
+other clips pooled, R107), `rolling` (causal: the drill, then the speaker's earlier clips in reading
+order, R111) or `rolling-lite` (the same with the four-number form, R120). The rolling choices read
+reading order from `corpora/<id>/sessions/<CODE>.json` (§3); a speaker without one keeps manifest
+order, and a session file that can't be read is an error.

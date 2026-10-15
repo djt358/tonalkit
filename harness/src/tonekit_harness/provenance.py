@@ -1,5 +1,6 @@
-"""Data-provenance check: every PROVENANCE.toml source must be cleared by data-register.csv, and
-every data file in a pack must be attested by the pack's PROVENANCE.toml."""
+"""Data-provenance check: every PROVENANCE.toml source must be cleared by data-register.csv, every
+data file in a pack must be attested by the pack's PROVENANCE.toml, and no corpus a pack was fitted
+on may be stale (ruling R113, `provenance_stale`)."""
 
 from __future__ import annotations
 
@@ -12,8 +13,13 @@ import tomllib
 from collections.abc import Iterable
 from pathlib import Path
 
+from .contracts.registry import RegistryError
+from .data_option import add_data_option, root_from
+from .provenance_stale import corpora_of, stale_violations
+
 _VALUES = {"allow", "verify", "deny", "n/a"}
-_TOP_LEVEL_KEYS = ("artifact", "artifacts", "note", "source", "signoff")
+# `corpora`: the corpus ids a fit in the pack used (ruling R113).
+_TOP_LEVEL_KEYS = ("artifact", "artifacts", "corpora", "note", "source", "signoff")
 _MANIFEST_NAME = "PROVENANCE.toml"
 _DATA_SUFFIXES = {".toml", ".json"}  # the pack's data files: the pack itself and its calibrations
 
@@ -71,8 +77,8 @@ def _artifact_entries(doc: dict) -> list[str] | None:
 
 
 def _check_format(manifest: Path, doc: dict) -> list[str]:
-    """Top-level shape: only artifact(s)/note/source/signoff, exactly one of `artifact` and
-    `artifacts`, and a note."""
+    """Top-level shape: only artifact(s)/corpora/note/source/signoff, exactly one of `artifact`
+    and `artifacts`, a note, and `corpora` (if given) an array of corpus ids."""
     violations: list[str] = []
     for key in doc:
         if key in _TOP_LEVEL_KEYS:
@@ -91,6 +97,10 @@ def _check_format(manifest: Path, doc: dict) -> list[str]:
         violations.append(f"{manifest}: `artifact` must be a non-empty string")
     elif "artifacts" in doc and _artifact_entries(doc) is None:
         violations.append(f"{manifest}: `artifacts` must be a non-empty array of non-empty strings")
+    if corpora_of(doc) is None:
+        violations.append(
+            f"{manifest}: `corpora` must be an array of corpus ids (lower-case letters, digits, `.`, `_`, `-`)"
+        )
     if "note" not in doc:
         violations.append(f"{manifest}: missing required key `note`")
     elif not _is_text(doc["note"]):
@@ -151,21 +161,25 @@ def _check_one(register: dict[str, str], manifest: Path) -> list[str]:
     return violations
 
 
-def check(register_csv: str | Path, manifests: Iterable[Path]) -> list[str]:
+def check(register_csv: str | Path, manifests: Iterable[Path], data: Path | None = None) -> list[str]:
     """Return one human-readable violation per problem found in `manifests` (empty list = clean).
+    With a data root `data`, a corpus a manifest lists under `corpora` that is marked stale there
+    is one (ruling R113); a data root that does not exist marks nothing stale.
 
     A file that appears more than once is checked once.
     """
     register = load_register(Path(register_csv))
+    manifests = [Path(m) for m in manifests]
     violations: list[str] = []
     seen: set[Path] = set()
     for m in manifests:
-        m = Path(m)
         key = m.resolve()
         if key in seen:
             continue
         seen.add(key)
         violations.extend(_check_one(register, m))
+    if data is not None:
+        violations.extend(stale_violations(manifests, data))
     return violations
 
 
@@ -231,14 +245,19 @@ def _artifact_violations(manifest: Path, repo_root: Path) -> list[str]:
     return violations
 
 
-def check_packs(register_csv: str | Path, packs_root: str | Path, manifests: Iterable[Path] = ()) -> list[str]:
+def check_packs(
+    register_csv: str | Path,
+    packs_root: str | Path,
+    manifests: Iterable[Path] = (),
+    data: Path | None = None,
+) -> list[str]:
     """Check every pack under `packs_root`, plus any extra `manifests`.
 
     Each immediate subdirectory of `packs_root` must hold a PROVENANCE.toml whose `artifact` (or
     each of its `artifacts`) is a regular file inside that subdirectory, and that names every
     `*.toml` and `*.json` file in it. Artifact paths are relative to the repo root, which is the
     parent of `packs_root` (e.g. `packs/cmn/cmn.calib.json`). Every manifest found is then checked
-    like an explicit one.
+    like an explicit one, and against the stale markers of the data root `data` when one is given.
     """
     packs_root = Path(packs_root)
     violations: list[str] = []
@@ -257,7 +276,7 @@ def check_packs(register_csv: str | Path, packs_root: str | Path, manifests: Ite
                 continue
             found.append(manifest)
             violations.extend(_artifact_violations(manifest, repo_root))
-    violations.extend(check(register_csv, [*found, *manifests]))
+    violations.extend(check(register_csv, [*found, *manifests], data))
     return violations
 
 
@@ -270,11 +289,12 @@ def _run(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
         parser.error("--packs-root must not be empty")
     files = [Path(f) for f in args.files]
     try:
+        data = root_from(args)
         if args.packs_root is not None:
-            violations = check_packs(args.register, args.packs_root, files)
+            violations = check_packs(args.register, args.packs_root, files, data)
         else:
-            violations = check(args.register, files)
-    except (OSError, ProvenanceError) as e:
+            violations = check(args.register, files, data)
+    except (OSError, ProvenanceError, RegistryError) as e:
         print(f"error: {e}", file=sys.stderr)
         return 2
     if violations:
@@ -295,5 +315,6 @@ def register(subparsers) -> None:
         "its data files (*.toml, *.json) as an existing artifact (paths relative to DIR/..), "
         "and check those files",
     )
+    add_data_option(p)  # stale markers (ruling R113); a data root that does not exist has none
     p.add_argument("files", nargs="*", help="PROVENANCE.toml files to check")
     p.set_defaults(func=lambda args: _run(args, p))

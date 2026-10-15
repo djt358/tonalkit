@@ -1,4 +1,4 @@
-use tonekit_core::{F0Track, MAX_BRIDGED_GAP_FRAMES};
+use tonekit_core::{voiced_runs, F0Track, MIN_RUN_FRAMES};
 
 /// Voiced neighbours consulted on each side of a frame.
 const NEIGHBOURS: usize = 5;
@@ -6,8 +6,6 @@ const NEIGHBOURS: usize = 5;
 const MAX_DEVIATION_ST: f32 = 9.0;
 /// Semitone reference (spec §6.2).
 const REF_HZ: f32 = 55.0;
-/// Runs with fewer voiced frames than this are left alone (ruling R32).
-const MIN_RUN_FRAMES: usize = 5;
 
 /// Fix isolated octave jumps in place, one voiced run at a time (ruling R32).
 ///
@@ -36,14 +34,9 @@ pub fn repair_octaves(track: &mut F0Track) {
         })
         .collect();
 
-    let mut start = 0;
-    for end in 1..=voiced.len() {
-        let run_ends =
-            end == voiced.len() || voiced[end].0 - voiced[end - 1].0 > MAX_BRIDGED_GAP_FRAMES + 1;
-        if run_ends {
-            repair_run(track, &voiced[start..end]);
-            start = end;
-        }
+    let frames: Vec<usize> = voiced.iter().map(|&(i, _)| i).collect();
+    for run in voiced_runs(&frames) {
+        repair_run(track, &voiced[run]);
     }
 }
 

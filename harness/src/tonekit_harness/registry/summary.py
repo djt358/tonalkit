@@ -6,9 +6,8 @@ from collections import Counter
 from dataclasses import dataclass, field
 from typing import get_args
 
-from ..contracts.registry import RegistryError, Split
+from ..contracts.registry import RegistryError, Split, StaleMarker
 from .root import DataRoot
-from .stale import StaleMarker
 
 
 @dataclass(frozen=True)

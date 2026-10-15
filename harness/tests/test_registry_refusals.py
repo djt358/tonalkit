@@ -4,11 +4,21 @@ and a gate is never graded on synthetic data or uncleared sources."""
 from __future__ import annotations
 
 import pytest
-from registry_support import CALIB, DEV, HELDOUT, REGISTER, add_corpus, build_composed_root, speaker, speaker_clips
+from registry_support import (
+    CALIB,
+    DEV,
+    HELDOUT,
+    REGISTER,
+    add_corpus,
+    build_composed_root,
+    ids_in_split,
+    speaker,
+    speaker_clips,
+)
 
 from tonekit_harness import clearance
-from tonekit_harness.registry import DataRoot, RefusalError
-from tonekit_harness.registry.refusals import MAX_PROBLEMS_SHOWN
+from tonekit_harness.registry import DataRoot, FittingSelection, GateSelection, RefusalError
+from tonekit_harness.registry.errors import MAX_PROBLEMS_SHOWN
 
 
 @pytest.fixture
@@ -21,7 +31,9 @@ def data(tmp_path):
 
 def test_fitting_on_public_calib_and_dev_is_allowed(data):
     selection = data.select(["aishell3"], splits=["calib", "dev"])
-    assert selection.for_fitting(REGISTER) is selection  # returned, so it chains
+    checked = selection.for_fitting(REGISTER)  # returned, so it chains
+    assert isinstance(checked, FittingSelection) and checked.items == selection.items
+    assert not isinstance(selection, FittingSelection)  # the check is in the type, not the object asked
 
 
 def test_fitting_on_a_gate_speaker_is_refused_with_the_corpus_and_speaker(data):
@@ -63,8 +75,8 @@ def test_dev_speakers_may_be_fitted_on_but_the_heldout_ones_next_to_them_may_not
     ],
 )
 def test_fitting_on_a_source_the_register_does_not_clear_is_refused(tmp_path, source, why):
-    add_corpus(tmp_path, "l2", kind="public", source=source, speakers=[speaker("s", "calib")],
-               clips=speaker_clips("s", source))  # fmt: skip
+    add_corpus(tmp_path, "l2", kind="public", source=source, speakers=[speaker(CALIB, "calib")],
+               clips=speaker_clips(CALIB, source))  # fmt: skip
     with pytest.raises(RefusalError, match=rf"l2: {why} \(2 clips\)"):
         DataRoot(tmp_path).select().for_fitting(REGISTER)
 
@@ -84,7 +96,7 @@ def test_every_problem_is_listed_not_only_the_first(data):
 
 
 def test_a_long_list_of_problems_is_cut_short(tmp_path):
-    speakers = [speaker(f"s{i}", "heldout") for i in range(MAX_PROBLEMS_SHOWN + 3)]
+    speakers = [speaker(i, "heldout") for i in ids_in_split("heldout", MAX_PROBLEMS_SHOWN + 3)]
     clips = [c for s in speakers for c in speaker_clips(s["id"], "aishell-3", n=1)]
     add_corpus(tmp_path, "big", kind="public", source="aishell-3", speakers=speakers, clips=clips)
     with pytest.raises(RefusalError) as e:
@@ -93,9 +105,34 @@ def test_a_long_list_of_problems_is_cut_short(tmp_path):
     assert str(e.value).endswith("and 3 more")
 
 
-def test_an_empty_selection_has_nothing_to_refuse(data):
-    assert len(data.select(["later-*"]).for_fitting(REGISTER)) == 0
-    assert len(data.select(["later-*"]).for_gate(REGISTER)) == 0
+def test_an_empty_selection_is_refused_rather_than_passing_vacuously(data):
+    empty = data.select(["later-*"])  # a glob may match nothing (a gate file names corpora to come)
+    assert len(empty) == 0
+    for check, headline in [(empty.for_fitting, "fit parameters"), (empty.for_gate, "grade a gate")]:
+        with pytest.raises(RefusalError) as e:
+            check(REGISTER)
+        assert str(e.value) == (
+            f"refusing to {headline} on this selection:\n"
+            "  the selection is empty: no clip matches the corpora, splits and sets asked for"
+        )
+
+
+def test_a_union_of_checked_selections_must_be_checked_again(data):
+    fit = data.select(["aishell3"], splits=["calib"]).for_fitting(REGISTER)
+    union = fit | data.select(["dj-*"])
+    assert not isinstance(union, FittingSelection)
+    with pytest.raises(RefusalError, match="dj-2026-10/dj"):
+        union.for_fitting(REGISTER)
+
+
+def test_a_refusal_carries_its_problems_and_how_many_clips_are_at_fault(data):
+    with pytest.raises(RefusalError) as e:
+        data.select().for_gate({**REGISTER, "dj-corpus": "deny"})
+    r = e.value.refusal
+    assert r.clips == 4 and not r.synthetic_only  # 2 synthetic clips of smoke, 2 dj clips
+    with pytest.raises(RefusalError) as e:
+        data.select(["smoke"]).for_gate(REGISTER)
+    assert e.value.refusal.synthetic_only and e.value.refusal.clips == 2
 
 
 def test_the_default_register_is_the_checkouts_own(data):
@@ -116,7 +153,8 @@ def test_the_register_may_be_one_read_from_a_file(data, tmp_path):
 
 def test_a_gate_on_recordings_is_allowed(data):
     selection = data.select(kinds=["recorded"], splits=["gate"], sets=["gate"])
-    assert selection.for_gate(REGISTER) is selection
+    checked = selection.for_gate(REGISTER)
+    assert isinstance(checked, GateSelection) and checked.items == selection.items
 
 
 def test_a_gate_on_public_heldout_speakers_is_allowed(data):

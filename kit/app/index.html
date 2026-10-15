@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <!-- Nothing leaves this page: only its own files load, and fetches go to its own site. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self'; media-src 'self' blob:; img-src 'self' data:; script-src 'self'; worker-src 'self'; style-src 'self'; form-action 'none'; base-uri 'none'">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="light dark">
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="referrer" content="no-referrer">
+  <meta name="format-detection" content="telephone=no">
+  <title>Read aloud</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="style.css">
+  <script type="module" src="app.js"></script>
+</head>
+<body>
+  <div id="dev-banner" class="banner dev" hidden>DEV: all cards shown, stand-ins allowed. Not for volunteers.</div>
+  <div id="error-banner" class="banner error" role="alert" hidden></div>
+
+  <main>
+    <section id="screen-loading" class="screen" aria-busy="true">
+      <div class="spinner" aria-hidden="true"></div>
+    </section>
+
+    <section id="screen-welcome" class="screen" hidden>
+      <h1 data-copy="welcome.title"></h1>
+      <p class="lead" data-copy="welcome.body"></p>
+      <div class="actions">
+        <button id="welcome-start" class="primary" data-copy="welcome.start"></button>
+      </div>
+    </section>
+
+    <section id="screen-consent" class="screen" hidden>
+      <h1 data-copy="consent.title"></h1>
+      <div id="consent-text" class="prose"></div>
+      <div class="actions">
+        <button id="consent-agree" class="primary" data-copy="consent.agree"></button>
+        <button id="consent-decline" class="quiet" data-copy="consent.decline"></button>
+      </div>
+    </section>
+
+    <section id="screen-declined" class="screen" hidden>
+      <p class="lead" data-copy="consent.declined"></p>
+    </section>
+
+    <section id="screen-background" class="screen" hidden>
+      <h1 data-copy="background.title"></h1>
+      <p class="lead" data-copy="background.intro"></p>
+      <div id="background-questions"></div>
+      <div class="actions">
+        <button id="background-next" class="primary" data-copy="background.next"></button>
+      </div>
+    </section>
+
+    <section id="screen-mic" class="screen" hidden>
+      <h1 data-copy="mic.title"></h1>
+      <p class="lead" data-copy="mic.body"></p>
+      <div class="meter" aria-hidden="true"><div class="meter-fill"></div></div>
+      <p id="mic-status" class="status" aria-live="polite"></p>
+      <p id="mic-error" class="error-text" role="alert" hidden></p>
+      <div class="actions">
+        <button id="mic-allow" class="primary" data-copy="mic.allow"></button>
+        <button id="mic-continue" class="primary" data-copy="mic.continue" hidden></button>
+      </div>
+    </section>
+
+    <section id="screen-cards" class="screen cards" hidden>
+      <p id="card-progress" class="progress"></p>
+      <div class="card" aria-live="polite">
+        <p id="card-text" class="card-text" lang="zh-Hans"></p>
+        <p id="card-pinyin" class="card-pinyin" lang="zh-Latn-pinyin" hidden></p>
+        <p id="card-hint" class="card-hint" hidden></p>
+        <p id="card-note" class="card-note" lang="zh" hidden></p>
+      </div>
+      <div class="meter" aria-hidden="true"><div class="meter-fill"></div></div>
+      <p id="card-status" class="status" aria-live="polite"></p>
+      <div class="card-actions">
+        <button id="card-record" class="record" data-copy="card.record"></button>
+        <div class="row">
+          <button id="card-play" class="secondary" data-copy="card.play" hidden></button>
+          <button id="card-redo" class="secondary" data-copy="card.redo" hidden></button>
+          <button id="card-skip" class="secondary" data-copy="card.skip"></button>
+          <button id="card-next" class="primary next" data-copy="card.next" disabled></button>
+        </div>
+        <button id="card-finish" class="quiet small" data-copy="card.finish_early" hidden></button>
+      </div>
+    </section>
+
+    <section id="screen-done" class="screen" hidden>
+      <h1 data-copy="done.title"></h1>
+      <p id="done-body" class="lead" data-copy="done.body"></p>
+      <div class="code-box">
+        <p class="code-label" data-copy="done.code_label"></p>
+        <p id="done-code" class="code"></p>
+        <p class="code-note" data-copy="done.code_note"></p>
+      </div>
+      <p id="share-status" class="status" aria-live="polite"></p>
+      <div class="actions">
+        <button id="share-button" class="primary" data-copy="share.button" disabled></button>
+        <a id="share-fallback" class="button primary" data-copy="share.fallback" hidden></a>
+        <button id="done-delete" class="quiet" data-copy="done.delete"></button>
+      </div>
+    </section>
+
+    <section id="screen-pause" class="screen" hidden>
+      <h1 data-copy="pause.title"></h1>
+      <p class="lead" data-copy="pause.body"></p>
+      <p id="pause-error" class="error-text" role="alert" hidden></p>
+      <div class="actions">
+        <button id="pause-resume" class="primary" data-copy="pause.resume"></button>
+      </div>
+    </section>
+
+    <section id="screen-error" class="screen" hidden>
+      <p id="error-text" class="lead error-text" role="alert"></p>
+      <p id="error-detail" class="detail"></p>
+    </section>
+  </main>
+</body>
+</html>

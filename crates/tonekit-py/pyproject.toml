@@ -22,7 +22,9 @@ classifiers = [
 module-name = "tonekit_py"
 manifest-path = "Cargo.toml"
 # One abi3 wheel serves every CPython >= 3.11 (Cargo.toml: abi3-py311).
-strip = true
+# No strip (and none in the release profile, see Cargo.toml): macOS 27's dyld refuses a library
+# that rustc below 1.98 stripped ("mis-aligned LINKEDIT string pool").
+strip = false
 # Build against the workspace's Cargo.lock exactly: the numbers must not move with a dependency.
 locked = true
 

@@ -96,6 +96,30 @@ on every push and pull request.
 To clear a `verify` source properly, confirm its terms and update its row in the register. A
 `[[signoff]]` records a person's decision to use it while the terms are still unconfirmed.
 
+## Volunteer recordings
+
+Recordings from the S0.5 volunteer kit are the `volunteer-corpus` row in the register. They are
+made on the volunteers' own phones, with the consent text in [`kit/CONSENT.md`](kit/CONSENT.md)
+(version `v1`; every session records the version its speaker agreed to).
+
+- **What each promise rests on.** [`kit/PROMISES.md`](kit/PROMISES.md) maps every promise in the
+  consent and the guide to the mechanism that keeps it and the test that would fail if it broke.
+- **Where the data lives.** Under `$TONEKIT_DATA`, never in the repository: audio is blocked from
+  git (`scripts/check-no-audio.sh`), and speakers are known only by pseudonymous session codes and
+  enum-only background answers. One of the team analyzes it in a private cloud workspace that only
+  the team can open, sometimes with an AI assistant (R78).
+- **What it may be used for.** Testing and tuning tonekit and Bendy, nothing else (R72). The row's
+  `shipped_weights_training` is `allow` (R79), so the S1 gate can issue a verdict on volunteer
+  clips, and a calibration fitted on them passes `tkh provenance` without a `[[signoff]]`. Such a
+  pack lists `volunteer-corpus` as a `[[source]]`; nothing yet requires a fitted pack to list its
+  sources at all. Volunteer speakers stay in the `gate` split, which fitting refuses, until the team moves
+  consenting speakers into `calib` (`docs/s05/contracts.md` §3). Their audio is never resynthesised:
+  `tkh synth` and `tkh adversary` refuse any clip whose source is `volunteer-corpus` (R80).
+- **Deletion.** A volunteer's session code is the only key. `tkh purge --session CODE` (P5; it
+  doesn't exist yet) will remove that session's audio, answers and everything intake kept for it,
+  log the purge, and mark outputs fitted on the corpus stale (`docs/s05/contracts.md` §6). The team then
+  deletes the original zip and any copy placed in the private workspace.
+
 ## Synthetic audio never fits shipped calibration
 
 Synthetic and TTS audio (`synthetic-world`, `apple-system-tts`) are for tests and diagnostics. They

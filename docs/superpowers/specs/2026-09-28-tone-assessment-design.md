@@ -117,9 +117,16 @@ to know *which* syllables were said before it can judge them.
    ├── lattice(analysis, pack, grading)                    open set, no candidates
    │        → ToneLattice: TBU spans × inventory log-likelihoods + posteriors
    │
-   └── assess(analysis, pack, grading, intended, distractors, evidence, compare_accents)
-            = decode([intended] ∪ distractors) + diagnostics + fusion
-            → UtteranceAssessment (xiuzhen/Bendy grading)
+   ├── assess(analysis, pack, grading, intended, distractors, evidence, compare_accents)
+   │        = decode([intended] ∪ distractors) + diagnostics + fusion
+   │        → UtteranceAssessment (xiuzhen/Bendy grading)
+   │
+   ├── roll_register(previous, analysis, assessment, params)          (R111)
+   │        → RollingRegister: the register to carry to the next utterance, following the
+   │          speaker's drift (its `register` goes to the next analyze())
+   │
+   └── roll_register_lite(previous, analysis, assessment, params)     (R120)
+            → Register: the same, keeping only the register's four numbers
 ```
 
 `tonekit` holds no policy. It reports likelihoods, probabilities, distances and diagnostics.
@@ -197,6 +204,13 @@ pub struct GradingTarget { pub accent: AccentId, pub style: Option<StyleProfile>
 
 // register.rs: semitones re 55 Hz; four numbers, deliberately coarse (§11.3)
 pub struct Register { pub floor_st: f32, pub median_st: f32, pub ceil_st: f32, pub n_syllables: u32 }
+// rolling.rs (R111): what an app carries between utterances to follow the speaker's drift.
+// `pool`: seconds of voiced speech (after decay) per 0.1 st bin from −6 st, 540 bins (to 48 st).
+pub struct RollingRegister { pub register: Register, pub pool: Vec<f64> }
+// None = no decay / no cap (both None: plain pooling, R107). Default 30 s and 0.03 (calib
+// `rolling_register`, optional; when present both keys are required, null for none). The lite
+// form (R120) rolls a plain `Register` under the same parameters.
+pub struct RollingParams { pub half_life_s: Option<f32>, pub max_share: Option<f32> }
 
 // style.rs: an individual's realisation within an accent (imprint). No timbre, no embedding.
 pub struct StyleTone { pub tone: ToneId, pub contour: Vec<f32>, pub n: u32 }
@@ -228,6 +242,15 @@ pub enum MeasureIssue {
     InvalidRegister,
     /// Evidence that is not a number (a non-finite shape or neural probability) was ignored.
     InvalidEvidence,
+    /// No anchor, pitched or unpitched, could hold the syllable (R102; it was `Unvoiced` before).
+    NoNucleus,
+    /// Speech energy and a vowel's spectrum but no pitch: scored on the calibration's unpitched
+    /// evidence (R103), `Partial`; `NotMeasured` without that evidence, or where the table rates
+    /// every tone alike (R119): `overall` is then None.
+    Unpitched,
+    /// The pitch gives way to ≥ 50 ms of creak (unpitched vowel-like speech): the calibration's
+    /// creaky-tail evidence is added to every tone's likelihood (R108).
+    CreakyTail,
 }
 pub enum Measured { Full, Partial { issues: Vec<MeasureIssue> }, NotMeasured { issue: MeasureIssue } }
 /// Advice direction ("start higher"). `amount` is in Chao units, or ms for Turn*.
@@ -279,7 +302,8 @@ pub struct UtteranceAssessment { pub schema: String, pub intended: CandidateId, 
 pub enum RegisterSource { Given, ColdStart }
 pub struct Analysis { pub f0: F0Track, pub energy: EnergyTrack, pub nuclei: Vec<Nucleus>,
     pub boundaries: Vec<u32>, pub speech: Option<FrameRange>, pub register: Register,
-    pub register_source: RegisterSource, pub voiced_st: Vec<f32>, pub issues: Vec<MeasureIssue> }
+    pub register_source: RegisterSource, pub voiced_st: Vec<f32>, pub issues: Vec<MeasureIssue>,
+    pub sonority: Vec<f32> }  // per frame, share of the energy in 150 Hz–2 kHz (R102)
 
 // error.rs
 pub enum AssessError {
@@ -511,23 +535,45 @@ Inputs: boundary candidates B (sorted frames), speech region, candidates of any 
   - Paths start at any boundary with leading speech frames and nuclei charged like a gap edge,
     and end the same way.
   - An unmeasurable syllable scores `unvoiced_syllable_llr`.
+  - **Count stage (R102):** when the nuclei admit no strict path, the strict and then the relaxed
+    pass run again over the nuclei plus extra syllable candidates (unpitched vowel-like energy
+    peaks, and a second syllable where a voiced run's spectrum changes), with their boundaries.
+    An extra candidate no syllable covers costs no insertion. A syllable on an unpitched
+    candidate is scored on the calibration's `unpitched` evidence (R103) and is
+    `Partial(Unpitched)`. Without that evidence (the compiled-in default calibration, a pack
+    whose calibration has no `unpitched` section, or a place whose table gives every tone the same
+    value within 1e-9, which leaves every tone's LLR at 0: R119) its path scores
+    `unvoiced_syllable_llr` and it is `NotMeasured(Unpitched)`: like a missing syllable, it leaves
+    `overall` `None` (R104). The shipped `cmn` table is pooled at both places, so today every
+    unpitched syllable is `NotMeasured(Unpitched)`.
   - **Relaxed pass:** only if no such path exists and the analysis has ≥ 1 nucleus, syllables may
     hold at most one nucleus. A syllable without one (a missing syllable) scores
-    `unvoiced_syllable_llr` and is `Partial(Unvoiced)`, so it counts toward `overall` as a likely
-    miss.
+    `unvoiced_syllable_llr` and is `NotMeasured(NoNucleus)`: the assessment's `overall` is then
+    `None` (not scored, a reject at every threshold), never a prior (R104).
   - **No path:** the candidate's K syllables sit at an empty span at the speech-region start and
-    score `K × unvoiced_syllable_llr`. They're `NotMeasured(Unvoiced)` ("tone not checked",
-    `overall = None`) only if the analysis has no nuclei; otherwise they're `Partial(Unvoiced)`.
+    score `K × unvoiced_syllable_llr`. They're `NotMeasured(Unvoiced)` if the analysis has no
+    nuclei and `NotMeasured(NoNucleus)` otherwise; either way `overall = None`. Neither stage runs
+    without a pitched nucleus (no syllable could be anchored), so an isolated syllable said
+    entirely in creak, or any clip with no pitch at all, never reaches the `unpitched` evidence
+    (R103): it is `NotMeasured(Unvoiced)`, "tone not checked".
 - `dur(d) = −(ln(d/r))² / (2·dur_sigma²)`: 0 at d = r and symmetric in log-duration, where
   r = median inter-nucleus interval (default 220 ms) and `dur_sigma` = 0.4.
 - **Null hypothesis ("something else was said"):**
   `null_llr = Σ_tbu [max_t loglik_t − logsumexp_t(ln prior_t + loglik_t)]` over the open lattice
   (§7.3). That is the best free choice of tone per nucleus, which is always ≥ 0. Candidate
-  posteriors are a softmax over `{llr_c} ∪ {null_llr + null_bias}`.
+  posteriors are a softmax over `{llr_c} ∪ {null_llr + null_bias}`. The lattice is over the
+  nuclei only: the count stage's extra candidates (R102) add no term to the null, so a syllable a
+  reading places on one is scored for the reading and not for the null.
 - Seeds live in `cmn.calib.json`: `filler_per_frame = 0.03`, `unvoiced_syllable_llr = −3.0`,
-  `insertion_llr = −2.0`, `null_bias = −2.0`.
+  `insertion_llr = −2.0`, `null_bias = −2.0`. It also carries the optional `unpitched` and
+  `creaky_tail` tables (ln P(observation | tone) at the end of a phrase and elsewhere), fitted by
+  `tkh fit` (R103, R108, R110; a place with too few observations is pooled, the same value for
+  every tone, which for `unpitched` is no evidence, R119), and the optional `rolling_register`
+  parameters (R111, R120).
 - Cost is O(|B|²·K) per candidate. With |B| ≤ 4·nuclei + 2 and up to 64 candidates, this is
-  microseconds to milliseconds.
+  microseconds to milliseconds. That bound is the nuclei's stage only: the count stage's B is the
+  nuclei's boundaries plus up to two per extra candidate (R102), so there |B| ≤ 4·nuclei + 2 +
+  2·(extra candidates). It runs only for a candidate the nuclei cannot place.
 
 This subsumes v1's "known N": a single intended candidate is a set of size 1, and the same code
 handles spellbooks with tonal overlap, extra syllables and a generation-widened vocabulary.
@@ -655,6 +701,27 @@ to a literal GAN.
   - Bendy persists it per user; an optional 妈麻马骂 onboarding utterance seeds it. Only syllables
     that were measured count as u, so a whispered or silent cast leaves a given register
     unchanged; consumers persist `register_update` only if `n_syllables > 0`.
+  - **Rolling register (R111).** Learners drift (they often start higher and more variable and
+    settle), so the app can instead carry a `RollingRegister` from utterance to utterance with
+    `roll_register(previous, analysis, assessment, params)`, seeded by the drill (each drill
+    utterance rolled in from `None`) or by the first graded utterances. It pools the speech-only
+    voiced semitones (R106) of every utterance with a measured syllable in 0.1 st bins: each
+    utterance counts as its voiced seconds, at most `−half_life_s · log2(1 − max_share)`
+    (1.3 s by default); the pool first decays by `2^(−counted/half_life_s)`. Floor, median and
+    ceiling are the pool's weighted p5/p50/p95, widened by `2 st · (1 − min(n, 30)/30)` while
+    cold, at least 4 st wide. Without decay or cap a warm rolling register is the pooled
+    percentiles of every frame (R107). `register_update` is unchanged.
+  - **Lite rolling register (R120).** For an app that won't store a histogram,
+    `roll_register_lite(previous, analysis, assessment, params)` rolls the four-number `Register`
+    itself: each utterance moves floor, median and ceiling
+    `w = min(0.5, max(u/(n+u), 1 − 2^(−counted/half_life_s)))` of the way to its own
+    p5/p50/p95, with `counted` capped as above. Once `u/(n+u)` is below `max_share` (after about
+    `u/max_share` syllables) no utterance moves a number more than `max_share` of the way, and
+    once the decay term is the larger an older utterance halves in weight after `half_life_s` of
+    newer speech; before that (and always, without decay or cap) it is `register_update`'s merge. It
+    averages per-utterance percentiles, so it is narrower than the pooled register (by about 1 st
+    on the calibration corpus), and one far-off utterance moves all three numbers by up to
+    `max_share` of its distance, where a pool's percentiles move a bounded amount.
   - It's never inferred from anything but the user's own f0.
 
 ---
@@ -708,7 +775,10 @@ with the download date next to the data, so the provenance claim can be shown la
 
 - On-device only. PCM is discarded after analysis unless the user saves a clip.
 - No speaker embeddings, ever. `Register` is four numbers, and `StyleProfile` is per-tone mean
-  contours in normalised space: pitch-shape statistics, not timbre.
+  contours in normalised space: pitch-shape statistics, not timbre. A `RollingRegister` (R111)
+  adds the user's pitch distribution (a 540-bin histogram of their voiced semitones, decayed):
+  still pitch statistics, not timbre, kept on the device like the register. The lite form (R120)
+  keeps only the register's four numbers.
 - Common Voice's no-re-identification term is honoured.
 
 ### 11.4 Imprints and voice likeness: resolved (DJ, v2.1)

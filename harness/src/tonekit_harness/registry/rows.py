@@ -3,17 +3,15 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 from typing import NamedTuple
 
 from ..contracts.registry import CorpusMeta, RegistryError, Speaker
+from ..contracts.relpath import is_relative_inside
 from ..manifest import Clip, ManifestError
 from ..manifest import load as load_manifest
-from .errors import reason
+from .errors import cut, reason
 from .items import CorpusClip
-
-MAX_PROBLEMS_SHOWN = 10
-
 
 class RowProblem(NamedTuple):
     row: int  # index among the manifest's rows
@@ -27,7 +25,7 @@ def corpus_clips(
     """The clips of the manifest at `manifest_path`, each with its corpus and `[[speaker]]`.
 
     Raises `RegistryError` naming the file (and the line of every row at fault, up to
-    `MAX_PROBLEMS_SHOWN`) if the manifest is missing or unreadable, a clip names a speaker the
+    `errors.MAX_PROBLEMS_SHOWN`) if the manifest is missing or unreadable, a clip names a speaker the
     corpus does not have, a clip's source is not the corpus's, a clip id is used twice, or a clip's
     path leaves the corpus directory."""
     clips = _read(manifest_path, meta)
@@ -72,8 +70,7 @@ def row_problems(clips: list[Clip], meta: CorpusMeta, speakers: Mapping[str, Spe
             problems.append(RowProblem(row, f"clip id {clip.id!r} is used twice", first_row[clip.id]))
         else:
             first_row[clip.id] = row
-        path = PurePosixPath(clip.path)
-        if path.is_absolute() or ".." in path.parts:
+        if not is_relative_inside(clip.path):
             problems.append(
                 RowProblem(
                     row,
@@ -86,12 +83,11 @@ def row_problems(clips: list[Clip], meta: CorpusMeta, speakers: Mapping[str, Spe
 
 def _describe(manifest_path: Path, meta: CorpusMeta, problems: list[RowProblem]) -> str:
     lines = _row_lines(manifest_path)
-    shown = []
-    for p in problems[:MAX_PROBLEMS_SHOWN]:
+    described = []
+    for p in problems:
         again = "" if p.first_row is None else f" (first on line {lines[p.first_row]})"
-        shown.append(f"{manifest_path}:{lines[p.row]}: {p.text}{again}")
-    if len(problems) > MAX_PROBLEMS_SHOWN:
-        shown.append(f"{manifest_path}: and {len(problems) - MAX_PROBLEMS_SHOWN} more problems")
+        described.append(f"{manifest_path}:{lines[p.row]}: {p.text}{again}")
+    shown = cut(described, f"{manifest_path}: and {{}} more problems")
     return f"corpus {meta.id!r}: invalid manifest\n" + "\n".join(f"  {s}" for s in shown)
 
 

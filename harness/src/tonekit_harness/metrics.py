@@ -2,7 +2,8 @@
 
 The P0 gate S1: pick the accept threshold by leave-one-pair-out (LOO) and require correct-accept
 at least 0.90 and wrong-accept at most 0.10. The utterance score is `Result.overall`; a clip with
-no score (`None`, "tone not checked") is a reject at every threshold.
+no score (`None`, "tone not checked") is a reject at every threshold. `GateMetrics.rank` is a
+diagnostic beside it that needs no threshold.
 """
 
 from __future__ import annotations
@@ -48,6 +49,8 @@ class GateMetrics:
     thresholds: dict[str, float]  # held-out pair id -> θ fitted on the other pairs; may be ±inf
     rejected_none: list[str]  # clip ids with no score, counted as rejects
     outcomes: list[PairOutcome] = field(default_factory=list)  # sorted by pair id
+    # gate clips with no pair, left out of the pairs: a relabel made their pair a half pair (R112)
+    unpaired: list[str] = field(default_factory=list)
 
     @property
     def correct_accepted(self) -> int:
@@ -87,6 +90,19 @@ class GateMetrics:
         return lower
 
     @property
+    def ranked(self) -> float:
+        """How many gate pairs have their correct clip outscoring its tone-error clip, a tie
+        counting ½ (`outscores`)."""
+        return sum(outscores(o.correct_overall, o.wrong_overall) for o in self.outcomes)
+
+    @property
+    def rank(self) -> float | None:
+        """The share of gate pairs whose correct clip outscores its tone-error clip, a tie
+        counting ½ (`outscores`); None without pairs. It needs no threshold: with 20 to 40 pairs
+        the LOO θ can move a lot between runs, and CA and WA move with it, while this does not."""
+        return self.ranked / len(self.outcomes) if self.outcomes else None
+
+    @property
     def accepted(self) -> dict[str, bool]:
         """Clip id -> accepted at its held-out threshold, for every gate clip."""
         out: dict[str, bool] = {}
@@ -106,23 +122,35 @@ def _accepts(score: float | None, theta: float) -> bool:
     return score is not None and score >= theta
 
 
+def unpaired_gate_clips(results: Sequence[Result]) -> list[str]:
+    """The ids of the gate clips with no pair, sorted. `tkh relabel` takes the pair off both clips
+    of a gate pair that is no longer one correct and one tone_error reading (an error card read as
+    the correct word, say): the clips stay in the corpus for fitting, and the gate grades pairs
+    whole, so it leaves them out (ruling R112)."""
+    return sorted(r.id for r in results if r.set == "gate" and r.pair is None)
+
+
+def outscores(correct: float | None, wrong: float | None) -> float:
+    """1 when the correct clip scores above the wrong one, ½ for a tie, else 0. A clip with no
+    score (None, a reject at every threshold) is below every score, and two such clips tie."""
+    c = -math.inf if correct is None else correct
+    w = -math.inf if wrong is None else wrong
+    return 1.0 if c > w else 0.5 if c == w else 0.0
+
+
 def _gate_pairs(results: Sequence[Result]) -> list[tuple[str, Result, Result]]:
-    """The gate results grouped by pair, as (pair, correct, wrong) sorted by pair id."""
+    """The gate results grouped by pair, as (pair, correct, wrong) sorted by pair id; gate clips
+    with no pair are not in a pair (`unpaired_gate_clips`)."""
     by_pair: dict[str, dict[str, Result]] = {}
     for r in results:
-        if r.set != "gate":
+        if r.set != "gate" or r.pair is None:
             continue
-        if r.pair is None:
-            raise MetricsError(f"gate clip {r.id!r} has no pair")
         if r.label not in ("correct", "tone_error"):
-            raise MetricsError(
-                f"gate clip {r.id!r} has label {r.label!r}; expected 'correct' or 'tone_error'"
-            )
+            raise MetricsError(f"gate clip {r.id!r} has label {r.label!r}; expected 'correct' or 'tone_error'")
         slot = by_pair.setdefault(r.pair, {})
         if r.label in slot:
             raise MetricsError(
-                f"gate pair {r.pair!r} has more than one {r.label!r} clip "
-                f"({slot[r.label].id!r} and {r.id!r})"
+                f"gate pair {r.pair!r} has more than one {r.label!r} clip ({slot[r.label].id!r} and {r.id!r})"
             )
         slot[r.label] = r
     pairs = []
@@ -146,10 +174,7 @@ def _fit_threshold(correct: Sequence[float | None], wrong: Sequence[float | None
     candidates = [-math.inf, *((a + b) / 2 for a, b in zip(measured, measured[1:])), math.inf]
     # Both lists have the same length, so J's numerator, accepted-correct minus accepted-wrong,
     # ranks θs exactly (integers, no float ties).
-    gains = [
-        sum(_accepts(s, theta) for s in correct) - sum(_accepts(s, theta) for s in wrong)
-        for theta in candidates
-    ]
+    gains = [sum(_accepts(s, theta) for s in correct) - sum(_accepts(s, theta) for s in wrong) for theta in candidates]
     best = max(gains)
     tied = [theta for theta, gain in zip(candidates, gains) if gain == best]
     return tied[(len(tied) - 1) // 2]
@@ -161,13 +186,12 @@ def loo_gate(results: Sequence[Result]) -> GateMetrics:
     For each held-out pair, θ is fitted on the other pairs (`_fit_threshold`) and applied to the
     held-out pair. CA and WA aggregate the held-out decisions over all pairs; `passed` is
     CA ≥ 0.90 and WA ≤ 0.10, compared exactly on the counts (`GateMetrics.ca_ok`, `wa_ok`).
-    Raises `MetricsError` for fewer than 2 pairs or a malformed pair.
+    Gate clips with no pair are left out and listed in `unpaired` (R112). Raises `MetricsError`
+    for fewer than 2 pairs or a malformed pair.
     """
     pairs = _gate_pairs(results)
     if len(pairs) < 2:
-        raise MetricsError(
-            f"leave-one-pair-out needs at least 2 gate pairs; the results have {len(pairs)}"
-        )
+        raise MetricsError(f"leave-one-pair-out needs at least 2 gate pairs; the results have {len(pairs)}")
     outcomes: list[PairOutcome] = []
     for i, (pair, correct, wrong) in enumerate(pairs):
         others = pairs[:i] + pairs[i + 1 :]
@@ -185,22 +209,28 @@ def loo_gate(results: Sequence[Result]) -> GateMetrics:
             )
         )
     n = len(pairs)
-    rejected_none = sorted(
-        r.id for _, c, w in pairs for r in (c, w) if r.overall is None
-    )
+    rejected_none = sorted(r.id for _, c, w in pairs for r in (c, w) if r.overall is None)
     return GateMetrics(
         ca=sum(o.correct_accepted for o in outcomes) / n,
         wa=sum(o.wrong_accepted for o in outcomes) / n,
         thresholds={o.pair: o.theta for o in outcomes},
         rejected_none=rejected_none,
         outcomes=outcomes,
+        unpaired=unpaired_gate_clips(results),
     )
+
+
+def _minimal_set_clips(results: Sequence[Result]) -> list[Result]:
+    """The `diag_minimal` clips read as their card asks. A minimal-set card is a correct reading
+    (R76); one a listener relabelled `tone_error` was said as some other reading, so ranking its
+    intended reading first would be the wrong answer (R112)."""
+    return [r for r in results if r.set == "diag_minimal" and r.label == "correct"]
 
 
 def candidate_id_accuracy(results: Sequence[Result]) -> float | None:
     """The fraction of `diag_minimal` clips whose intended reading ranks first, or None if the
-    results have no such clip."""
-    clips = [r for r in results if r.set == "diag_minimal"]
+    results have no such clip. Clips relabelled as misread are left out (`_minimal_set_clips`)."""
+    clips = _minimal_set_clips(results)
     if not clips:
         return None
     return sum(r.intended_rank == 1 for r in clips) / len(clips)
@@ -237,7 +267,7 @@ def _gate_reason(r: Result, gate: GateMetrics) -> str | None:
 
 
 def _diag_reason(r: Result, theta: float) -> str | None:
-    if r.set == "diag_minimal" and r.intended_rank != 1:
+    if r.set == "diag_minimal" and r.label == "correct" and r.intended_rank != 1:
         return f"intended reading ranked {r.intended_rank}, expected rank 1"
     if r.set == "diag_count" and not _count_ok(r, theta):
         if r.intended_rank != 1:

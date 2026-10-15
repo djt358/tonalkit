@@ -62,6 +62,43 @@ pub(crate) fn local_extrema(s: &[f32], lo: usize, hi: usize, kind: Extremum) -> 
     out
 }
 
+/// The frame in `a..=b` (`b` in bounds) with the lowest (`Min`) or highest (`Max`) `s`; for a flat
+/// extremum, the middle of its first run.
+fn extremum_middle(s: &[f32], a: usize, b: usize, kind: Extremum) -> usize {
+    let better = |x: f32, y: f32| match kind {
+        Extremum::Max => x > y,
+        Extremum::Min => x < y,
+    };
+    let mut best = a;
+    for i in a..=b {
+        if better(s[i], s[best]) {
+            best = i;
+        }
+    }
+    let mut last = best;
+    while last < b && s[last + 1] == s[best] {
+        last += 1;
+    }
+    (best + last) / 2
+}
+
+/// The frame in `a..=b` with the lowest `s`, the middle of a flat minimum.
+pub(crate) fn argmin_middle(s: &[f32], a: usize, b: usize) -> usize {
+    extremum_middle(s, a, b, Extremum::Min)
+}
+
+/// The frame in `a..=b` with the highest `s`, the middle of a flat maximum.
+pub(crate) fn argmax_middle(s: &[f32], a: usize, b: usize) -> usize {
+    extremum_middle(s, a, b, Extremum::Max)
+}
+
+/// Whether the valley between frames `a <= b` of `s` is too shallow to part two peaks: its lowest
+/// frame (in `a..=b`) is above the lower of `s[a]` and `s[b]` minus `dip_db`.
+pub(crate) fn shallow_valley(s: &[f32], a: usize, b: usize, dip_db: f32) -> bool {
+    let valley = s[a..=b].iter().copied().fold(f32::INFINITY, f32::min);
+    valley > s[a].min(s[b]) - dip_db
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -89,5 +126,20 @@ mod tests {
             vec![1]
         );
         assert!(local_extrema(&[], 0, 0, Extremum::Max).is_empty());
+    }
+
+    #[test]
+    fn flat_extrema_report_the_middle_of_their_first_run() {
+        let s = [3.0, 1.0, 1.0, 1.0, 2.0, 5.0, 5.0, 1.0];
+        assert_eq!(argmin_middle(&s, 0, 7), 2);
+        assert_eq!(argmax_middle(&s, 0, 7), 5);
+        assert_eq!(argmax_middle(&s, 0, 4), 0);
+    }
+
+    #[test]
+    fn a_valley_is_shallow_unless_it_dips_more_than_dip_db_below_the_lower_peak() {
+        let s = [10.0, 8.5, 9.0, 12.0];
+        assert!(shallow_valley(&s, 0, 3, 2.0));
+        assert!(!shallow_valley(&s, 0, 3, 1.0));
     }
 }

@@ -190,6 +190,80 @@ final class SmokeTests: XCTestCase {
         XCTAssertEqual(openSet.tbus.count, 3)
     }
 
+    // MARK: The rolling register (ruling R111)
+
+    func testARegisterRollsFromUtteranceToUtterance() throws {
+        let pcm = try Fixtures.pcm()
+        let pack = try Fixtures.pack()
+        XCTAssertEqual(pack.rollingParams(), RollingParams(halfLifeS: 30, maxShare: 0.03))
+
+        let cold = try analyze(pcm: pcm, sampleRate: 16_000, register: nil, externalF0: nil)
+        let graded = try assess(analysis: cold, pack: pack, request: Fixtures.request413())
+        let first = try rollRegister(previous: nil, analysis: cold, assessment: graded, pack: pack)
+        XCTAssertEqual(first.register.nSyllables, 3)
+        XCTAssertEqual(first.pool.count, 540)
+
+        let warm = try analyze(pcm: pcm, sampleRate: 16_000, register: first.register, externalF0: nil)
+        XCTAssertEqual(warm.register, first.register)
+        let again = try assess(analysis: warm, pack: pack, request: Fixtures.request413())
+        let second = try rollRegister(previous: first, analysis: warm, assessment: again, pack: pack)
+        XCTAssertEqual(second.register.nSyllables, 6)
+
+        let bad = RollingParams(halfLifeS: -1, maxShare: nil)
+        XCTAssertThrowsError(try rollRegister(previous: nil, analysis: cold, assessment: graded, pack: pack, params: bad)) { error in
+            guard let assessError = error as? AssessError, case .InvalidRequest = assessError else {
+                XCTFail("expected AssessError.InvalidRequest, got \(error)")
+                return
+            }
+        }
+    }
+
+    // MARK: The lite register (ruling R120)
+
+    func testALiteRegisterRollsAsFourNumbers() throws {
+        let pcm = try Fixtures.pcm()
+        let pack = try Fixtures.pack()
+        let cold = try analyze(pcm: pcm, sampleRate: 16_000, register: nil, externalF0: nil)
+        let graded = try assess(analysis: cold, pack: pack, request: Fixtures.request413())
+        let first = try rollRegisterLite(previous: nil, analysis: cold, assessment: graded, pack: pack)
+        XCTAssertEqual(first.nSyllables, 3)
+        XCTAssertEqual(first, graded.registerUpdate)
+
+        let warm = try analyze(pcm: pcm, sampleRate: 16_000, register: first, externalF0: nil)
+        let again = try assess(analysis: warm, pack: pack, request: Fixtures.request413())
+        let second = try rollRegisterLite(previous: first, analysis: warm, assessment: again, pack: pack)
+        XCTAssertEqual(second.nSyllables, 6)
+        let pooled = try rollRegisterLite(
+            previous: first, analysis: warm, assessment: again, pack: pack,
+            params: RollingParams(halfLifeS: nil, maxShare: nil))
+        XCTAssertEqual(pooled, again.registerUpdate)
+    }
+
+    // MARK: Every measurement issue is handled
+
+    /// `issueKind` switches over `MeasureIssue` with no `default`, so a case added on the Rust side
+    /// fails to compile here until it is handled, as it must in Bendy's own `switch`.
+    func testEveryMeasureIssueIsHandled() throws {
+        let all: [MeasureIssue] = [
+            .unvoiced, .lowSnr, .clipped, .tooShort, .coldStartRegister, .invalidRegister,
+            .invalidEvidence, .noNucleus, .unpitched, .creakyTail,
+        ]
+        XCTAssertEqual(Set(all.map(issueKind)).count, all.count)
+        // The fixture's issues go through the same switch.
+        let analysis = try analyze(pcm: try Fixtures.pcm(), sampleRate: 16_000, register: nil, externalF0: nil)
+        let assessment = try assess(analysis: analysis, pack: try Fixtures.pack(), request: Fixtures.request413())
+        for syllable in assessment.syllables {
+            switch syllable.measured {
+            case .full:
+                break
+            case .partial(let issues):
+                XCTAssertEqual(issues.map(issueKind), ["cold start register"])
+            case .notMeasured(let issue):
+                XCTFail("syllable not measured: \(issueKind(issue))")
+            }
+        }
+    }
+
     // MARK: A pitch track from outside
 
     func testAnExternalF0TrackIsUsedAndSanitised() throws {
@@ -247,6 +321,24 @@ final class SmokeTests: XCTestCase {
             largest = max(largest, abs(a - b))
         }
         XCTAssertLessThan(largest, 1e-6)
+    }
+}
+
+// MARK: - Measurement issues
+
+/// What each issue means to a caller. No `default`: the compiler checks that every case is here.
+private func issueKind(_ issue: MeasureIssue) -> String {
+    switch issue {
+    case .unvoiced: return "unvoiced"
+    case .lowSnr: return "low signal-to-noise"
+    case .clipped: return "clipped"
+    case .tooShort: return "too short"
+    case .coldStartRegister: return "cold start register"
+    case .invalidRegister: return "invalid register"
+    case .invalidEvidence: return "invalid evidence"
+    case .noNucleus: return "no nucleus"
+    case .unpitched: return "unpitched"
+    case .creakyTail: return "creaky tail"
     }
 }
 
