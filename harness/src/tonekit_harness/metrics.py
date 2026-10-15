@@ -2,7 +2,8 @@
 
 The P0 gate S1: pick the accept threshold by leave-one-pair-out (LOO) and require correct-accept
 at least 0.90 and wrong-accept at most 0.10. The utterance score is `Result.overall`; a clip with
-no score (`None`, "tone not checked") is a reject at every threshold.
+no score (`None`, "tone not checked") is a reject at every threshold. `GateMetrics.rank` is a
+diagnostic beside it that needs no threshold.
 """
 
 from __future__ import annotations
@@ -87,6 +88,19 @@ class GateMetrics:
         return lower
 
     @property
+    def ranked(self) -> float:
+        """How many gate pairs have their correct clip outscoring its tone-error clip, a tie
+        counting ½ (`outscores`)."""
+        return sum(outscores(o.correct_overall, o.wrong_overall) for o in self.outcomes)
+
+    @property
+    def rank(self) -> float | None:
+        """The share of gate pairs whose correct clip outscores its tone-error clip, a tie
+        counting ½ (`outscores`); None without pairs. It needs no threshold: with 20 to 40 pairs
+        the LOO θ can move a lot between runs, and CA and WA move with it, while this does not."""
+        return self.ranked / len(self.outcomes) if self.outcomes else None
+
+    @property
     def accepted(self) -> dict[str, bool]:
         """Clip id -> accepted at its held-out threshold, for every gate clip."""
         out: dict[str, bool] = {}
@@ -104,6 +118,14 @@ class Failure:
 
 def _accepts(score: float | None, theta: float) -> bool:
     return score is not None and score >= theta
+
+
+def outscores(correct: float | None, wrong: float | None) -> float:
+    """1 when the correct clip scores above the wrong one, ½ for a tie, else 0. A clip with no
+    score (None, a reject at every threshold) is below every score, and two such clips tie."""
+    c = -math.inf if correct is None else correct
+    w = -math.inf if wrong is None else wrong
+    return 1.0 if c > w else 0.5 if c == w else 0.0
 
 
 def _gate_pairs(results: Sequence[Result]) -> list[tuple[str, Result, Result]]:

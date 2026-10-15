@@ -92,6 +92,22 @@ have tonekit_core.swift 'case TooLong\(seconds: Float, max: Float'
 # The two issues a caller sees for input that was not usable as given.
 have tonekit_core.swift 'case invalidRegister'
 have tonekit_core.swift 'case invalidEvidence'
+# A syllable nothing could hold, one with no pitch, and one whose pitch gives way to creak
+# (rulings R102, R103, R108): an exhaustive Swift `switch` over MeasureIssue must handle them (the
+# smoke test has one).
+have tonekit_core.swift 'case noNucleus'
+have tonekit_core.swift 'case unpitched'
+have tonekit_core.swift 'case creakyTail'
+# The analysis's sonority track (ruling R102).
+have tonekit_core.swift 'public var sonority: \[Float\]'
+# The smoke test's exhaustive switch handles every MeasureIssue case the bindings have. Swift does
+# not compile here, so this is the check that runs on every push.
+smoke=swift/TonekitSmoke/Tests/TonekitSmokeTests/SmokeTests.swift
+issues=$(awk '/^public enum MeasureIssue: /{on=1; next} on && /^}/{exit} on && /^ *case [a-zA-Z]+ *$/{print $2}' "$out/tonekit_core.swift")
+[ -n "$issues" ] || fail "tonekit_core.swift: no MeasureIssue cases found"
+for issue in $issues; do
+    grep -Eq "case \.$issue:" "$smoke" || fail "$smoke: the MeasureIssue switch lacks case .$issue"
+done
 for id in Lect AccentId ToneId CandidateId; do
     have tonekit_core.swift "^public typealias $id = String\$"
 done

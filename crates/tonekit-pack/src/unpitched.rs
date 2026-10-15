@@ -4,7 +4,7 @@
 use tonekit_core::{MeasureIssue, Measured, ToneJudgement, ToneTarget};
 
 use crate::error::{invalid, PackError};
-use crate::score::logsumexp;
+use crate::score::{clamp_log, logsumexp, LOG_CLAMP};
 use crate::{LanguagePack, TargetContext};
 
 impl LanguagePack {
@@ -12,7 +12,8 @@ impl LanguagePack {
     /// pitch, or `None` when the calibration carries no unpitched evidence.
     ///
     /// - `loglik[t]` is the calibration's `ln P(unpitched | t)` for the context's place (the end
-    ///   of the phrase, or elsewhere), in inventory order.
+    ///   of the phrase, or elsewhere), in inventory order; `-LOG_CLAMP` for a tone the table does
+    ///   not name, so every value is finite (ruling R12).
     /// - `llr_target` is the target's mixture (main tone and lexical variants by weight) against
     ///   the prior-weighted background of every tone, as for a shape (spec §7.1).
     /// - `heard` is the tone with the largest posterior if it reaches the heard threshold.
@@ -38,7 +39,7 @@ impl LanguagePack {
         let loglik: Vec<f32> = self
             .inventory
             .iter()
-            .map(|t| table.get(&t.0).copied().unwrap_or(f32::NEG_INFINITY))
+            .map(|t| table.get(&t.0).copied().unwrap_or(-LOG_CLAMP as f32))
             .collect();
         let ll = |tone: &tonekit_core::ToneId| -> Result<f64, PackError> {
             let i = self
@@ -91,21 +92,12 @@ impl LanguagePack {
         Ok(Some(ToneJudgement {
             expected: target.tone.clone(),
             loglik,
-            llr_target: clamp(llr),
+            llr_target: clamp_log(llr),
             distance: None,
             component: None,
             heard,
             deltas: Vec::new(),
             measured: Measured::Partial { issues: all },
         }))
-    }
-}
-
-/// A log-value as a finite f32 (ruling R12).
-fn clamp(v: f64) -> f32 {
-    if v.is_nan() {
-        -1.0e6
-    } else {
-        v.clamp(-1.0e6, 1.0e6) as f32
     }
 }

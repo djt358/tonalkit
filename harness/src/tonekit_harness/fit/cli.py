@@ -53,6 +53,11 @@ mixture components. Citations, the neutral tone's rules and the other accents ar
 Provenance: PROVENANCE.toml."""
 
 
+# The calibration sections `tkh fit` fits. They are dropped from the calibration it starts from,
+# so a fit never rests on evidence fitted earlier (on other speakers, or on a corpus since purged).
+FITTED_SECTIONS = ("unpitched", "creaky_tail")
+
+
 def fit(
     clips,
     seed_pack: str,
@@ -69,8 +74,11 @@ def fit(
     evidence (on the observations of the newly fitted pack). Each round observes with the previous round's files,
     which moves where the decoder puts syllables. Templates are shrunk towards the seed pack's
     expectations with strength `shrink` (`fit_templates`), and with `component` they are added to
-    the seed's realisations as mixture components of that weight (`fitted_pack`)."""
+    the seed's realisations as mixture components of that weight (`fitted_pack`). The first round
+    observes without `seed_calib`'s unpitched and creaky-tail evidence (`FITTED_SECTIONS`)."""
     pack_toml, calib = seed_pack, json.loads(seed_calib)
+    for section in FITTED_SECTIONS:
+        calib.pop(section, None)
     prior = seed_expectations(seed_pack)
     with tempfile.TemporaryDirectory() as cache:
         for _ in range(rounds):

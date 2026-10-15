@@ -105,6 +105,12 @@ def _metrics_table(
         ["Candidate-ID accuracy (diag_minimal)", rate(cand_acc, n_minimal), "diagnostic", "-"],
         ["Count robustness (diag_count)", rate(count_rob, n_count), "diagnostic", "-"],
         ["Median threshold over the held-out pairs", num(gate.median_threshold), "-", "-"],
+        [
+            "Rank (correct clip outscores its error clip, ties ½)",
+            "n/a" if gate.rank is None else f"{gate.rank:.3f} ({gate.ranked:g}/{n})",
+            "diagnostic",
+            "-",
+        ],
     ]
     return table(["Metric", "Value", "Requirement", "Result"], rows)
 
@@ -161,7 +167,8 @@ def _measured_label(s) -> str:
     if s.fallback:
         return "no nucleus (fallback)"
     if s.unpitched:
-        return "unpitched (creak evidence)"
+        # Without the calibration's unpitched evidence nothing was measured (ruling R103).
+        return "unpitched (no evidence)" if s.measured == "NotMeasured" else "unpitched (creak evidence)"
     if "CreakyTail" in s.issues:
         return f"{s.measured} (creaky tail)"
     return s.measured
@@ -230,8 +237,8 @@ def write(
     if gate.rejected_none:
         lines += ["## Clips with no score", ""]
         lines += [
-            "Tone not checked (no syllable measured, or a syllable with no nucleus: see above); "
-            "each counts as a reject.",
+            "Tone not checked (no syllable measured, a syllable with no nucleus (see above), or an "
+            "unpitched one the calibration has no evidence for); each counts as a reject.",
             "",
         ]
         lines += [f"- {cid}" for cid in gate.rejected_none] + [""]

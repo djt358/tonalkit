@@ -636,10 +636,89 @@ def test_cli_requires_register_and_something_to_check(capsys):
     capsys.readouterr()
 
 
-def test_cli_packs_root_on_the_real_packs_exits_0(capsys):
-    rc = cli.main(["provenance", "--register", str(REAL_REGISTER), "--packs-root", str(REPO / "packs")])
+def test_cli_packs_root_on_the_real_packs_exits_0(tmp_path, capsys):
+    # A data root that does not exist (CI) holds no stale marker.
+    args = ["provenance", "--register", str(REAL_REGISTER), "--packs-root", str(REPO / "packs")]
+    rc = cli.main([*args, "--data", str(tmp_path / "no-data-root")])
     assert rc == 0
     assert capsys.readouterr().out.strip() == "provenance ok"
+
+
+# --- a stale calibration can't ship (ruling R113) ---------------------------------------------
+
+
+def mark(data: Path, corpus: str, body: str | None = None) -> Path:
+    """A stale marker for `corpus` under the data root `data` (a valid one unless `body`)."""
+    marker = data / "stale" / f"{corpus}.json"
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    reason = '{"reason": "purged session K7Q2MD", "marked_at": "2026-10-10T12:00:00Z"}'
+    marker.write_text(body if body is not None else f'{{"corpus": "{corpus}", "reasons": [{reason}]}}', encoding="utf-8")
+    return marker
+
+
+def test_a_pack_fitted_on_a_stale_corpus_is_a_violation(tmp_path):
+    make_pack(tmp_path, "aaa", prov("aaa", extra='corpora = ["fit-one", "fit-two"]\n'))
+    data = tmp_path / "data"
+    data.mkdir()
+    assert provenance.check_packs(REGISTER, tmp_path / "packs", data=data) == []
+    mark(data, "unlisted")
+    assert provenance.check_packs(REGISTER, tmp_path / "packs", data=data) == []
+    marker = mark(data, "fit-two")
+    (v,) = provenance.check_packs(REGISTER, tmp_path / "packs", data=data)
+    assert "fitted on corpus 'fit-two', which is stale" in v and str(marker) in v and "1 reason" in v
+    # The reasons name sessions: the violation counts them and never prints them.
+    assert "K7Q2MD" not in v
+    mark(data, "fit-one", body="not json")
+    v = provenance.check_packs(REGISTER, tmp_path / "packs", data=data)
+    assert len(v) == 2 and "fit-one" in v[0] and "unreadable marker" in v[0]
+    # Without a data root, or with one that does not exist, nothing is stale.
+    assert provenance.check_packs(REGISTER, tmp_path / "packs") == []
+    assert provenance.check_packs(REGISTER, tmp_path / "packs", data=tmp_path / "missing") == []
+
+
+def test_explicit_manifests_are_checked_for_stale_corpora_once(tmp_path):
+    p = write_body(tmp_path, "p.toml", 'corpora = ["c1"]\n')
+    data = tmp_path / "data"
+    mark(data, "c1")
+    assert len(provenance.check(REGISTER, [p, p], data)) == 1
+    assert provenance.check(REGISTER, [p]) == []
+
+
+@pytest.mark.parametrize("value", ['"c1"', "[7]", '[""]', '["../escape"]', '["Upper"]', '["a/b"]'])
+def test_corpora_must_be_an_array_of_corpus_ids(tmp_path, value):
+    p = write_body(tmp_path, "p.toml", f"corpora = {value}\n")
+    (v,) = provenance.check(REGISTER, [p], tmp_path)
+    assert "`corpora` must be an array of corpus ids" in v
+
+
+def test_corpora_is_a_known_key_and_may_be_empty(tmp_path):
+    assert provenance.check(REGISTER, [write_body(tmp_path, "p.toml", "corpora = []\n")]) == []
+
+
+def test_the_shipped_calibration_lists_its_corpus_and_fails_once_it_is_stale(tmp_path, capsys):
+    shipped = tomllib.loads((REPO / "packs" / "cmn" / "PROVENANCE.toml").read_text(encoding="utf-8"))
+    assert shipped["corpora"] == ["volunteers-s05-v1"]
+    data = tmp_path / "data"
+    mark(data, "volunteers-s05-v1")
+    args = ["provenance", "--register", str(REAL_REGISTER), "--packs-root", str(REPO / "packs")]
+    assert cli.main([*args, "--data", str(data)]) == 1
+    out = capsys.readouterr().out
+    assert "volunteers-s05-v1" in out and "provenance ok" not in out
+
+
+def test_cli_reads_the_data_root_from_the_environment(tmp_path, monkeypatch, capsys):
+    make_pack(tmp_path, "aaa", prov("aaa", extra='corpora = ["c1"]\n'))
+    data = tmp_path / "data"
+    mark(data, "c1")
+    args = ["provenance", "--register", str(REGISTER), "--packs-root", str(tmp_path / "packs")]
+    monkeypatch.setenv("TONEKIT_DATA", str(data))
+    assert cli.main(args) == 1
+    monkeypatch.setenv("TONEKIT_DATA", str(tmp_path / "elsewhere"))
+    assert cli.main(args) == 0
+    assert cli.main([*args, "--data", str(data)]) == 1
+    # An empty --data is refused rather than read as the current directory.
+    assert cli.main([*args, "--data", ""]) == 2
+    assert "--data is empty" in capsys.readouterr().err
 
 
 def test_cli_packs_root_exits_1_on_uncovered_pack(tmp_path, capsys):

@@ -57,7 +57,9 @@ cited id has an entry.
 
 - Languages and accents are data in `packs/`, not code. A pack's data files must all be listed in
   its `PROVENANCE.toml`, and every source must be a row in `data-register.csv`. `tkh provenance`
-  checks both. See [`DATA_PROVENANCE.md`](DATA_PROVENANCE.md).
+  checks both. A pack fitted on corpora lists them (`corpora`), and `tkh provenance` also fails
+  while the data root (`--data`, else `$TONEKIT_DATA`) marks one of them stale (R113). See
+  [`DATA_PROVENANCE.md`](DATA_PROVENANCE.md).
 - Don't commit recordings of anyone without a register row and their release.
 - Synthetic or TTS audio is for tests and diagnostics only. It never fits shipped calibration, and
   it never counts toward the gate.

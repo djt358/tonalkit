@@ -11,11 +11,12 @@ import pytest
 import tonekit_py
 
 from tonekit_harness import cli
+from tonekit_harness.fit import cli as fit_cli
 from tonekit_harness.evaluate import Grader
 from tonekit_harness.fit.observe import SHAPE, UNPITCHED, Observation, observe_clip
 from tonekit_harness.fit.select import FitError, calib_speakers, fit_clips
 from tonekit_harness.fit.tail import fit_creaky_tail, tail_rates
-from tonekit_harness.fit.unpitched import MIN_RATE, SMOOTHING, fit_unpitched, rates
+from tonekit_harness.fit.unpitched import MIN_HITS, MIN_RATE, SMOOTHING, fit_unpitched, rates
 
 from support import gate_corpus, write_manifest
 
@@ -96,6 +97,31 @@ def test_tkh_fit_writes_a_calibration_tonekit_loads(corpus, tmp_path):
     tonekit_py.lattice(analysis, (PACKS / "cmn.toml").read_text(encoding="utf-8"), out.read_text(encoding="utf-8"), grading)
 
 
+def test_a_fit_starts_without_the_start_calibrations_evidence(corpus, monkeypatch):
+    # The first round observes without the unpitched and creaky-tail evidence of the calibration
+    # it starts from (fitted earlier, perhaps on other speakers); the second with round one's.
+    root, clips = corpus
+    seen = []
+    real = fit_cli.observations
+
+    def spy(clips, pack_toml, calib_json, *args, **kwargs):
+        seen.append(json.loads(calib_json))
+        return real(clips, pack_toml, calib_json, *args, **kwargs)
+
+    monkeypatch.setattr(fit_cli, "observations", spy)
+    start = json.loads((PACKS / "cmn.calib.json").read_text(encoding="utf-8"))
+    planted = {"phrase_final": {t: -0.1 for t in TONES}, "other": {t: -0.1 for t in TONES}}
+    for section in fit_cli.FITTED_SECTIONS:
+        start[section] = planted
+    pack = (PACKS / "cmn.toml").read_text(encoding="utf-8")
+    fitted = fit_cli.fit(clips, pack, json.dumps(start), root, rounds=2, templates=False)
+    assert len(seen) == 2
+    assert not set(fit_cli.FITTED_SECTIONS) & set(seen[0])
+    assert all(seen[1][section] not in (None, planted) for section in fit_cli.FITTED_SECTIONS)
+    assert all(fitted.calib[section] != planted for section in fit_cli.FITTED_SECTIONS)
+    assert seen[0] == {k: v for k, v in start.items() if k not in fit_cli.FITTED_SECTIONS}
+
+
 def test_tkh_fit_writes_a_fitted_pack_and_refuses_a_component_weight_out_of_range(corpus, tmp_path, capsys):
     root, _ = corpus
     corpus_toml(root / "corpus.toml", {"dj": "calib"})
@@ -116,38 +142,55 @@ def obs(tone: str, kind: str, final: bool = True, creaky: bool = False) -> Obser
 
 
 def test_creaky_tail_rates_count_only_syllables_with_a_shape():
-    # Tone 4 at the phrase's end: 3 of 4 shapes end in creak; tone 1: none of 4; an unpitched
+    # Tone 4 at the phrase's end: 12 of 16 shapes end in creak; tone 1: none of 16; an unpitched
     # tone 4 and an error card's creaky tone 1 are not counted.
     error = Observation("e", "s", "tone_error", True, "1", 0, 1, None, True, SHAPE, None, True)
     observations = (
-        [obs("4", SHAPE, creaky=True)] * 3
-        + [obs("4", SHAPE), obs("4", UNPITCHED)]
-        + [obs("1", SHAPE)] * 4
-        + [error]
+        [obs("4", SHAPE, creaky=True)] * 12
+        + [obs("4", SHAPE)] * 4
+        + [obs("4", UNPITCHED), error]
+        + [obs("1", SHAPE)] * 16
     )
     r = tail_rates(observations, TONES, final=True)
-    pooled = (3 + 1) / (8 + 2)
-    assert r["4"] == pytest.approx((3 + SMOOTHING * pooled) / (4 + SMOOTHING))
-    assert r["1"] == pytest.approx((0 + SMOOTHING * pooled) / (4 + SMOOTHING))
+    pooled = (12 + 1) / (32 + 2)
+    assert r["4"] == pytest.approx((12 + SMOOTHING * pooled) / (16 + SMOOTHING))
+    assert r["1"] == pytest.approx((0 + SMOOTHING * pooled) / (16 + SMOOTHING))
     fitted = fit_creaky_tail(observations, TONES)
     assert fitted["phrase_final"]["4"] == round(math.log(r["4"]), 4)
     assert fitted["other"]["4"] == round(math.log(0.5), 4)  # nothing there: Laplace's 1/2
 
 
 def test_unpitched_rates_are_smoothed_towards_the_pooled_rate():
-    # Tone 3: 3 unpitched of 4 at the phrase's end; tone 1: 0 of 4; 2 of 8 overall... pooled by
-    # Laplace: (3 + 1) / (8 + 2) = 0.4.
-    observations = [obs("3", UNPITCHED)] * 3 + [obs("3", SHAPE)] + [obs("1", SHAPE)] * 4
+    # Tone 3: 12 unpitched of 16 at the phrase's end; tone 1: 0 of 16; pooled by Laplace:
+    # (12 + 1) / (32 + 2).
+    observations = [obs("3", UNPITCHED)] * 12 + [obs("3", SHAPE)] * 4 + [obs("1", SHAPE)] * 16
     r = rates(observations, TONES, final=True)
-    pooled = 0.4
-    assert r["3"] == pytest.approx((3 + SMOOTHING * pooled) / (4 + SMOOTHING))
-    assert r["1"] == pytest.approx((0 + SMOOTHING * pooled) / (4 + SMOOTHING))
+    pooled = 13 / 34
+    assert r["3"] == pytest.approx((12 + SMOOTHING * pooled) / (16 + SMOOTHING))
+    assert r["1"] == pytest.approx((0 + SMOOTHING * pooled) / (16 + SMOOTHING))
     assert r["2"] == pytest.approx(pooled)
     # Nothing elsewhere in the phrase: Laplace's 1/2.
     assert rates(observations, TONES, final=False)["3"] == pytest.approx(0.5)
     fitted = fit_unpitched(observations, TONES)
     assert fitted["phrase_final"]["3"] == round(math.log(r["3"]), 4)
     assert min(fitted["phrase_final"].values()) >= round(math.log(MIN_RATE), 4)
+
+
+def test_a_place_with_few_hits_gives_every_tone_the_pooled_rate():
+    # 3 unpitched tone 3s of 4, none of 16 tone 1s: too few hits to tell the tones apart, so the
+    # table is flat there (every tone at the pooled rate) and says nothing for or against a tone.
+    few = [obs("3", UNPITCHED)] * 3 + [obs("3", SHAPE)] + [obs("1", SHAPE)] * 16
+    r = rates(few, TONES, final=True)
+    assert list(r.values()) == pytest.approx([(3 + 1) / (20 + 2)] * len(TONES))
+    # One hit short of `MIN_HITS` is still flat; at `MIN_HITS` the tones part.
+    short = [obs("3", UNPITCHED)] * (MIN_HITS - 1) + [obs("1", SHAPE)] * 16
+    assert len(set(rates(short, TONES, final=True).values())) == 1
+    enough = [obs("3", UNPITCHED)] * MIN_HITS + [obs("1", SHAPE)] * 16
+    r = rates(enough, TONES, final=True)
+    assert r["3"] > r["2"] > r["1"]
+    # The creaky-tail table shares the rule.
+    tails = [obs("4", SHAPE, creaky=True)] * 3 + [obs("1", SHAPE)] * 16
+    assert len(set(tail_rates(tails, TONES, final=True).values())) == 1
 
 
 def test_missed_syllables_say_nothing_about_creak():
