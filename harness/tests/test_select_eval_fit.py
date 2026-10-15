@@ -287,3 +287,15 @@ def test_tkh_corpora_lists_what_intake_and_an_adapter_wrote(data, capsys):
     rows = {line.split()[0]: line.split() for line in out.splitlines()[2:]}
     assert rows["aishell3"][:3] == ["aishell3", "public", "aishell-3"]
     assert rows[VOLUNTEERS][:5] == [VOLUNTEERS, "recorded", "volunteer-corpus", "gate", "2"]
+
+
+def test_tkh_review_reads_the_results_of_a_selection_by_its_corpus_clip_ids(own, tmp_path, capsys):
+    from tonekit_harness.repo import repo_root
+    from tonekit_harness.review.scorer import NOT_GRADED
+    from tonekit_harness.review.view import ReviewOptions, page_data
+
+    out = tmp_path / "e"
+    code, _, err = eval_run(capsys, out, "--data", str(own), "--select", "aishell3:calib", "--select", VOLUNTEERS)
+    assert code == 0, err
+    page = page_data(ReviewOptions(root=own, corpus_id=VOLUNTEERS, repo=repo_root(), results=out / "results.json"))
+    assert len(page["clips"]) == 12 and not [c for c in page["clips"] if c["group"] == NOT_GRADED]
