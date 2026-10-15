@@ -11,14 +11,14 @@ const ZERO_SEED_STATE: u64 = 0x9E37_79B9_7F4A_7C15;
 const WARMUP: usize = 16;
 
 #[derive(Clone, Debug)]
-pub(crate) struct Rng {
+pub struct Rng {
     state: u64,
     /// Second Box–Muller variate, kept for the next `gaussian` call.
     spare: Option<f64>,
 }
 
 impl Rng {
-    pub(crate) fn new(seed: u64) -> Self {
+    pub fn new(seed: u64) -> Self {
         let mut rng = Rng {
             state: if seed == 0 { ZERO_SEED_STATE } else { seed },
             spare: None,
@@ -30,7 +30,7 @@ impl Rng {
     }
 
     /// Marsaglia xorshift64 (13, 7, 17).
-    pub(crate) fn next_u64(&mut self) -> u64 {
+    pub fn next_u64(&mut self) -> u64 {
         let mut x = self.state;
         x ^= x << 13;
         x ^= x >> 7;
@@ -40,12 +40,12 @@ impl Rng {
     }
 
     /// Uniform in `[0, 1)` with 53 random bits.
-    pub(crate) fn uniform(&mut self) -> f64 {
+    pub fn uniform(&mut self) -> f64 {
         (self.next_u64() >> 11) as f64 / (1_u64 << 53) as f64
     }
 
     /// Standard normal (mean 0, variance 1) by Box–Muller.
-    pub(crate) fn gaussian(&mut self) -> f64 {
+    pub fn gaussian(&mut self) -> f64 {
         if let Some(z) = self.spare.take() {
             return z;
         }

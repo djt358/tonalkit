@@ -25,6 +25,13 @@ fn with_evidence() -> String {
     calib.to_string()
 }
 
+/// The shipped calibration with `phrase_final` and `other` as its unpitched tables.
+fn with_tables(phrase_final: serde_json::Value, other: serde_json::Value) -> String {
+    let mut calib: serde_json::Value = serde_json::from_str(CMN_CALIB).unwrap();
+    calib["unpitched"] = serde_json::json!({ "phrase_final": phrase_final, "other": other });
+    calib.to_string()
+}
+
 /// The shipped calibration without unpitched evidence.
 fn without_evidence() -> String {
     let mut calib: serde_json::Value = serde_json::from_str(CMN_CALIB).unwrap();
@@ -245,4 +252,41 @@ fn an_isolated_or_all_unpitched_clip_never_reaches_the_unpitched_evidence() {
         );
         assert_eq!(u.overall, None);
     }
+}
+
+#[test]
+fn a_table_that_rates_every_tone_alike_is_no_evidence() {
+    // Ruling R119: a pooled place gives every tone LLR 0, which tells the tones apart no better
+    // than no table, so the syllable is `NotMeasured { Unpitched }` and the reading unscored. The
+    // shipped calibration pools both places; so does any table with one rate for every tone.
+    let pcm = clip(true);
+    let flat = serde_json::json!({ "1": -1.0, "2": -1.0, "3": -1.0, "4": -1.0, "5": -1.0 });
+    for calib in [CMN_CALIB.to_owned(), with_tables(flat.clone(), flat)] {
+        unscored_without_evidence(&pcm, Some(&calib));
+    }
+}
+
+#[test]
+fn a_table_that_tells_the_tones_apart_at_the_syllables_place_still_scores() {
+    // Place by place: a flat table elsewhere in the phrase does not stop the phrase-final one,
+    // which differs, from scoring the last syllable.
+    let pcm = clip(true);
+    let differs = serde_json::json!({ "1": -5.0, "2": -3.5, "3": -1.0, "4": -2.5, "5": -3.0 });
+    let flat = serde_json::json!({ "1": -3.6, "2": -3.6, "3": -3.6, "4": -3.6, "5": -3.6 });
+    let u = graded(
+        &pcm,
+        Some(&with_tables(differs, flat)),
+        &["4", "1", "3"],
+        &["4", "1", "1"],
+    );
+    let last = &u.syllables[2];
+    assert_eq!(
+        last.measured,
+        Measured::Partial {
+            issues: vec![MeasureIssue::Unpitched]
+        },
+        "{u:#?}"
+    );
+    assert!(last.p_correct > 0.5, "{u:#?}");
+    assert!(u.overall.is_some(), "{u:#?}");
 }

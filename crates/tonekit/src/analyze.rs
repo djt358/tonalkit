@@ -82,7 +82,7 @@ fn sanitised(track: &F0Track) -> F0Track {
 /// [`REGISTER_ST_BAND`], `floor <= median <= ceil` with the ceiling above the floor, and a
 /// believable syllable count. Anything else (a corrupted persisted register, most likely) would
 /// grade every syllable wrongly and be persisted again through `register_update`.
-fn usable(r: &Register) -> bool {
+pub(crate) fn usable(r: &Register) -> bool {
     [r.floor_st, r.median_st, r.ceil_st]
         .iter()
         .all(|v| REGISTER_ST_BAND.contains(v))

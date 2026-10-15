@@ -76,6 +76,7 @@ mod speakers;
 
 pub use fluent::{synth_fluent, FluentSpec, FluentSyllable};
 pub use pitch::{chao_to_hz, register_for};
+pub use rng::Rng;
 pub use spaced::{synth, SynthSpec, SynthSyllable};
 pub use speakers::{Speaker, FEMALE, FLUENT_SPEAKERS, MALE_LOW, OCTAVE_SPANNING, WIDE};
 

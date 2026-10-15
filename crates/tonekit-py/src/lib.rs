@@ -1,6 +1,7 @@
 //! `tonekit_py`: the tonekit facade for Python, JSON in and JSON out.
 //!
-//! The four functions mirror the Rust facade (`analyze`, `decode`, `lattice`, `assess`) and pass
+//! The functions mirror the Rust facade (`analyze`, `decode`, `lattice`, `assess`,
+//! `roll_register`, `roll_register_lite`, and `rolling_params` for a pack's own) and pass
 //! everything else as JSON text in the facade's own serde format (spec §5), so a Python caller
 //! gets exactly the numbers the CLI and the Swift package give: it is the same compiled code.
 //! There are no Python-side mirror types to drift out of step.
@@ -25,7 +26,7 @@ use pyo3::exceptions::{PyOverflowError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use tonekit::{
     Analysis, AnalyzeOptions, AssessRequest, Candidate, F0Choice, F0Track, GradingTarget,
-    LanguagePack, Register, SAMPLE_RATE,
+    LanguagePack, Register, RollingParams, RollingRegister, UtteranceAssessment, SAMPLE_RATE,
 };
 
 /// Parses `$text` as a `$ty`; on failure the error names the Python argument (`$arg`).
@@ -204,6 +205,60 @@ fn assess_json(
     emit!(assessment)
 }
 
+fn roll_register_json(
+    previous_json: Option<&str>,
+    analysis_json: &str,
+    assessment_json: &str,
+    pack_toml: &str,
+    calib_json: Option<&str>,
+    params_json: Option<&str>,
+) -> Result<String, String> {
+    let previous = previous_json
+        .map(|text| parse!(RollingRegister, "previous_json", text))
+        .transpose()?;
+    let analysis = parse!(Analysis, "analysis_json", analysis_json)?;
+    let assessment = parse!(UtteranceAssessment, "assessment_json", assessment_json)?;
+    let params = params_or_the_packs(pack_toml, calib_json, params_json)?;
+    let rolled = tonekit::roll_register(previous.as_ref(), &analysis, &assessment, &params)
+        .map_err(failure)?;
+    emit!(rolled)
+}
+
+fn roll_register_lite_json(
+    previous_json: Option<&str>,
+    analysis_json: &str,
+    assessment_json: &str,
+    pack_toml: &str,
+    calib_json: Option<&str>,
+    params_json: Option<&str>,
+) -> Result<String, String> {
+    let previous = previous_json
+        .map(|text| parse!(Register, "previous_json", text))
+        .transpose()?;
+    let analysis = parse!(Analysis, "analysis_json", analysis_json)?;
+    let assessment = parse!(UtteranceAssessment, "assessment_json", assessment_json)?;
+    let params = params_or_the_packs(pack_toml, calib_json, params_json)?;
+    let rolled = tonekit::roll_register_lite(previous.as_ref(), &analysis, &assessment, &params)
+        .map_err(failure)?;
+    emit!(rolled)
+}
+
+/// `params_json` as `RollingParams`, or without it the pack calibration's `rolling_register` (the
+/// pack is read only then).
+fn params_or_the_packs(
+    pack_toml: &str,
+    calib_json: Option<&str>,
+    params_json: Option<&str>,
+) -> Result<RollingParams, String> {
+    match params_json {
+        Some(text) => parse!(RollingParams, "params_json", text),
+        None => Ok(load_pack(pack_toml, calib_json)?
+            .calibration()
+            .rolling_register
+            .clone()),
+    }
+}
+
 /// Analyses one utterance, once, for any number of `decode`, `lattice` and `assess` calls.
 ///
 /// `pcm` is 16 kHz mono audio as floats in -1..1: a list or tuple of floats, or a
@@ -305,6 +360,86 @@ fn assess(
         .map_err(value_error)
 }
 
+/// The register to keep after grading an utterance, following the speaker as their register
+/// drifts (ruling R111): `previous_json` (a `RollingRegister`, or `None` for a speaker with nothing
+/// rolled in yet) with the utterance's voiced speech rolled in, older evidence decaying.
+///
+/// `analysis_json` is what `analyze` returned and `assessment_json` what `assess` returned for it;
+/// an utterance with no measured syllable changes nothing. `params_json` is a `RollingParams`
+/// (`{"half_life_s": 30.0, "max_share": 0.03}`; both `null` is plain pooling); without it the
+/// pack calibration's `rolling_register` applies, so `pack_toml` and `calib_json` are read only
+/// then. Pass the result's `register` to the next `analyze` as `register_json`.
+///
+/// Returns the `RollingRegister` as JSON. Raises `ValueError` for unusable parameters, a bad pack
+/// or JSON that does not parse.
+#[pyfunction]
+#[pyo3(signature = (previous_json, analysis_json, assessment_json, pack_toml, calib_json, params_json=None))]
+fn roll_register(
+    py: Python<'_>,
+    previous_json: Option<&str>,
+    analysis_json: &str,
+    assessment_json: &str,
+    pack_toml: &str,
+    calib_json: Option<&str>,
+    params_json: Option<&str>,
+) -> PyResult<String> {
+    py.detach(|| {
+        roll_register_json(
+            previous_json,
+            analysis_json,
+            assessment_json,
+            pack_toml,
+            calib_json,
+            params_json,
+        )
+    })
+    .map_err(value_error)
+}
+
+/// The four-number form of `roll_register` (ruling R120), for a caller that keeps only the
+/// register between utterances: `previous_json` is a `Register` (what `analyze` takes as
+/// `register_json`), or `None` for a speaker with nothing rolled in yet. The same half-life and
+/// per-utterance cap as `roll_register`, but each utterance moves floor, median and ceiling part of
+/// the way to its own percentiles instead of adding its frames to a pool; without decay or cap it
+/// is `register_update`. Arguments as for `roll_register`.
+///
+/// Returns the `Register` as JSON. Raises `ValueError` for unusable parameters, a bad pack or JSON
+/// that does not parse.
+#[pyfunction]
+#[pyo3(signature = (previous_json, analysis_json, assessment_json, pack_toml, calib_json, params_json=None))]
+fn roll_register_lite(
+    py: Python<'_>,
+    previous_json: Option<&str>,
+    analysis_json: &str,
+    assessment_json: &str,
+    pack_toml: &str,
+    calib_json: Option<&str>,
+    params_json: Option<&str>,
+) -> PyResult<String> {
+    py.detach(|| {
+        roll_register_lite_json(
+            previous_json,
+            analysis_json,
+            assessment_json,
+            pack_toml,
+            calib_json,
+            params_json,
+        )
+    })
+    .map_err(value_error)
+}
+
+/// The pack's parameters for `roll_register`: its calibration's `rolling_register` (ruling R111),
+/// or tonekit's default when the calibration has none (or is `None`). Returns the `RollingParams`
+/// as JSON. Raises `ValueError` for a bad pack.
+#[pyfunction]
+#[pyo3(signature = (pack_toml, calib_json))]
+fn rolling_params(pack_toml: &str, calib_json: Option<&str>) -> PyResult<String> {
+    load_pack(pack_toml, calib_json)
+        .and_then(|pack| emit!(pack.calibration().rolling_register))
+        .map_err(value_error)
+}
+
 /// Lexical-tone assessment: the tonekit Rust library for Python, JSON in and JSON out.
 #[pymodule]
 fn tonekit_py(m: &Bound<'_, PyModule>) -> PyResult<()> {
@@ -312,5 +447,8 @@ fn tonekit_py(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(decode, m)?)?;
     m.add_function(wrap_pyfunction!(lattice, m)?)?;
     m.add_function(wrap_pyfunction!(assess, m)?)?;
+    m.add_function(wrap_pyfunction!(roll_register, m)?)?;
+    m.add_function(wrap_pyfunction!(roll_register_lite, m)?)?;
+    m.add_function(wrap_pyfunction!(rolling_params, m)?)?;
     Ok(())
 }

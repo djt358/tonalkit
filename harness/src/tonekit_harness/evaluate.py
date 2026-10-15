@@ -28,9 +28,22 @@ import numpy as np
 import tonekit_py
 from scipy.io import wavfile
 
-from . import calibration, clearance, eval_results, manifest, metrics, pitch_tracks, provenance, report, speaker_register
+from . import (
+    calibration,
+    clearance,
+    eval_results,
+    manifest,
+    metrics,
+    pitch_tracks,
+    provenance,
+    report,
+    rolling_register,
+    speaker_register,
+)
 from .ingest import TARGET_SR, to_float32
 from .manifest import Clip, ManifestError, to_candidate_json
+from .register_json import register_json as canonical_register
+from .session_order import SessionOrderError
 
 # harness/.cache/analysis, next to src/ (the directory is gitignored)
 DEFAULT_CACHE_DIR = Path(__file__).resolve().parents[2] / ".cache" / "analysis"
@@ -169,10 +182,6 @@ def _cache_key(wav: bytes, register_json: str | None, f0_identity: str | None = 
         h.update(len(part).to_bytes(8, "big"))
         h.update(part)
     return h.hexdigest()
-
-
-def _canonical(obj: dict) -> str:
-    return json.dumps(obj, sort_keys=True, separators=(",", ":"))
 
 
 def _read_cached(path: Path) -> str | None:
@@ -328,7 +337,7 @@ def _chain_registers(clips: list[Clip], grader: Grader) -> tuple[dict[str, str |
             by_id[clip.id] = result
             update = assessment["register_update"]
             if update["n_syllables"] > 0:  # nothing measured: there is nothing to learn from
-                register_json = _canonical(update)
+                register_json = canonical_register(update)
         registers[speaker] = register_json
     return registers, by_id
 
@@ -339,11 +348,15 @@ def speaker_registers(clips: list[Clip], grader: Grader) -> dict[str, str | None
     return _chain_registers(clips, grader)[0]
 
 
-REGISTER_FROM = ("drill", "speaker")
+REGISTER_FROM = ("drill", "speaker", "rolling", "rolling-lite")
 REGISTER_HELP = {
     "drill": "each speaker's register drill clips (R46)",
     "speaker": "each clip's speaker's other clips, pooled (R107)",
+    "rolling": "the drill, then the speaker's earlier clips in reading order, time-weighted (R111)",
+    "rolling-lite": "the drill, then the speaker's earlier clips in reading order, time-weighted on "
+    "the register's four numbers alone (R120)",
 }
+ROLLING = ("rolling", "rolling-lite")  # the register sources that roll under `rolling_register`
 
 
 def clip_registers(
@@ -352,7 +365,11 @@ def clip_registers(
     """Clip id -> the register JSON its clip is graded with, and the results already graded on
     the way. `drill` (R46): each speaker's register after their `register` clips, which are
     graded on the way. `speaker` (ruling R107): each clip's from the same speaker's other clips,
-    pooled (`speaker_register.leave_one_out_registers`)."""
+    pooled (`speaker_register.leave_one_out_registers`). `rolling` (ruling R111): each clip's
+    rolled from the drill and the speaker's earlier clips only (`rolling_register`), every clip
+    graded on the way; `rolling-lite` (ruling R120) the same with the four-number register."""
+    if register_from in ROLLING:
+        return rolling_register.rolling_registers(clips, grader, lite=register_from == "rolling-lite")
     if register_from == "speaker":
         registers = speaker_register.leave_one_out_registers(
             clips, lambda c: json.loads(grader.analysis(c, None))
@@ -414,6 +431,17 @@ def run(
 # ---- tkh eval ---------------------------------------------------------------------------------
 
 
+def register_context(register_from: str, pack_toml: str, calib_json: str | None) -> str:
+    """What a report says about where each clip's register came from; for `rolling` and
+    `rolling-lite`, with the calibration's parameters."""
+    if register_from not in ROLLING:
+        return REGISTER_HELP[register_from]
+    p = json.loads(tonekit_py.rolling_params(pack_toml, calib_json))
+    half_life = "no decay" if p["half_life_s"] is None else f"half-life {p['half_life_s']:g} s of voiced speech"
+    cap = "no cap" if p["max_share"] is None else f"at most {p['max_share']:g} of a full pool per clip"
+    return f"{REGISTER_HELP[register_from]}: {half_life}, {cap}"
+
+
 def _run(args: argparse.Namespace) -> int:
     manifest_path = Path(args.manifest)
     try:
@@ -453,7 +481,7 @@ def _run(args: argparse.Namespace) -> int:
                 "data register": str(args.register or clearance.default_register()),
                 **files.context(),
                 "accent": args.accent or "the pack's base accent",
-                "register": REGISTER_HELP[args.register_from],
+                "register": register_context(args.register_from, files.pack_toml, files.calib_json),
                 "clips": ", ".join(f"{name} {n}" for name, n in per_set.items()),
                 "tonekit-py": tonekit_py_fingerprint(),
             },
@@ -468,6 +496,7 @@ def _run(args: argparse.Namespace) -> int:
         EvalError,
         metrics.MetricsError,
         provenance.ProvenanceError,
+        SessionOrderError,
         OSError,
     ) as e:
         print(f"error: {e}", file=sys.stderr)
@@ -521,7 +550,10 @@ def register(subparsers) -> None:
         choices=REGISTER_FROM,
         default="drill",
         help="where a clip's register comes from: the speaker's register drill clips (drill, R46, "
-        "the default) or all of the speaker's other clips, pooled (speaker, R107)",
+        "the default), all of the speaker's other clips, pooled (speaker, R107), or the drill and "
+        "the speaker's earlier clips in reading order, time-weighted under the calibration's "
+        "rolling_register (rolling, R111; rolling-lite keeps only the register's four numbers, "
+        "R120)",
     )
     p.add_argument(
         "--speaker",

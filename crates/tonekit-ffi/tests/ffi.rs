@@ -10,10 +10,10 @@ use std::path::Path;
 use serde_json::Value;
 use tonekit::{
     AccentId, AssessError, AssessRequest, Candidate, CandidateId, F0Frame, F0Track, GradingTarget,
-    Lect, MeasureIssue, Measured, Register, RegisterSource, ToneId, ToneTarget,
-    UtteranceAssessment,
+    Lect, MeasureIssue, Measured, Register, RegisterSource, RollingParams, ToneId, ToneTarget,
+    UtteranceAssessment, POOL_BINS, POOL_BIN_ST,
 };
-use tonekit_ffi::{analyze, assess, decode, lattice, Pack};
+use tonekit_ffi::{analyze, assess, decode, lattice, roll_register, roll_register_lite, Pack};
 
 const CMN_TOML: &str = include_str!("../../../packs/cmn/cmn.toml");
 const CMN_CALIB: &str = include_str!("../../../packs/cmn/cmn.calib.json");
@@ -321,6 +321,82 @@ fn a_given_register_is_used_and_updated() {
     assert_eq!(warm.register, register);
     let again = assess(warm, pack(), request_413()).unwrap();
     assert_eq!(again.register_update.n_syllables, register.n_syllables + 3);
+}
+
+/// Ruling R111: the rolling register crosses the boundary, starting from `nil`, with the pack's
+/// parameters by default.
+#[test]
+fn a_register_rolls_from_utterance_to_utterance() {
+    assert_eq!(pack().rolling_params(), RollingParams::DEFAULT);
+    let cold = analyze(fixture_pcm(), RATE, None, None).unwrap();
+    let graded = assess(cold.clone(), pack(), request_413()).unwrap();
+    let first = roll_register(None, cold.clone(), graded.clone(), pack(), None).unwrap();
+    assert_eq!(first.register.n_syllables, 3);
+    assert_eq!(first.pool.len(), POOL_BINS);
+
+    let warm = analyze(fixture_pcm(), RATE, Some(first.register.clone()), None).unwrap();
+    assert_eq!(warm.register, first.register);
+    let again = assess(warm.clone(), pack(), request_413()).unwrap();
+    let second = roll_register(Some(first.clone()), warm, again, pack(), None).unwrap();
+    assert_eq!(second.register.n_syllables, 6);
+    // The same frames again leave the levels where they were (to the pool's grid).
+    assert!((second.register.median_st - first.register.median_st).abs() <= POOL_BIN_ST);
+
+    let pooled = roll_register(
+        None,
+        cold.clone(),
+        graded.clone(),
+        pack(),
+        Some(RollingParams::POOLED),
+    );
+    assert_eq!(pooled.unwrap().register.n_syllables, 3);
+    let bad = RollingParams {
+        half_life_s: Some(-1.0),
+        max_share: None,
+    };
+    assert!(matches!(
+        roll_register(None, cold, graded, pack(), Some(bad)),
+        Err(AssessError::InvalidRequest { .. })
+    ));
+}
+
+/// Ruling R120: the lite register crosses the boundary as a plain `Register`; without decay it is
+/// `register_update`.
+#[test]
+fn a_lite_register_rolls_from_utterance_to_utterance() {
+    let cold = analyze(fixture_pcm(), RATE, None, None).unwrap();
+    let graded = assess(cold.clone(), pack(), request_413()).unwrap();
+    let first = roll_register_lite(None, cold.clone(), graded.clone(), pack(), None).unwrap();
+    assert_eq!(first.n_syllables, 3);
+    assert_eq!(first, graded.register_update); // a cold start is the cold-start register
+
+    let warm = analyze(fixture_pcm(), RATE, Some(first.clone()), None).unwrap();
+    let again = assess(warm.clone(), pack(), request_413()).unwrap();
+    let second = roll_register_lite(
+        Some(first.clone()),
+        warm.clone(),
+        again.clone(),
+        pack(),
+        None,
+    )
+    .unwrap();
+    assert_eq!(second.n_syllables, 6);
+    let pooled = roll_register_lite(
+        Some(first),
+        warm,
+        again.clone(),
+        pack(),
+        Some(RollingParams::POOLED),
+    );
+    assert_eq!(pooled, Ok(again.register_update));
+    let bad = RollingParams {
+        half_life_s: None,
+        max_share: Some(0.03),
+    };
+    assert!(matches!(
+        roll_register_lite(None, cold, graded, pack(), Some(bad)),
+        Err(AssessError::InvalidRequest { .. })
+    ));
 }
 
 #[test]

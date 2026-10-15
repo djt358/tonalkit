@@ -64,6 +64,11 @@ have tonekit_ffi.swift 'public static func fromToml\(packToml: String, calibJson
 have tonekit_ffi.swift 'func lect\(\)[[:space:]]*-> Lect'
 have tonekit_ffi.swift 'func baseAccent\(\)[[:space:]]*-> AccentId'
 have tonekit_ffi.swift 'func inventory\(\)[[:space:]]*-> \[ToneId\]'
+# The rolling register (ruling R111): carried from utterance to utterance by the app.
+have tonekit_ffi.swift 'public func rollRegister\(previous: RollingRegister\?, analysis: Analysis, assessment: UtteranceAssessment, pack: Pack, params: RollingParams\? = nil\)[[:space:]]*throws[[:space:]]*-> RollingRegister'
+have tonekit_ffi.swift 'func rollingParams\(\)[[:space:]]*-> RollingParams'
+# Its four-number form (ruling R120): the app keeps only a Register.
+have tonekit_ffi.swift 'public func rollRegisterLite\(previous: Register\?, analysis: Analysis, assessment: UtteranceAssessment, pack: Pack, params: RollingParams\? = nil\)[[:space:]]*throws[[:space:]]*-> Register'
 
 # The request (tonekit.swift).
 have tonekit.swift '^public struct AssessRequest'
@@ -71,9 +76,12 @@ have tonekit.swift 'public var compareAccents: \[AccentId\]'
 
 # The shared types, the error and the four ids (tonekit_core.swift).
 for name in Analysis F0Track F0Frame Register Candidate ToneTarget GradingTarget \
-    UtteranceAssessment SyllableAssessment DecodeResult ToneLattice; do
+    UtteranceAssessment SyllableAssessment DecodeResult ToneLattice RollingRegister RollingParams; do
     have tonekit_core.swift "^public struct $name: "
 done
+have tonekit_core.swift 'public var pool: \[Double\]'
+have tonekit_core.swift 'public var halfLifeS: Float\?'
+have tonekit_core.swift 'public var maxShare: Float\?'
 for name in Measured MeasureIssue DeltaKind Evidence EvidenceKind RegisterSource; do
     have tonekit_core.swift "^public enum $name: "
 done

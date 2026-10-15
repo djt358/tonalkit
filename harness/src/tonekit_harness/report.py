@@ -184,7 +184,8 @@ def _measured_label(s) -> str:
     if s.fallback:
         return "no nucleus (fallback)"
     if s.unpitched:
-        # Without the calibration's unpitched evidence nothing was measured (ruling R103).
+        # Without the calibration's unpitched evidence (no table, or one that rates every tone
+        # alike at the syllable's place) nothing was measured (rulings R103, R119).
         return "unpitched (no evidence)" if s.measured == "NotMeasured" else "unpitched (creak evidence)"
     if "CreakyTail" in s.issues:
         return f"{s.measured} (creaky tail)"
@@ -256,7 +257,8 @@ def write(
         lines += ["## Clips with no score", ""]
         lines += [
             "Tone not checked (no syllable measured, a syllable with no nucleus (see above), or an "
-            "unpitched one the calibration has no evidence for); each counts as a reject.",
+            "unpitched one the calibration has no evidence for: no table, or one that rates every "
+            "tone alike, R119); each counts as a reject.",
             "",
         ]
         lines += [f"- {cid}" for cid in gate.rejected_none] + [""]
