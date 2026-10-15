@@ -14,6 +14,7 @@ forks a format locally.*
 | Purge log | `$TONEKIT_DATA/purge-log.jsonl` | `tonekit_harness.contracts.registry` |
 | Eval results (per clip) | `$TONEKIT_DATA/reports/<corpus>.results.json` | `tonekit_harness.eval_results` |
 | Relabel export and log | `relabels-<corpus>.json` (the review page's download); `corpora/<id>/relabels.jsonl` | `tonekit_harness.contracts.relabel` |
+| tonekit's own JSON (analysis, assessment, registers) and pack calibration | the library's API; `packs/<lect>/<lect>.calib.json` (repo) | Rust: `tonekit_core` types, `tonekit_pack::Calibration` (§8) |
 
 All models are pydantic v2 with `extra="forbid"`, like `manifest.Clip`. `tkh schema` writes their
 JSON Schemas to `kit/schema/`, and the kit's JavaScript tests validate against those.
@@ -352,3 +353,66 @@ skipped; one that says what the applied one says changes nothing, so applying a 
 no-op and a newer export replaces older decisions. Decisions for clips the corpus does not have
 are skipped; a decision that does not fit its clip (tone count, unknown tone, `as_card` with other
 tones) refuses the whole file.
+
+## 8. tonekit's formats the harness and apps read
+
+These are the library's own types (spec §5), not pydantic models: the owner is the Rust serde type
+in `tonekit-core` (`tonekit-pack` for the calibration), Swift gets them through UniFFI and Python as
+JSON (`tonekit_py`). Every change below is additive: a new field has a serde default, so JSON
+written before it still parses, and a new `MeasureIssue` case must be handled by an exhaustive Swift
+`switch` (`scripts/check-swift-bindings.sh` checks the smoke test names every case).
+
+**`Analysis.sonority`** (R102): one number per frame, on the f0 grid, in [0, 1]: the share of the
+frame's energy between 150 Hz and 2 kHz. Default `[]`: an older analysis parses, and its decode has
+no count stage candidates.
+
+**`MeasureIssue`**, new cases (JSON strings, like the old ones):
+- `NoNucleus` (R102, R104): `NotMeasured`; no anchor, pitched or unpitched, could hold the
+  syllable. The assessment's `overall` is then `null` unless the syllable has a confusion hit.
+  Replaces `Unvoiced` for that meaning; `Unvoiced` still parses and still means no voice at all,
+  and the harness reads a legacy `Partial [Unvoiced]` as a fallback.
+- `Unpitched` (R103, R119): a syllable with speech energy and a vowel's spectrum but no pitch.
+  `Partial` when the calibration's `unpitched` table tells the tones apart at its place; otherwise
+  `NotMeasured`, and `overall` is `null` as for `NoNucleus`.
+- `CreakyTail` (R108): among a pitched syllable's `Partial` issues when its pitch gives way to at
+  least 50 ms of creak.
+
+**Calibration** (`<lect>.calib.json`, `tonekit_pack::Calibration`; unknown keys are refused), three
+optional sections:
+
+```json
+{"unpitched":   {"phrase_final": {"1": -3.2189, "2": -3.2189, "3": -3.2189, "4": -3.2189, "5": -3.2189},
+                 "other":        {"1": -3.6376, "...": "every tone of the pack"}},
+ "creaky_tail": {"phrase_final": {"1": -2.3546, "...": "..."}, "other": {"...": "..."}},
+ "rolling_register": {"half_life_s": 30.0, "max_share": 0.03}}
+```
+
+- `unpitched` and `creaky_tail` (R103, R108): `ln P(observation | tone)` for the phrase's last
+  syllable (`phrase_final`) and every other one (`other`); each names every tone of the pack, each
+  value finite and at most 0. A place whose values are all within 1e-9 of each other carries no
+  evidence: an unpitched syllable there is `NotMeasured` (R119), and a creaky tail there adds the
+  same to every tone. `tkh fit` writes both (R109, R110); the shipped `unpitched` table is pooled.
+- `rolling_register` (R111): both keys required when the section is present, each a number or
+  `null` (no decay, no cap); `half_life_s` > 0, `max_share` in (0, 1) and only with a half-life.
+  Without the section: 30 s and 0.03.
+
+**Registers.** `Register` is `{"floor_st", "median_st", "ceil_st", "n_syllables"}` (semitones re
+55 Hz, unchanged). The rolling register (R111) and its four-number form (R120):
+
+| | Full (R111) | Lite (R120) |
+|---|---|---|
+| What the app keeps | `RollingRegister`: `{"register": Register, "pool": [540 numbers]}` (seconds of voiced speech per 0.1 st bin from −6 st, each finite and ≥ 0; an unusable pool starts afresh) | a `Register` (one `analyze` refuses starts afresh) |
+| Rust | `tonekit::roll_register(previous, &analysis, &assessment, &params)` | `tonekit::roll_register_lite(..)`, same arguments |
+| Swift | `rollRegister(previous:analysis:assessment:pack:params:)` (`params` default `nil`: `pack.rollingParams()`) | `rollRegisterLite(..)`, same labels |
+| Python | `roll_register(previous_json, analysis_json, assessment_json, pack_toml, calib_json, params_json=None)` | `roll_register_lite(..)`, same arguments |
+
+`RollingParams` is `{"half_life_s": number or null, "max_share": number or null}`, as in the
+calibration; Python's `rolling_params(pack_toml, calib_json)` returns a pack's. Bad parameters are
+`InvalidRequest` (Python: `ValueError`).
+
+**Where `tkh eval` takes a clip's register** (`--register-from`, also `tkh fit --register-from`;
+written to eval results as `register_from`): `drill` (the default, R46), `speaker` (the speaker's
+other clips pooled, R107), `rolling` (causal: the drill, then the speaker's earlier clips in reading
+order, R111) or `rolling-lite` (the same with the four-number form, R120). The rolling choices read
+reading order from `corpora/<id>/sessions/<CODE>.json` (§3); a speaker without one keeps manifest
+order, and a session file that can't be read is an error.
