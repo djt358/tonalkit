@@ -1084,15 +1084,22 @@ risk, and THCHS-30's tones are the script's, never checked against each speaker.
 
 **Decision.** `tkh adapt` drops utterances of more than 32 syllables unless `--max-syllables`
 says otherwise. **Why.** The length probe (`harness/scripts/length_probe.py` on
-tonekit-testkit's fluent phrases: four voices, six phrases per length and voice, each level and
-with one Chao step of declination) found no length up to 32 syllables at which `tkh eval` or
-`tkh fit`'s forced decode breaks down: their time grows with the clip (the analysis, about 40 ms
-per syllable here; assessing and the forced decode take a few ms), and the share of clips the
-forced decode holds one nucleus per syllable stays level. At 48 syllables a quarter of the level
-phrases lose a syllable (no nucleus), which leaves the whole clip unscored. AISHELL-3's sentences
-are mostly shorter; THCHS-30's are 20 to 47 syllables, so the cap keeps about half of them. **Cost
-if wrong.** Synthetic phrases are easier than read sentences; a real-speech length effect would
-show as unscored or misaligned long clips, and `--max-syllables` lowers the cap.
+tonekit-testkit's fluent phrases of 4 to 48 syllables: four voices, six phrases per length and
+voice, each level and with one Chao step of declination) found no length at which `tkh eval` or
+`tkh fit`'s forced decode breaks down. Per syllable nothing changes with length: the forced
+decode puts 96–100% of syllables on their true span and measures 95–100% as a shape at every
+length, and `tkh eval` hears 94–100% of level phrases' syllables as spoken. Time grows with the
+clip (the analysis, about 37 ms per syllable here; assessing and the forced decode take a few
+ms). What falls is the share of clips with every syllable measured (scored by `tkh eval`, and
+"clean" for the template fit), as a miss rate of about 0.4% per syllable compounds: 96% of level
+phrases at 12 and 16 syllables, 92% at 24, 88% at 32, 83% at 48 (75% and 62% with declination
+at 32 and 48). 32 keeps the length at which at most about one level clip in eight loses a
+syllable, AISHELL-3's sentences (they average 3.5 s: 85 hours over 88,035 utterances, about 15
+syllables) and about half of THCHS-30's (20 to 47 syllables). **Cost if wrong.** Synthetic phrases are easier than read sentences (no pauses, no
+reset of the register within a sentence); a real-speech length effect would show as unscored or
+misaligned long clips, and `--max-syllables` lowers the cap. Declination, not length, is what
+cost tonekit's hearing in the probe (74–84% of syllables heard as spoken at every length with one
+Chao of drift): the register pooled per speaker does not follow a sentence's drift.
 
 ### R124: Public speakers keep their ids, a hashed split and only documented metadata
 

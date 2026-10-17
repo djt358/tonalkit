@@ -46,7 +46,16 @@ def test_third_tone_sandhi_written_as_spoken_is_kept():
     assert read(transcript("你好", "ni2 hao3")).form == "either"  # 2-3 is also a citation
 
 
-@pytest.mark.parametrize("hanzi,pinyin", [("我的", "wo3 de5"), ("第一次", "di4 yi1 ci4"), ("统一", "tong3 yi1")])
+@pytest.mark.parametrize(
+    "hanzi,pinyin",
+    [
+        ("我的", "wo3 de5"),
+        ("第一次", "di4 yi1 ci4"),
+        ("统一", "tong3 yi1"),
+        ("看一看", "kan4 yi5 kan4"),  # 一 and 不 written neutral: the checker leaves them alone
+        ("对不起", "dui4 bu5 qi3"),
+    ],
+)
 def test_tones_no_sandhi_touches_are_kept(hanzi, pinyin):
     assert tones(transcript(hanzi, pinyin)) == "-".join(p[-1] for p in pinyin.split())
 

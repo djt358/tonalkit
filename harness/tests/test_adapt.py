@@ -208,6 +208,12 @@ def test_a_corpus_with_relabels_is_not_replaced(aishell, tmp_path):
         adapt(aishell3, aishell, options(data, limit_speakers=1))
 
 
+def test_a_download_with_nothing_to_keep_writes_nothing(aishell, tmp_path):
+    with pytest.raises(AdaptError, match="could be kept"):
+        adapt(aishell3, aishell, options(tmp_path / "data", max_syllables=1))
+    assert not (tmp_path / "data").exists()  # not even the data root it would have made
+
+
 @pytest.mark.parametrize("bad", [{"max_syllables": 0}, {"limit_speakers": 0}, {"corpus_id": "Not/Valid"}])
 def test_bad_options_are_refused(aishell, tmp_path, bad):
     with pytest.raises(AdaptError):

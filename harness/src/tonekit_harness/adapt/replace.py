@@ -32,5 +32,8 @@ def put_in_place(staged: Path, corpus: Path, aside: Path) -> str:
         remove_tree(staged)
         return "unchanged"
     apply_all([MoveNew(corpus, aside), MoveNew(staged, corpus)])
-    remove_tree(aside)
+    try:
+        remove_tree(aside)
+    except OSError:
+        pass  # the new corpus is in place; the next `tkh adapt` of this corpus removes what is left
     return "replaced"

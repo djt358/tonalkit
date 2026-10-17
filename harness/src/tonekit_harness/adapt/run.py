@@ -15,7 +15,7 @@ from types import ModuleType
 
 from ..contracts.registry import CORPUS_ID_PATTERN, RegistryError, corpus_dir, load_corpus_file
 from ..intake.checks import check_new_files
-from ..intake.commit import remove_tree
+from ..intake.commit import make_parents, remove_made, remove_tree
 from ..intake.corpus_toml import corpus_toml_text
 from ..intake.layout import RELABEL_LOG
 from ..intake.packs import pack_path
@@ -28,8 +28,9 @@ from .plan import Plan, plan
 from .replace import put_in_place
 from .speakers import LECT, corpus_file
 
-# R123: the length probe (harness/scripts/length_probe.py) found no length at which the forced
-# decode or `tkh eval` breaks down on synthetic phrases up to 48 syllables; see decisions.md.
+# R123: the length probe (harness/scripts/length_probe.py) found nothing that breaks down with
+# length up to 48 syllables, but the share of clips with every syllable measured falls as a small
+# per-syllable miss rate compounds (88% of level phrases at 32 syllables, 83% at 48).
 DEFAULT_MAX_SYLLABLES = 32
 
 
@@ -138,7 +139,8 @@ def adapt(adapter: ModuleType, src: Path, opts: AdaptOptions) -> AdaptResult:
     for left in layout.leftovers(opts.root, cid):
         remove_tree(left)
     staged = layout.staging_dir(opts.root, cid)
-    staged.mkdir(parents=True)
+    made = make_parents(staged)  # the data root and corpora/, when new: removed again on failure
+    staged.mkdir()
     try:
         rows = _stage(staged, p)
         if not rows:
@@ -152,6 +154,7 @@ def adapt(adapter: ModuleType, src: Path, opts: AdaptOptions) -> AdaptResult:
     except BaseException:
         if staged.exists():
             remove_tree(staged)
+        remove_made(made)
         raise
     stale = None
     if outcome == "replaced":

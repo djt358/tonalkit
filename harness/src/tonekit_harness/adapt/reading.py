@@ -141,11 +141,12 @@ def _surface_marked(hanzi: tuple[str, ...], bases: tuple[str, ...], tones: tuple
 
 
 def _underlying(hanzi: tuple[str, ...], bases: tuple[str, ...], tones: tuple[str, ...]) -> list[tuple[str, ...]]:
-    """Per syllable, the citation tones a spoken tone could come from: 一 is yī, 不 is bù; a 2 in a
-    run of 2s that ends right before a 3 may be a sandhi'd 3."""
+    """Per syllable, the citation tones a spoken tone could come from: 一 is yī, 不 is bù (unless
+    written neutral, as in 看一看 and 对不起, which the checker leaves alone); a 2 in a run of 2s
+    that ends right before a 3 may be a sandhi'd 3."""
     out: list[tuple[str, ...]] = []
     for i, (h, b, t) in enumerate(zip(hanzi, bases, tones)):
-        if _is_yi_bu(h, b):
+        if _is_yi_bu(h, b) and t != "5":
             out.append(("1",) if b == "yi" else ("4",))
         elif t == "2" and _run_of_twos_before_a_three(hanzi, bases, tones, i):
             out.append(("2", "3"))
