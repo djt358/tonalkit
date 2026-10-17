@@ -8,11 +8,11 @@ from pathlib import Path
 
 from .. import clearance
 from ..contracts.registry import RegistryError
+from ..data_option import add_data_option, root_from
 from ..manifest import ManifestError
 from ..provenance import ProvenanceError
 from ..repo import repo_root
 from .errors import IntakeError
-from .options import add_data_option, root_from
 from .run import IntakeOptions, intake_bundle
 from .summary import bundle_lines, next_lines
 
@@ -34,7 +34,7 @@ def _options(args: argparse.Namespace) -> IntakeOptions:
 def _run(args: argparse.Namespace) -> int:
     try:
         opts = _options(args)
-    except (IntakeError, OSError, ProvenanceError) as e:
+    except (IntakeError, RegistryError, OSError, ProvenanceError) as e:
         print(f"error: {e}", file=sys.stderr)
         return 1
     results, failed = [], 0

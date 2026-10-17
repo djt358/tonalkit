@@ -18,8 +18,8 @@ from ..contracts.relabel import LogEntry, RelabelError, RelabelExport
 from ..intake import layout
 from ..intake.manifest_lines import appended, rewritten
 from ..intake.packs import pack_path
-from ..intake.stale import mark_stale
 from ..manifest import ManifestError
+from ..registry.stale import mark_stale
 from .plan import Plan, plan_relabel
 from .state import CorpusState, corpus_state, session_of
 

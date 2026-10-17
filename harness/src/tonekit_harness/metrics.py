@@ -240,13 +240,53 @@ def _count_ok(r: Result, theta: float) -> bool:
     return r.intended_rank == 1 and (r.label != "correct" or _accepts(r.overall, theta))
 
 
-def count_robustness(results: Sequence[Result], theta: float) -> float | None:
+def count_robustness(results: Sequence[Result], theta: float | None) -> float | None:
     """The fraction of `diag_count` clips ranked first and, for a `correct` clip, scoring at least
-    `theta` (normally the median LOO threshold); None if the results have no such clip."""
+    `theta` (normally the median LOO threshold); None if the results have no such clip, or no
+    threshold (a run with no gate pairs)."""
     clips = [r for r in results if r.set == "diag_count"]
-    if not clips:
+    if not clips or theta is None:
         return None
     return sum(_count_ok(r, theta) for r in clips) / len(clips)
+
+
+def has_gate_clips(results: Sequence[Result]) -> bool:
+    """Whether the results hold a gate clip. Without one there is no S1 verdict to compute: a
+    public corpus's sentences are never gate clips (R121)."""
+    return any(r.set == "gate" for r in results)
+
+
+@dataclass(frozen=True)
+class SentenceAccuracy:
+    """How tonekit heard the sentences of public corpora, whose transcripts say what was spoken
+    (R121): a diagnostic, never part of a gate."""
+
+    clips: int
+    unscored: int  # sentence clips with no overall (tone not checked)
+    syllables: int  # the sentences' syllables
+    heard: int  # syllables tonekit gave a tone (`heard` is not None)
+    agreed: int  # ... and the tone is the transcript's
+
+    @property
+    def accuracy(self) -> float | None:
+        """The share of heard syllables heard as the transcript's tone; None if none was heard."""
+        return self.agreed / self.heard if self.heard else None
+
+
+def sentence_accuracy(results: Sequence[Result]) -> SentenceAccuracy | None:
+    """The sentence diagnostic over the `sentence` results; None if there are none."""
+    clips = [r for r in results if r.set == "sentence"]
+    if not clips:
+        return None
+    syllables = [s for r in clips for s in r.syllables]
+    heard = [s for s in syllables if s.heard is not None]
+    return SentenceAccuracy(
+        clips=len(clips),
+        unscored=sum(r.overall is None for r in clips),
+        syllables=len(syllables),
+        heard=len(heard),
+        agreed=sum(s.heard == s.expected for s in heard),
+    )
 
 
 def _fmt(x: float | None) -> str:
@@ -266,24 +306,25 @@ def _gate_reason(r: Result, gate: GateMetrics) -> str | None:
     return None
 
 
-def _diag_reason(r: Result, theta: float) -> str | None:
+def _diag_reason(r: Result, theta: float | None) -> str | None:
     if r.set == "diag_minimal" and r.label == "correct" and r.intended_rank != 1:
         return f"intended reading ranked {r.intended_rank}, expected rank 1"
-    if r.set == "diag_count" and not _count_ok(r, theta):
-        if r.intended_rank != 1:
-            return f"intended reading ranked {r.intended_rank}, expected rank 1"
+    if r.set == "diag_count" and r.intended_rank != 1:
+        return f"intended reading ranked {r.intended_rank}, expected rank 1"
+    if r.set == "diag_count" and theta is not None and not _count_ok(r, theta):
         return f"overall {_fmt(r.overall)}, below the median threshold {theta:.3f}"
     return None
 
 
-def failures(results: Sequence[Result], gate: GateMetrics, theta: float) -> list[Failure]:
+def failures(results: Sequence[Result], gate: GateMetrics | None, theta: float | None) -> list[Failure]:
     """Every clip the metrics count against us, with why: gate clips misclassified at their
     held-out θ, `diag_minimal` clips whose intended reading did not rank first and `diag_count`
-    clips that fail `count_robustness` at `theta`. Ordered gate, diag_minimal, diag_count, then
-    by pair and clip id, whatever the order of `results`."""
+    clips that fail `count_robustness` at `theta` (with no threshold, only those not ranked
+    first). Ordered gate, diag_minimal, diag_count, then by pair and clip id, whatever the order
+    of `results`. Sentences (R121) are never failures: a diagnostic counts them."""
     out = []
     for r in results:
-        reason = _gate_reason(r, gate) if r.set == "gate" else _diag_reason(r, theta)
+        reason = _gate_reason(r, gate) if r.set == "gate" and gate is not None else _diag_reason(r, theta)
         if reason is not None:
             out.append(Failure(r, reason))
     out.sort(key=lambda f: (_FAILURE_SET_ORDER[f.result.set], f.result.pair or "", f.result.id))

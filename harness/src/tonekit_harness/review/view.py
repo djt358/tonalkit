@@ -18,6 +18,7 @@ from ..intake import layout
 from ..intake.packs import pack_path
 from ..intake.trace import corpus_document
 from ..manifest import Clip
+from ..registry.items import qualify
 from ..relabel.pairs import twins
 from ..relabel.rules import card_tones
 from ..relabel.state import ClipState, CorpusState, corpus_state, session_of
@@ -157,6 +158,13 @@ def _selected(st: ClipState, opts: ReviewOptions) -> bool:
     return not opts.sets or row.set in opts.sets
 
 
+def _by_clip_id(results: EvalResults | None, corpus_id: str) -> dict:
+    """The results by the corpus's own clip ids. A `tkh eval --select` results file names clips
+    `<corpus>/<id>` (`registry.qualify`): this corpus's are read by their own id."""
+    prefix = qualify(corpus_id, "")
+    return {c.id.removeprefix(prefix): c for c in results.clips} if results else {}
+
+
 def page_data(opts: ReviewOptions, *, now: datetime | None = None) -> dict:
     """Everything the page shows. Raises `ReviewError` (or `RelabelError`) when the corpus, its
     decks or the results cannot be read, or the filters leave no clip."""
@@ -166,7 +174,7 @@ def page_data(opts: ReviewOptions, *, now: datetime | None = None) -> dict:
         raise ReviewError(f"no clips in corpus {opts.corpus_id!r} for the speakers and sets asked for")
     shown = shown_cards(state, repo=opts.repo, deck=opts.deck)
     results, results_path = _results(opts)
-    by_id = {c.id: c for c in results.clips} if results else {}
+    by_id = _by_clip_id(results, opts.corpus_id)
     originals = state.originals
     twin_of = twins(originals)
     views = {

@@ -31,6 +31,7 @@ class Observation:
     kind: str  # SHAPE, UNPITCHED or MISSED
     shape: dict | None  # the ToneShape JSON when `kind` is SHAPE and it sits on a nucleus
     creaky: bool = False  # a shape whose pitch gives way to creak (`CreakyTail`, ruling R108)
+    span: tuple[int, int] | None = None  # the decoded syllable's [start, end) frames
 
     @property
     def context(self) -> tuple[str | None, bool]:
@@ -103,6 +104,7 @@ def observe_clip(clip: Clip, grader: Grader, register_json: str | None) -> list[
                 kind=kind,
                 shape=shapes.get(span) if kind == SHAPE else None,
                 creaky=kind == SHAPE and "CreakyTail" in _issues(fit["judgement"]["measured"]),
+                span=span,
             )
         )
     return out

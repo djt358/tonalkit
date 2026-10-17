@@ -7,6 +7,7 @@ from pathlib import Path
 
 from ..contracts.registry import load_corpus_file
 from ..manifest import Clip
+from ..registry import FittingSelection
 
 
 class FitError(ValueError):
@@ -33,3 +34,13 @@ def fit_clips(clips: Sequence[Clip], allowed: Sequence[str], wanted: Sequence[st
     if not out:
         raise FitError(f"no clips for speaker(s) {', '.join(chosen) or '(none)'}")
     return out
+
+
+def selection_clips(selection: FittingSelection) -> list[Clip]:
+    """The grading clips of a selection the registry has cleared for fitting (no gate or heldout
+    speaker, every source cleared). A fit reads `calib` speakers only, as from a manifest: a `dev`
+    speaker in the selection is refused, never dropped quietly."""
+    dev = sorted(q for q, s in selection.speakers.items() if s.split != "calib")
+    if dev:
+        raise FitError(f"speaker(s) {', '.join(dev)} are not in the calib split; only calib speakers are fitted on")
+    return selection.grading_clips()

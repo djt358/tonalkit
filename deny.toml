@@ -6,7 +6,15 @@ all-features = true
 [advisories]
 version = 2
 # paste is unmaintained, not vulnerable; it is a proc-macro reached only through pyin's dependencies.
-ignore = [{ id = "RUSTSEC-2024-0436", reason = "paste is unmaintained (not vulnerable); transitive proc-macro via pyin -> statrs -> nalgebra -> simba; revisit when pyin's dependencies move" }]
+# zip 0.5 (RUSTSEC-2026-0367, -0368, -0369: unsafe permission bits and symlinks when *extracting* an
+# archive) arrives only through pyin's default ndarray-npy "compressed_npz" feature. tonekit never reads
+# .npz files or extracts archives with it; upgrading needs a pyin that moves off ndarray-npy 0.8.
+ignore = [
+    { id = "RUSTSEC-2024-0436", reason = "paste is unmaintained (not vulnerable); transitive proc-macro via pyin -> statrs -> nalgebra -> simba; revisit when pyin's dependencies move" },
+    { id = "RUSTSEC-2026-0367", reason = "zip 0.5 via pyin -> ndarray-npy (compressed_npz); tonekit never extracts archives with it; revisit when pyin moves off ndarray-npy 0.8" },
+    { id = "RUSTSEC-2026-0368", reason = "zip 0.5 via pyin -> ndarray-npy (compressed_npz); tonekit never extracts archives with it; revisit when pyin moves off ndarray-npy 0.8" },
+    { id = "RUSTSEC-2026-0369", reason = "zip 0.5 via pyin -> ndarray-npy (compressed_npz); tonekit never extracts archives with it; revisit when pyin moves off ndarray-npy 0.8" },
+]
 
 [licenses]
 version = 2

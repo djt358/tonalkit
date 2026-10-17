@@ -33,6 +33,7 @@ Split = Literal["gate", "dev", "calib", "heldout"]
 
 SessionCode = Annotated[str, Field(pattern=SESSION_CODE_PATTERN)]
 CORPUS_ID_PATTERN = r"^[a-z0-9][a-z0-9._-]*$"  # no `/`: a corpus id names a directory and a file
+SPEAKER_ID_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._-]*$"  # no `/`: public corpora name audio folders by it
 _VOLUNTEER_ID = re.compile(r"v-([a-hj-np-z2-9]{6})")
 
 
@@ -45,7 +46,10 @@ class RegistryError(ValueError):
 
 def data_root(cli_value: str | Path | None = None, *, environ: Mapping[str, str] | None = None) -> Path:
     """The data root: `tkh --data PATH`, else `$TONEKIT_DATA`, else `~/tonekit-data`. Absolute; it
-    is not created."""
+    is not created. An empty `cli_value` (an unset shell variable) raises `RegistryError` rather
+    than meaning the current directory."""
+    if cli_value is not None and not str(cli_value).strip():
+        raise RegistryError("--data is empty; give a directory, or leave it out for $TONEKIT_DATA")
     env = (os.environ if environ is None else environ).get(DATA_ENV, "").strip()
     chosen = Path(cli_value) if cli_value is not None else Path(env) if env else Path.home() / DEFAULT_DATA_DIRNAME
     return chosen.expanduser().absolute()
@@ -75,7 +79,7 @@ def stale_path(root: Path, corpus_id: str) -> Path:
 
 
 class Speaker(StrictModel):
-    id: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]*$")  # v-<session code> for volunteers
+    id: str = Field(pattern=SPEAKER_ID_PATTERN)  # v-<session code> for volunteers
     background: Background | None = None  # public corpora do not say
     grew_up_hearing: GrewUpHearing | None = None
     # The pack accent id this speaker is graded against; None means `speaker_accent`'s default (R82).

@@ -9,12 +9,16 @@ reading). Pure: no files.
 - unclear: the row as intake wrote it, flagged `needs_listen` for another listen (R112);
 - exclude (bad audio): no row. The audio stays until purge.
 
+A public corpus's sentence (R121) has no card: its reading is what its transcript says was said,
+so tones heard otherwise become both its intended reading and its produced tones, and it stays
+`correct`.
+
 Whether a pair is still a pair is `pairs`' business."""
 
 from __future__ import annotations
 
 from ..contracts.relabel import AppliedDecision, Decision
-from ..manifest import Clip
+from ..manifest import SENTENCE, Clip
 
 GRADED_LABELS = frozenset({"correct", "tone_error"})
 
@@ -43,4 +47,7 @@ def relabelled(original: Clip, decision: Decision | AppliedDecision | None) -> C
     tones = list(decision.tones or [])
     if tones == card_tones(original):
         return original
+    if original.set == SENTENCE:
+        intended = original.intended.model_copy(update={"tones": tones})
+        return original.model_copy(update={"produced_tones": tones, "intended": intended})
     return original.model_copy(update={"produced_tones": tones, "label": _label(original, tones)})
