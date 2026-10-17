@@ -32,7 +32,11 @@ def session_code(clip: Clip) -> str | None:
 
 
 def _session(root: Path, code: str) -> Session | None:
-    path = session_copy(root, code)
+    # A selection across corpora qualifies clip ids with their corpus (`<corpus>/<CODE>-<card>`,
+    # `registry.Selection.grading_clips`) and grades from the corpora directory: the session file
+    # is then in that corpus's directory.
+    corpus, _, bare = code.rpartition("/")
+    path = session_copy(root / corpus if corpus else root, bare)
     if not path.is_file():
         return None
     try:

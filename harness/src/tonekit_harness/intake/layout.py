@@ -28,15 +28,6 @@ def corpora_dir(root: Path) -> Path:
     return root / "corpora"
 
 
-def corpus_ids(root: Path) -> list[str]:
-    """Every corpus directory under the data root (with or without a corpus.toml), sorted; intake's
-    staging areas and other dot-directories are not corpora."""
-    base = corpora_dir(root)
-    if not base.is_dir():
-        return []
-    return sorted(p.name for p in base.iterdir() if p.is_dir() and not p.name.startswith("."))
-
-
 def default_corpus_id(deck_id: str) -> str:
     """The corpus a bundle goes to without `--corpus`: one per deck, so every volunteer who read
     the same cards is graded together."""

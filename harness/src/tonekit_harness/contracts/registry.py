@@ -46,7 +46,10 @@ class RegistryError(ValueError):
 
 def data_root(cli_value: str | Path | None = None, *, environ: Mapping[str, str] | None = None) -> Path:
     """The data root: `tkh --data PATH`, else `$TONEKIT_DATA`, else `~/tonekit-data`. Absolute; it
-    is not created."""
+    is not created. An empty `cli_value` (an unset shell variable) raises `RegistryError` rather
+    than meaning the current directory."""
+    if cli_value is not None and not str(cli_value).strip():
+        raise RegistryError("--data is empty; give a directory, or leave it out for $TONEKIT_DATA")
     env = (os.environ if environ is None else environ).get(DATA_ENV, "").strip()
     chosen = Path(cli_value) if cli_value is not None else Path(env) if env else Path.home() / DEFAULT_DATA_DIRNAME
     return chosen.expanduser().absolute()

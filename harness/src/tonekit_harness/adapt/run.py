@@ -13,14 +13,19 @@ from datetime import UTC, datetime
 from pathlib import Path
 from types import ModuleType
 
-from ..contracts.registry import CORPUS_ID_PATTERN, RegistryError, corpus_dir, load_corpus_file
+from ..contracts.registry import (
+    CORPUS_ID_PATTERN,
+    RegistryError,
+    corpus_dir,
+    load_corpus_file,
+)
 from ..intake.checks import check_new_files
 from ..intake.commit import make_parents, remove_made, remove_tree
 from ..intake.corpus_toml import corpus_toml_text
 from ..intake.layout import RELABEL_LOG
 from ..intake.packs import pack_path
-from ..intake.stale import mark_stale
 from ..manifest import Clip
+from ..registry.stale import mark_stale
 from . import drops, layout
 from .audio import converted
 from .corpus_files import AdaptError

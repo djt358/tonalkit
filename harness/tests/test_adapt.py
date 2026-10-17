@@ -255,10 +255,11 @@ def test_an_adapted_corpus_is_graded_without_a_verdict_and_fitted_on_its_calib_s
     assert code == 0, err
     fit_line, eval_line = [line.strip() for line in out.splitlines() if line.startswith("  uv run tkh ")]
     fit_args, eval_args = fit_line.split()[3:], eval_line.split()[3:]
-    assert eval_args[eval_args.index("--speaker") + 1] == "SSB0005"  # the held-out speaker
+    assert fit_args[fit_args.index("--select") + 1] == "aishell3:calib"
+    assert eval_args[eval_args.index("--select") + 1] == "aishell3:heldout"  # SSB0005, the held-out speaker
     code, out, err = tkh(capsys, *fit_args, "--rounds", "1")
     assert code == 0, err
-    assert "fitted on 3 clips of SSB0011, SSB0012" in out
+    assert "fitted on 3 clips of aishell3/SSB0011, aishell3/SSB0012" in out
     assert json.loads((data / "fits" / "aishell3.calib.json").read_text())["unpitched"]
     code, out, err = tkh(capsys, *eval_args, "--no-cache")
     assert code == 0, err

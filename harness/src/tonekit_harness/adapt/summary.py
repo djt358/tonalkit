@@ -42,14 +42,13 @@ def next_lines(r: AdaptResult, root: Path) -> list[str]:
     speakers have no register drill."""
     report, results = data_layout.report_path(root, r.corpus_id), data_layout.results_path(root, r.corpus_id)
     calib = root / "fits" / f"{r.corpus_id}.calib.json"
-    fit = ["uv", "run", "tkh", "fit", "--manifest", r.manifest, "--pack", r.pack, "--out-calib", calib]
+    data = ["--data", root]
+    fit = ["uv", "run", "tkh", "fit", *data, "--select", f"{r.corpus_id}:calib", "--pack", r.pack, "--out-calib", calib]
     fit += ["--register-from", "speaker"]
     lines = ["", "next, from harness/ (outputs go under the data root, never the repository):", "  " + _quoted(fit)]
     held_out = r.splits.get("heldout", [])
     if held_out:
-        evaluate = ["uv", "run", "tkh", "eval", "--manifest", r.manifest, "--pack", r.pack, "--calib", calib]
-        evaluate += ["--register-from", "speaker", "--report", report, "--results", results]
-        for sid in held_out:
-            evaluate += ["--speaker", sid]
+        evaluate = ["uv", "run", "tkh", "eval", *data, "--select", f"{r.corpus_id}:heldout", "--pack", r.pack]
+        evaluate += ["--calib", calib, "--register-from", "speaker", "--report", report, "--results", results]
         lines.append("  " + _quoted(evaluate))
     return lines

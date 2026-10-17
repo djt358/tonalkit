@@ -10,7 +10,7 @@ from pathlib import Path
 from .. import clearance
 from ..contracts.registry import RegistryError
 from ..intake.errors import IntakeError
-from ..intake.options import add_data_option, root_from
+from ..data_option import add_data_option, root_from
 from ..manifest import ManifestError
 from ..provenance import ProvenanceError
 from ..repo import repo_root

@@ -9,11 +9,12 @@ import sys
 from pathlib import Path
 
 from ..contracts.bundle import SESSION_CODE_PATTERN
+from ..contracts.registry import RegistryError
+from ..data_option import add_data_option, root_from
 from ..evaluate import DEFAULT_CACHE_DIR
 from ..repo import repo_root
 from .bundle_match import session_bundles
 from .errors import IntakeError
-from .options import add_data_option, root_from
 from .purge import PurgeOutcome, purge_session
 
 RAW_COPIES = Path("harness") / "corpus" / "raw"  # where DJ unzips bundles in the checkout
@@ -66,7 +67,7 @@ def _run(args: argparse.Namespace) -> int:
         root = root_from(args)
         code = _code(args.session)
         outcome = purge_session(root, code, repo=repo, cache_dir=DEFAULT_CACHE_DIR)
-    except (IntakeError, OSError) as e:
+    except (IntakeError, RegistryError, OSError) as e:
         print(f"error: {e}", file=sys.stderr)
         return 1
     if outcome is None:

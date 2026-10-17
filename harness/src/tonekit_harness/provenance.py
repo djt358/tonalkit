@@ -13,8 +13,8 @@ import tomllib
 from collections.abc import Iterable
 from pathlib import Path
 
-from .intake.errors import IntakeError
-from .intake.options import add_data_option, root_from
+from .contracts.registry import RegistryError
+from .data_option import add_data_option, root_from
 from .provenance_stale import corpora_of, stale_violations
 
 _VALUES = {"allow", "verify", "deny", "n/a"}
@@ -294,7 +294,7 @@ def _run(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
             violations = check_packs(args.register, args.packs_root, files, data)
         else:
             violations = check(args.register, files, data)
-    except (OSError, ProvenanceError, IntakeError) as e:
+    except (OSError, ProvenanceError, RegistryError) as e:
         print(f"error: {e}", file=sys.stderr)
         return 2
     if violations:
