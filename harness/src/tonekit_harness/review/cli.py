@@ -8,10 +8,11 @@ import shlex
 import sys
 from pathlib import Path
 
+from ..contracts.registry import RegistryError
 from ..contracts.relabel import RelabelError
+from ..data_option import add_data_option, root_from
 from ..intake import layout
 from ..intake.errors import IntakeError
-from ..intake.options import add_data_option, root_from
 from ..repo import repo_root
 from .cards import ReviewError
 from .page import write_page
@@ -57,7 +58,7 @@ def _run(args: argparse.Namespace) -> int:
         opts = _options(args)
         data = page_data(opts)
         path = write_page(opts.root, opts.corpus_id, data)
-    except (ReviewError, RelabelError, IntakeError, OSError) as e:
+    except (ReviewError, RelabelError, IntakeError, RegistryError, OSError) as e:
         print(f"error: {e}", file=sys.stderr)
         return 1
     print("\n".join(_lines(path, data, opts)))

@@ -12,6 +12,7 @@ from pathlib import Path
 
 from ..atomic import write_text_atomic
 from ..contracts.registry import PurgeRecord, RegistryError, corpus_file_path, inbox_dir, load_corpus_file
+from ..registry.stale import mark_stale
 from . import layout
 from .analysis_cache import clear_analysis_cache
 from .reports import remove_files, reports_mentioning
@@ -24,7 +25,6 @@ from .manifest_lines import without_rows
 from .packs import pack_path
 from .purge_log import append_purge_record
 from .review_pages import review_pages_mentioning
-from .stale import mark_stale
 from .trace import CorpusTrace, corpus_document, find_session, manifest_text
 
 

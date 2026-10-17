@@ -78,3 +78,17 @@ def test_an_unreadable_session_file_is_an_error(tmp_path):
     (tmp_path / "sessions" / "K7Q2MD.json").write_text("{not json", encoding="utf-8")
     with pytest.raises(SessionOrderError, match="K7Q2MD.json"):
         reading_order(clips, tmp_path)
+
+
+def test_a_clip_qualified_by_its_corpus_finds_the_session_file_in_that_corpus(tmp_path):
+    # `tkh eval --select` grades from the corpora directory with ids `<corpus>/<CODE>-<card>`
+    corpus = tmp_path / "corpora" / "volunteers-s05-v1"
+    clips = [
+        recorded(corpus, "K7Q2MD", c).model_copy(
+            update={"id": f"volunteers-s05-v1/K7Q2MD-{c}", "speaker": "volunteers-s05-v1/v-k7q2md"}
+        )
+        for c in ["r01", "g01-c", "g01-e"]
+    ]
+    write_session(corpus, "K7Q2MD", ["r01", "g01-e", "g01-c"])
+    got = reading_order(clips, tmp_path / "corpora")["volunteers-s05-v1/v-k7q2md"]
+    assert [c.card for c in got] == ["r01", "g01-e", "g01-c"]

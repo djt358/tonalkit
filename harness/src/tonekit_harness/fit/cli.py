@@ -12,10 +12,15 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .. import calibration, clearance, manifest
+from ..contracts.registry import RegistryError
+from ..data_option import add_data_option, root_from
 from ..evaluate import REGISTER_FROM, EvalError, Grader, base_accent, clip_registers
+from ..registry import RefusalError, SelectionError
+from ..registry.runs import selection_from
+from ..registry.selectors import add_select_option
 from .observe import Observation, observe_clip
 from .packfile import fitted_pack, render, seed_expectations
-from .select import FitError, calib_speakers, fit_clips
+from .select import FitError, calib_speakers, fit_clips, selection_clips
 from .tail import fit_creaky_tail
 from .templates import fit_spread, fit_templates
 from .unpitched import fit_unpitched
@@ -93,27 +98,40 @@ def fit(
     return Fitted(pack_toml, calib)
 
 
+def _clips(args: argparse.Namespace) -> tuple[list, Path, list[str]]:
+    """The clips to fit on, the directory their paths are relative to, and the corpora they came
+    from (none named for a manifest)."""
+    register = clearance.read_register(args.register)
+    if args.manifest:
+        manifest_path = Path(args.manifest)
+        corpus_toml = Path(args.corpus) if args.corpus else manifest_path.parent / "corpus.toml"
+        clips = manifest.load(manifest_path, register=register)
+        return fit_clips(clips, calib_speakers(corpus_toml, args.pack), args.speaker), manifest_path.parent, []
+    if args.corpus:
+        raise FitError("--corpus names the corpus.toml of a --manifest; with --select the data root has them")
+    selection = selection_from(args.select, root_from(args), args.pack, default_splits=("calib",), speakers=args.speaker)
+    checked = selection.for_fitting(register)
+    return selection_clips(checked), checked.audio_root, list(checked.corpora)
+
+
 def _run(args: argparse.Namespace) -> int:
-    manifest_path = Path(args.manifest)
-    corpus_toml = Path(args.corpus) if args.corpus else manifest_path.parent / "corpus.toml"
     try:
-        clips = manifest.load(manifest_path, register=clearance.read_register(args.register))
         if args.as_component is not None and not 0.0 < args.as_component < 1.0:
             raise FitError(f"--as-component must be between 0 and 1, got {args.as_component}")
-        chosen = fit_clips(clips, calib_speakers(corpus_toml, args.pack), args.speaker)
+        chosen, root, corpora = _clips(args)
         files = calibration.load(args.pack, args.calib)
         result = fit(
             chosen,
             files.pack_toml,
             files.calib_json or json.dumps(DEFAULT_CALIB),
-            manifest_path.parent,
+            root,
             args.rounds,
             templates=args.out_pack is not None,
             register_from=args.register_from,
             shrink=args.shrink,
             component=args.as_component,
         )
-    except (FitError, EvalError, manifest.ManifestError, OSError, ValueError) as e:
+    except (FitError, EvalError, RefusalError, SelectionError, RegistryError, manifest.ManifestError, OSError, ValueError) as e:
         print(f"error: {e}", file=sys.stderr)
         return 1
     written = [_write(args.out_calib, json.dumps(result.calib, indent=2, ensure_ascii=False) + "\n")]
@@ -121,6 +139,9 @@ def _run(args: argparse.Namespace) -> int:
         written.append(_write(args.out_pack, result.pack_toml))
     speakers = sorted({c.speaker for c in chosen})
     print(f"fitted on {len(chosen)} clips of {', '.join(speakers)}; wrote {', '.join(map(str, written))}")
+    if corpora:
+        listed = ", ".join(f'"{c}"' for c in corpora)
+        print(f"fitted on corpora {', '.join(corpora)}: list them in the pack's PROVENANCE.toml as corpora = [{listed}] (R113)")
     return 0
 
 
@@ -149,13 +170,23 @@ DEFAULT_CALIB = {
 def register(subparsers) -> None:
     p = subparsers.add_parser(
         "fit",
-        help="fit the calibration on a corpus's calib-split speakers and write it (rulings R103, R108, R109)",
+        help="fit the calibration on calib-split speakers (of one manifest, or of a selection across corpora) "
+        "and write it (rulings R103, R108, R109)",
     )
-    p.add_argument("--manifest", required=True, help="corpus manifest (JSONL)")
-    p.add_argument("--corpus", help="the corpus's corpus.toml (default: beside the manifest); it says which speakers are calib")
+    clips = p.add_mutually_exclusive_group(required=True)
+    clips.add_argument("--manifest", help="corpus manifest (JSONL)")
+    add_select_option(clips, "calib (a fit reads calib speakers only)")
+    add_data_option(p)
+    p.add_argument(
+        "--corpus", help="with --manifest: the corpus's corpus.toml (default: beside the manifest); it says which speakers are calib"
+    )
     p.add_argument("--pack", required=True, help="language pack TOML (e.g. packs/cmn/cmn.toml)")
     p.add_argument("--calib", help="calibration JSON to start from (default: the one beside the pack)")
-    p.add_argument("--speaker", action="append", help="fit on this calib speaker only (repeatable; default: every calib speaker)")
+    p.add_argument(
+        "--speaker",
+        action="append",
+        help="fit on this calib speaker only (repeatable; corpus/speaker with --select; default: every calib speaker)",
+    )
     p.add_argument("--out-calib", required=True, help="where to write the fitted calibration JSON")
     p.add_argument(
         "--out-pack",
