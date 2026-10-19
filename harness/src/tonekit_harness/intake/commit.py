@@ -11,7 +11,7 @@ from pathlib import Path
 from ..atomic import write_text_atomic
 
 
-def _make_parents(path: Path) -> list[Path]:
+def make_parents(path: Path) -> list[Path]:
     """Create the missing parent directories of `path`; returns them, outermost first."""
     made = [p for p in reversed(path.parents) if not p.exists()]
     for p in made:
@@ -19,7 +19,8 @@ def _make_parents(path: Path) -> list[Path]:
     return made
 
 
-def _remove_made(made: list[Path]) -> None:
+def remove_made(made: list[Path]) -> None:
+    """Remove the (empty) directories `make_parents` created, innermost first."""
     for p in reversed(made):
         p.rmdir()
 
@@ -36,12 +37,12 @@ class MoveNew:
     def do(self) -> None:
         if self.dst.exists():
             raise FileExistsError(f"{self.dst} already exists")
-        self.made = _make_parents(self.dst)
+        self.made = make_parents(self.dst)
         os.rename(self.src, self.dst)
 
     def undo(self) -> None:
         os.rename(self.dst, self.src)
-        _remove_made(self.made)
+        remove_made(self.made)
 
 
 @dataclass
@@ -56,13 +57,13 @@ class Replace:
 
     def do(self) -> None:
         self.before = self.dst.read_text(encoding="utf-8") if self.dst.exists() else None
-        self.made = _make_parents(self.dst)
+        self.made = make_parents(self.dst)
         os.replace(self.src, self.dst)
 
     def undo(self) -> None:
         if self.before is None:
             self.dst.unlink(missing_ok=True)
-            _remove_made(self.made)
+            remove_made(self.made)
         else:
             write_text_atomic(self.dst, self.before)
 

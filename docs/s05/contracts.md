@@ -157,10 +157,11 @@ $TONEKIT_DATA/
   corpora/<corpus id>/manifest.jsonl
   corpora/<corpus id>/audio/...
   corpora/<corpus id>/audio/<CODE>/<card id>.wav  # intake: a session's clips, byte for byte
+  corpora/<corpus id>/audio/<speaker>/<utterance>.wav  # tkh adapt: a public corpus's audio, 16 kHz mono PCM16
   corpora/<corpus id>/sessions/<CODE>.json        # intake: the session's session.json, byte for byte
   corpora/<corpus id>/relabels.jsonl              # tkh relabel: append-only log of decisions and row changes (§7)
   inbox/                      # bundles waiting for intake
-  stale/<corpus id>.json      # outputs made from this corpus are stale (purge, relabel); cleared by the next run
+  stale/<corpus id>.json      # outputs made from this corpus are stale (purge, relabel, adapt again); cleared by the next run
   reports/<corpus id>.md      # where intake tells `tkh eval` to write (reports list clips by session code)
   reports/<corpus id>.results.json  # `tkh eval --results`: every clip's grading, which `tkh review` reads
   review/<corpus id>/index.html     # `tkh review`: the listening page; links the audio, opened from disk (§7)
@@ -170,7 +171,8 @@ $TONEKIT_DATA/
 A stale marker (`contracts.registry.StaleMarker`) is `{"corpus": "<id>", "reasons": [{"reason":
 "purged session K7Q2MD", "marked_at": "<UTC time>"}]}`; marking again appends a reason, and a
 marker that can't be read is replaced by one that says so. A relabel that changes rows marks the
-corpus with `relabelled <n> clips (<file name>)` (no clip ids).
+corpus with `relabelled <n> clips (<file name>)` (no clip ids); `tkh adapt` that replaces a public
+corpus marks it `adapted again from <adapter> (<n> clips)`.
 
 A pack fitted on corpora lists them in its `PROVENANCE.toml` as `corpora = ["<corpus id>", ...]`
 beside its `[[source]]` rows (ruling R113). `tkh provenance` fails while
@@ -197,6 +199,11 @@ split = "gate"                 # gate | dev | calib | heldout
 sessions = ["K7Q2MD"]
 ```
 
+- **Public corpora** (`tkh adapt aishell3|thchs30 SRC`, R121–R125): kind `public`, `source` the
+  register id (refused unless its `shipped_weights_training` is `allow`), speaker ids the corpus's
+  own, `background` and `grew_up_hearing` only where the corpus documents them, no stored accent.
+  Running it again on the same download changes nothing; with other options it replaces the
+  corpus in one step and marks it stale.
 - **Splits.**
   - Volunteer and DJ speakers default to `gate`.
   - Public corpora are split by speaker, deterministically by hash: calib 60%, dev 20%,
@@ -232,11 +239,21 @@ manifest holds many speakers and a gate pair is one speaker's two readings (the 
 false. A recorded `gate` or `diag_t23` card whose twin was skipped gets no row (pairs are graded
 whole).
 
+Rows `tkh adapt` writes from a public corpus (R121) are in `set = "sentence"`, a manifest value
+that is not a deck set, so no gate selects them: `id` is the corpus's utterance id, `speaker` its
+speaker id, `label` `correct`, `intended` the transcript's spoken tones (labels: the toneless
+syllables) with no distractors, `produced_tones` equal to `intended.tones`, no pair, `context`
+`phrase`, `source` the corpus's register id. The model refuses a sentence that is not one correct,
+unpaired reading. `tkh eval` over clips with no gate clip issues no verdict and reports the share
+of sentence syllables heard as the transcript's tone.
+
 Rows `tkh relabel` changes (§7, R112): `produced_tones` become what the listener heard and `label`
 follows them (`correct` when they are the intended reading, else `tone_error`); "unclear" sets
-`needs_listen`; "exclude" removes the row. When a pair of a pair set is no longer one `correct`
-and one `tone_error` row, both rows lose their `pair` (`null`): a `gate` row with no pair is kept
-for fitting and listed by the gate report, but is not in any pair. Every row still validates.
+`needs_listen`; "exclude" removes the row. A sentence heard otherwise takes the heard tones as
+both its intended and produced tones and stays `correct`. When a pair of a pair set is no longer
+one `correct` and one `tone_error` row, both rows lose their `pair` (`null`): a `gate` row with no
+pair is kept for fitting and listed by the gate report, but is not in any pair. Every row still
+validates.
 
 ## 5. Gate file (`gates/<id>.toml`)
 

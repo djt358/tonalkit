@@ -33,6 +33,7 @@ Split = Literal["gate", "dev", "calib", "heldout"]
 
 SessionCode = Annotated[str, Field(pattern=SESSION_CODE_PATTERN)]
 CORPUS_ID_PATTERN = r"^[a-z0-9][a-z0-9._-]*$"  # no `/`: a corpus id names a directory and a file
+SPEAKER_ID_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._-]*$"  # no `/`: public corpora name audio folders by it
 _VOLUNTEER_ID = re.compile(r"v-([a-hj-np-z2-9]{6})")
 
 
@@ -78,7 +79,7 @@ def stale_path(root: Path, corpus_id: str) -> Path:
 
 
 class Speaker(StrictModel):
-    id: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]*$")  # v-<session code> for volunteers
+    id: str = Field(pattern=SPEAKER_ID_PATTERN)  # v-<session code> for volunteers
     background: Background | None = None  # public corpora do not say
     grew_up_hearing: GrewUpHearing | None = None
     # The pack accent id this speaker is graded against; None means `speaker_accent`'s default (R82).

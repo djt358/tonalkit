@@ -68,6 +68,21 @@ deliberate error read as the correct word shows up in the report as an accepted 
 which is the list to listen to). It then prints the `tkh eval` command to run, with the report
 under the data root. `tkh purge --session CODE` deletes a session on request.
 
+## Public corpora (AISHELL-3, THCHS-30)
+
+Downloaded corpora never go in `corpus/` either. Extract the download, then from `harness/`:
+
+    uv run tkh adapt aishell3 ~/Downloads/data_aishell3
+    uv run tkh adapt thchs30 ~/Downloads/data_thchs30
+
+Each writes a `public` corpus under the data root (`corpora/aishell3`, `corpora/thchs30`): the
+corpus's speaker ids in hashed splits (R69), audio converted to 16 kHz mono PCM16, and one
+`sentence` row (R121) per utterance whose spoken tones its transcript settles (R122). It refuses
+a source the data register does not `allow`, prints how many utterances it dropped and why, and
+then the `tkh fit` and `tkh eval` commands to run. `--max-syllables N` (default 32, R123) caps the
+length, `--limit-speakers N` makes a quick trial on the first N speakers. Running it again on the
+same download changes nothing; with other options it replaces the corpus and marks it stale.
+
 ## Manifest: `corpus/manifest.jsonl`
 
 One JSON object per line. Blank lines are skipped. Unknown keys are rejected, so a misspelt field
@@ -78,7 +93,7 @@ is an error instead of silently dropped data. The schema is `manifest.Clip`.
 | `id` | string | Unique clip id, e.g. `gate-01-correct`. |
 | `path` | string | The ingested WAV, relative to `corpus/` (e.g. `dj/gate-01-correct.wav`). |
 | `speaker` | string | Speaker id, e.g. `dj`. |
-| `set` | one of `gate`, `diag_t23`, `diag_count`, `diag_minimal`, `diag_context`, `quiet`, `register`, `synthetic` | Which recording set the clip belongs to. |
+| `set` | one of `gate`, `diag_t23`, `diag_count`, `diag_minimal`, `diag_context`, `quiet`, `register`, `synthetic`, `sentence` | Which recording set the clip belongs to (`sentence`: a public corpus's utterance, R121). |
 | `pair` | string or null | Ties the correct and error clips of a pair together, e.g. `gate-01`. Null when the clip has no partner. |
 | `label` | one of `correct`, `tone_error`, `graded`, `n/a` | What was recorded relative to `intended`. `n/a` when no correct/error judgement applies. |
 | `intended` | candidate (required) | The reading the speaker was aiming for. |

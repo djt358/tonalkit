@@ -1,6 +1,6 @@
 # Decisions
 
-The choices that shaped tonekit's behaviour, data and build, numbered `R1` to `R120`. Code comments
+The choices that shaped tonekit's behaviour, data and build, numbered `R1` to `R125`. Code comments
 and tests cite them as "ruling R27" or just `R27`; this is where they are written down. Each entry
 says what was decided, why, and what it costs if it turns out wrong. The spec
 ([`docs/superpowers/specs/`](superpowers/specs/2026-09-28-tone-assessment-design.md)) says what
@@ -1032,6 +1032,102 @@ session's entries in `relabels.jsonl` and any relabel manifest a killed run left
 reminder names exported `relabels-*.json` files. On load, a review page drops the decisions the
 browser kept about sessions its corpus no longer has. **Why.** Contracts §6 reserved review pages
 for purge, and the log names clips. **Cost if wrong.** After any purge DJ runs `tkh review` again.
+
+## Public corpora (S0.5)
+
+### R121: A public corpus's sentences are their own clip set
+
+**Decision.** Manifest rows from public corpora (`tkh adapt`) have `set = "sentence"`: label
+`correct`, `produced_tones` equal to `intended.tones` (the transcript's spoken tones) and no pair
+(the model refuses anything else); the adapters write no distractors and no deck card. `sentence`
+is a manifest `ClipSet` value only: it is not a deck
+`CardSet`, so no gate file can select it (a gate's `select.sets` are deck sets) and
+`kit/schema` is unchanged. `tkh fit` reads sentences like any `correct` clip of a calib speaker.
+`tkh eval` over a manifest with no gate clips issues no S1 verdict ("No S1 verdict"), counts
+`diag_count` only by rank (there is no threshold), and reports a sentence diagnostic: the share
+of syllables tonekit heard as the transcript's tone, and the sentences with no score. A relabel
+of a sentence that heard other tones makes them its intended and produced tones (it stays one
+correct reading). **Why.** Public sentences are neither gate pairs nor diagnostic cards: they are
+fitting data with a known spoken reading, and the gate's verdict must never rest on them.
+**Cost if wrong.** A gate that should measure on public sentences needs a new set in the deck
+vocabulary and a gate rule for unpaired clips.
+
+### R122: Public transcripts are read with the sandhi checker, and what they don't settle is dropped
+
+**Decision.** `tkh adapt` reads each utterance's transcript (one hanzi and one numbered pinyin
+syllable each) into the tones the speaker produced, with C0's sandhi checker (`context =
+phrase`), on the transcript's own evidence. Surface markers are 一 written yí or yì and 不 written
+bú; citation markers are tones the checker would change (3-3, 一 as yī or 不 as bù where sandhi
+applies). Both in one transcript: dropped. No citation marker: the transcript is the spoken
+reading, kept only if it is a checker reading of some citation it could be written from (一 and
+不 restored, each 2 in a run of 2s before a 3 either a 2 or a sandhi'd 3) and none of those has
+more than one native reading (R89: 2-2-3 and 3-2-3 could be 展览馆). Citation markers only: a
+per-recording transcript (AISHELL-3) is dropped, since 3-3 there means no sandhi was heard or a
+dictionary tone slipped in; a script transcript (THCHS-30) goes through the checker when it has
+one native reading, its third-tone sandhi is inside a word (THCHS-30's first line gives the
+words) and no 一 keeps its dictionary tone where sandhi applies (dates, numbers and ordinals keep
+yī; the checker cannot tell them). Always dropped: erhua (儿 er5, an r-final syllable, `r5`), 一
+or 不 before a neutral syllable, a 2 or 3 before its own reduplication in the neutral tone (想想,
+姐姐), tokens that are not hanzi or pinyin syllables, syllables without a tone digit, lines that
+do not line up (THCHS-30's phone line must agree on the tones). `tkh adapt` prints the count per
+reason with example utterance ids. **Why.** A wrong produced tone in fitting data silently
+poisons the templates, and the data is plentiful (AISHELL-3 has 88,035 utterances), so ambiguity
+costs only rows. AISHELL-3's paper says its pinyin was transcribed per recording, reflecting the
+actual readings; THCHS-30's pinyin is one transcript per sentence of the script (identical for
+every speaker of its 1000 sentences), mixing dictionary and sandhi tones. **Cost if wrong.**
+Rows lost: every 3-2-3 is dropped, true ones (我没有) too, and on THCHS-30's pinyin about three
+quarters of the transcripts fall to one rule or another. Words whose neutral syllable is
+lexically a third tone (哪里 nǎli or náli, 小姐) cannot be told from the text and stay a residual
+risk, and THCHS-30's tones are the script's, never checked against each speaker.
+
+### R123: `tkh adapt --max-syllables` defaults to 32
+
+**Decision.** `tkh adapt` drops utterances of more than 32 syllables unless `--max-syllables`
+says otherwise. **Why.** The length probe (`harness/scripts/length_probe.py` on
+tonekit-testkit's fluent phrases of 4 to 48 syllables: four voices, six phrases per length and
+voice, each level and with one Chao step of declination) found no length at which `tkh eval` or
+`tkh fit`'s forced decode breaks down. Per syllable nothing changes with length: the forced
+decode puts 96–100% of syllables on their true span and measures 95–100% as a shape at every
+length, and `tkh eval` hears 94–100% of level phrases' syllables as spoken. Time grows with the
+clip (the analysis, about 37 ms per syllable here; assessing and the forced decode take a few
+ms). What falls is the share of clips with every syllable measured (scored by `tkh eval`, and
+"clean" for the template fit), as a miss rate of about 0.4% per syllable compounds: 96% of level
+phrases at 12 and 16 syllables, 92% at 24, 88% at 32, 83% at 48 (75% and 62% with declination
+at 32 and 48). 32 keeps the length at which at most about one level clip in eight loses a
+syllable, AISHELL-3's sentences (they average 3.5 s: 85 hours over 88,035 utterances, about 15
+syllables) and about half of THCHS-30's (20 to 47 syllables). **Cost if wrong.** Synthetic phrases are easier than read sentences (no pauses, no
+reset of the register within a sentence); a real-speech length effect would show as unscored or
+misaligned long clips, and `--max-syllables` lowers the cap. Declination, not length, is what
+cost tonekit's hearing in the probe (74–84% of syllables heard as spoken at every length with one
+Chao of drift): the register pooled per speaker does not follow a sentence's drift.
+
+### R124: Public speakers keep their ids, a hashed split and only documented metadata
+
+**Decision.** Adapted speakers keep the corpus's ids (AISHELL-3 `SSB0005`, THCHS-30 `A11`) and
+are split by hash (R69, R82); the corpus's own train/test split is not used. `background` and
+`grew_up_hearing` are set only where the corpus documents them: AISHELL-3's speakers are
+`native` (its paper: 218 native Mandarin speakers), and those whose `spk-info.txt` accent is
+north or south grew up hearing it on the `mainland`; THCHS-30's (college students fluent in
+standard Mandarin) have neither. No accent is stored, so graders use R82's default
+(`cmn-standard`). Utterance and speaker ids that are not plain file names are dropped as
+malformed. **Why.** Hashed splits keep held-out speakers out of every fit for good, and documented
+metadata feeds the reports' per-background views without guessing. **Cost if wrong.** An
+AISHELL-3 speaker with a strong regional accent is graded against `cmn-standard`, as every
+mainland volunteer is.
+
+### R125: No Common Voice adapter yet
+
+**Decision.** `tkh adapt` reads AISHELL-3 and THCHS-30 only. A Common Voice (zh-CN) reader needs
+a g2p for its text (pypinyin, MIT, already in the register as authoring code), a lower-trust mark
+on its rows that `tkh fit` honours (a manifest field, or fit skipping `needs_listen` rows: a
+contract change), and an MP3 decoder (a new dependency, or `afconvert`/`ffmpeg`), and the
+register's own Common Voice row says its targets are auto-generated and then sampled by DJ.
+**Why.** Every produced tone of a Common Voice row would be a g2p guess at polyphones and optional
+neutral tones, with no transcript to check it against, while AISHELL-3 alone gives about 218
+speakers with tones transcribed per recording, far more than the five or more calibration
+speakers the template fit was waiting for. **Cost if wrong.** zh-TW and zh-HK speakers (Common
+Voice is the register's only source of them) wait; adding the reader later is one more corpus
+module plus the trust mark.
 
 ## Process
 

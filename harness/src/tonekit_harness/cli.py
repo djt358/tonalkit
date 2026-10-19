@@ -18,6 +18,7 @@ import sys
 from collections.abc import Callable
 
 from . import bakeoff, deck_cli, evaluate, ingest, provenance, schema
+from .adapt import cli as adapt_cli
 from .data_option import add_data_option
 from .fit import cli as fit_cli
 from .intake import cli as intake_cli
@@ -28,6 +29,7 @@ from .review import cli as review_cli
 
 MODULES = [
     ingest, provenance, evaluate, bakeoff, schema, deck_cli, intake_cli, purge_cli, fit_cli, review_cli, relabel_cli,
+    adapt_cli,
     corpora_cmd,
 ]  # fmt: skip
 OPTIONAL_MODULES = ["synth", "adversary"]  # tonekit_harness.<name>; both need pyworld

@@ -17,7 +17,6 @@ import json
 import struct
 import sys
 import tomllib
-import warnings
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from functools import cache
@@ -44,7 +43,7 @@ from .contracts.pack import PackError
 from .contracts.registry import RegistryError
 from .data_option import add_data_option
 from .eval_input import NoClipsError, eval_input
-from .ingest import TARGET_SR, to_float32
+from .ingest import TARGET_SR, strict_wav_warnings, to_float32
 from .manifest import Clip, ManifestError, to_candidate_json
 from .register_json import register_json as canonical_register
 from .registry import SelectionError
@@ -137,15 +136,7 @@ def read_wav(path: Path, name: str) -> tuple[bytes, np.ndarray]:
     except OSError as e:
         raise EvalError(f"{name}: cannot read {path}: {e.strerror or e}") from e
     try:
-        with warnings.catch_warnings():
-            # scipy only warns about a file cut short ("Reached EOF prematurely") and returns
-            # fewer samples: that is an error here. Only a skipped unknown chunk is harmless.
-            warnings.simplefilter("error", wavfile.WavFileWarning)
-            warnings.filterwarnings(
-                "ignore",
-                message=r"Chunk \(non-data\) not understood",
-                category=wavfile.WavFileWarning,
-            )
+        with strict_wav_warnings():
             rate, samples = wavfile.read(io.BytesIO(data))
     except (ValueError, struct.error, wavfile.WavFileWarning) as e:
         raise EvalError(f"{name}: {path} is not a readable WAV file: {e}") from e
@@ -227,7 +218,7 @@ def _measured_issues(measured: str | dict) -> list[str]:
     one issue, none for `Full`."""
     if isinstance(measured, str):
         return []
-    (kind, body), = measured.items()
+    ((kind, body),) = measured.items()
     return list(body.get("issues", [])) if kind == "Partial" else [body["issue"]]
 
 
@@ -380,9 +371,7 @@ def clip_registers(
     if register_from in ROLLING:
         return rolling_register.rolling_registers(clips, grader, lite=register_from == "rolling-lite")
     if register_from == "speaker":
-        registers = speaker_register.leave_one_out_registers(
-            clips, lambda c: json.loads(grader.analysis(c, None))
-        )
+        registers = speaker_register.leave_one_out_registers(clips, lambda c: json.loads(grader.analysis(c, None)))
         return registers, {}
     registers, by_id = _chain_registers(clips, grader)
     return {c.id: registers[c.speaker] for c in clips}, by_id
@@ -454,6 +443,13 @@ def register_context(register_from: str, pack_toml: str, calib_json: str | None)
     return f"{REGISTER_HELP[register_from]}: {half_life}, {cap}"
 
 
+def sentence_note(sentences: metrics.SentenceAccuracy | None) -> str:
+    """`, sentence tone accuracy 0.812 (n heard syllables)` for the summary line, or nothing."""
+    if sentences is None or sentences.accuracy is None:
+        return ""
+    return f", sentence tone accuracy {sentences.accuracy:.3f} ({sentences.heard} heard syllables)"
+
+
 def _run(args: argparse.Namespace) -> int:
     try:
         data_register = clearance.read_register(args.register)
@@ -470,8 +466,10 @@ def _run(args: argparse.Namespace) -> int:
             register_from=args.register_from,
             accents=given.accents,
         )
-        gate = metrics.loo_gate(results)
-        theta = gate.median_threshold
+        # No gate clips (a public corpus's sentences, R121): no pairs, so no verdict and no θ.
+        gate = metrics.loo_gate(results) if metrics.has_gate_clips(results) else None
+        theta = None if gate is None else gate.median_threshold
+        sentences = metrics.sentence_accuracy(results)
         report.write(
             args.report,
             gate,
@@ -482,6 +480,7 @@ def _run(args: argparse.Namespace) -> int:
             n_minimal=given.sets.get("diag_minimal", 0),
             n_count=given.sets.get("diag_count", 0),
             results=results,
+            sentences=sentences,
             context={
                 **given.context,
                 "data register": str(args.register or clearance.default_register()),
@@ -510,6 +509,11 @@ def _run(args: argparse.Namespace) -> int:
     ) as e:
         print(f"error: {e}", file=sys.stderr)
         return 1
+    if gate is None:
+        print(f"S1: no verdict (no gate clips){sentence_note(sentences)}; report written to {args.report}")
+        if args.results:
+            print(f"per-clip results written to {args.results}")
+        return 0
     numbers = f"CA {gate.ca:.3f}, WA {gate.wa:.3f}"
     if cleared.verdict:
         verdict = "PASS" if gate.passed else "FAIL"

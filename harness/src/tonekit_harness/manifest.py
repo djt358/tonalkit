@@ -11,11 +11,13 @@ from pydantic import Field, ValidationError, model_validator
 
 from .contracts.base import StrictModel
 
-# The deck's vocabulary (contracts.md section 1); a clip may also be synthetic, or `graded`.
+# The deck's vocabulary (contracts.md section 1); a clip may also be synthetic, a public corpus's
+# sentence (R121), or `graded`.
 CardSet = Literal["gate", "diag_t23", "diag_count", "diag_minimal", "diag_context", "quiet", "register"]
 CardLabel = Literal["correct", "tone_error", "n/a"]
 Context = Literal["phrase", "isolated"]  # phrase: sandhi applies; isolated: the citation reading
-ClipSet = Literal[*get_args(CardSet), "synthetic"]
+SENTENCE = "sentence"
+ClipSet = Literal[*get_args(CardSet), "synthetic", "sentence"]
 ClipLabel = Literal[*get_args(CardLabel), "graded"]
 
 
@@ -72,6 +74,24 @@ class Clip(StrictModel):
                 f"clip {self.id!r} has a `synthetic` field but is in set {self.set!r}; "
                 "synthetic clips belong in set 'synthetic'"
             )
+        return self
+
+    @model_validator(mode="after")
+    def _a_sentence_is_one_correct_reading(self) -> Clip:
+        """A public corpus's sentence (R121) is what its transcript says was spoken: label
+        `correct`, `produced_tones` equal to the intended reading, and no pair. It is not a deck
+        card, and no gate selects it (a gate selects deck sets only)."""
+        if self.set != SENTENCE:
+            return self
+        if self.label != "correct":
+            raise ValueError(f"clip {self.id!r} is a sentence but has label {self.label!r}; a sentence is 'correct'")
+        if self.produced_tones != self.intended.tones:
+            raise ValueError(
+                f"clip {self.id!r} is a sentence, so its produced_tones must equal its intended tones "
+                f"({self.produced_tones} != {self.intended.tones})"
+            )
+        if self.pair is not None:
+            raise ValueError(f"clip {self.id!r} is a sentence but has pair {self.pair!r}; sentences are not paired")
         return self
 
 
