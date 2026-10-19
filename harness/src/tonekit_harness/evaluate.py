@@ -14,11 +14,11 @@ import argparse
 import hashlib
 import io
 import json
-import os
 import struct
 import sys
 import tomllib
 import warnings
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from functools import cache
 from importlib import metadata
@@ -32,7 +32,6 @@ from . import (
     calibration,
     clearance,
     eval_results,
-    manifest,
     metrics,
     pitch_tracks,
     provenance,
@@ -40,9 +39,16 @@ from . import (
     rolling_register,
     speaker_register,
 )
+from .atomic import write_text_atomic
+from .contracts.pack import PackError
+from .contracts.registry import RegistryError
+from .data_option import add_data_option
+from .eval_input import NoClipsError, eval_input
 from .ingest import TARGET_SR, to_float32
 from .manifest import Clip, ManifestError, to_candidate_json
 from .register_json import register_json as canonical_register
+from .registry import SelectionError
+from .registry.selectors import add_select_option
 from .session_order import SessionOrderError
 
 # harness/.cache/analysis, next to src/ (the directory is gitignored)
@@ -194,10 +200,7 @@ def _read_cached(path: Path) -> str | None:
 
 
 def _write_cached(path: Path, text: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
-    tmp.write_text(text, encoding="utf-8")
-    os.replace(tmp, path)  # atomic: a reader never sees a half-written entry
+    write_text_atomic(path, text)  # a reader never sees a half-written entry
 
 
 # ---- grading ----------------------------------------------------------------------------------
@@ -251,6 +254,12 @@ class Grader:
     root: Path
     cache_dir: Path | None  # None: no cache
     f0: str | None = None  # a name in `pitch_tracks.EXTERNAL_PROVIDERS`; None: tonekit's own pYIN
+    # Per speaker (`Clip.speaker`): the accent their clips are graded against (R82); `accent` for
+    # a speaker not in it.
+    accents: Mapping[str, str] | None = None
+
+    def accent_of(self, clip: Clip) -> str:
+        return (self.accents or {}).get(clip.speaker, self.accent)
 
     def analysis(
         self,
@@ -282,7 +291,7 @@ class Grader:
 
     def assess(self, clip: Clip, analysis_json: str) -> tuple[Result, dict]:
         request = {
-            "grading": grading_target(self.accent),
+            "grading": grading_target(self.accent_of(clip)),
             "intended": json.loads(to_candidate_json(clip.intended)),
             "distractors": [json.loads(to_candidate_json(d)) for d in clip.distractors],
             "external": [],
@@ -390,10 +399,12 @@ def run(
     use_cache: bool = True,
     f0: str | None = None,
     register_from: str = "drill",
+    accents: Mapping[str, str] | None = None,
 ) -> list[Result]:
     """Grade `clips`, returning one `Result` per clip in the same order.
 
-    `accent` defaults to the pack's `base_accent`. Each clip's `path` is relative to `root`.
+    `accent` defaults to the pack's `base_accent`; `accents` (speaker id to accent, R82) overrides
+    it for the speakers it names. Each clip's `path` is relative to `root`.
     Analyses are cached under `cache_dir` (default `DEFAULT_CACHE_DIR`) unless `use_cache` is
     false. `f0` names the pitch provider whose track tonekit analyses (one of
     `pitch_tracks.EXTERNAL_PROVIDERS`); None is tonekit's own pYIN. `register_from` says where a
@@ -419,6 +430,7 @@ def run(
         root=Path(root),
         cache_dir=Path(cache_dir or DEFAULT_CACHE_DIR) if use_cache else None,
         f0=f0,
+        accents=accents,
     )
 
     registers, by_id = clip_registers(clips, grader, register_from)
@@ -443,29 +455,23 @@ def register_context(register_from: str, pack_toml: str, calib_json: str | None)
 
 
 def _run(args: argparse.Namespace) -> int:
-    manifest_path = Path(args.manifest)
     try:
         data_register = clearance.read_register(args.register)
-        clips = manifest.load(manifest_path, register=data_register)
-        if args.speaker:
-            clips = [c for c in clips if c.speaker in args.speaker]
-            if not clips:
-                raise EvalError(f"no clips for speaker(s) {', '.join(args.speaker)}")
-        cleared = clearance.assess(clips, data_register, allow_synthetic=args.allow_synthetic)
+        given = eval_input(args, data_register)
+        clips, cleared = given.clips, given.cleared
         files = calibration.load(args.pack, args.calib)
         results = run(
             clips,
             files.pack_toml,
             files.calib_json,
             args.accent,
-            root=manifest_path.parent,  # clip paths are relative to the manifest's directory
+            root=given.root,
             use_cache=not args.no_cache,
             register_from=args.register_from,
+            accents=given.accents,
         )
         gate = metrics.loo_gate(results)
         theta = gate.median_threshold
-        sets = list(dict.fromkeys(c.set for c in clips))
-        per_set = {name: sum(c.set == name for c in clips) for name in sets}
         report.write(
             args.report,
             gate,
@@ -473,16 +479,15 @@ def _run(args: argparse.Namespace) -> int:
             metrics.count_robustness(results, theta),
             metrics.failures(results, gate, theta),
             clearance=cleared,
-            n_minimal=per_set.get("diag_minimal", 0),
-            n_count=per_set.get("diag_count", 0),
+            n_minimal=given.sets.get("diag_minimal", 0),
+            n_count=given.sets.get("diag_count", 0),
             results=results,
             context={
-                "manifest": str(args.manifest),
+                **given.context,
                 "data register": str(args.register or clearance.default_register()),
                 **files.context(),
-                "accent": args.accent or "the pack's base accent",
                 "register": register_context(args.register_from, files.pack_toml, files.calib_json),
-                "clips": ", ".join(f"{name} {n}" for name, n in per_set.items()),
+                "clips": ", ".join(f"{name} {n}" for name, n in given.sets.items()),
                 "tonekit-py": tonekit_py_fingerprint(),
             },
         )
@@ -494,6 +499,10 @@ def _run(args: argparse.Namespace) -> int:
     except (
         ManifestError,
         EvalError,
+        NoClipsError,
+        SelectionError,
+        RegistryError,
+        PackError,
         metrics.MetricsError,
         provenance.ProvenanceError,
         SessionOrderError,
@@ -507,6 +516,8 @@ def _run(args: argparse.Namespace) -> int:
         print(f"S1: {verdict} ({numbers}); report written to {args.report}")
     else:  # not a verdict: the label says so, and the numbers are only numbers
         print(f"S1: {cleared.label}; {numbers}; report written to {args.report}")
+    if given.refusal is not None:
+        print("\n".join(["not a gate verdict, because:"] + [f"  {p}" for p in given.refusal.problems]))
     if args.results:
         print(f"per-clip results written to {args.results}")
     return 0
@@ -518,14 +529,21 @@ def register(subparsers) -> None:
         aliases=["evaluate"],
         help="grade the corpus, compute the leave-one-pair-out gate and write a report",
     )
-    p.add_argument("--manifest", required=True, help="corpus manifest (JSONL)")
+    clips = p.add_mutually_exclusive_group(required=True)
+    clips.add_argument("--manifest", help="corpus manifest (JSONL); clip paths are relative to its directory")
+    add_select_option(clips, "every split")
+    add_data_option(p)
     p.add_argument("--pack", required=True, help="language pack TOML (e.g. packs/cmn/cmn.toml)")
     p.add_argument(
         "--calib",
         help="calibration JSON (default: <pack stem>.calib.json beside the pack if it exists, "
         "as the tonekit CLI does, else tonekit's compiled-in default)",
     )
-    p.add_argument("--accent", help="accent to grade against (default: the pack's base accent)")
+    p.add_argument(
+        "--accent",
+        help="accent to grade every clip against (default: with --manifest the pack's base accent; with --select "
+        "each speaker's accent from its corpus.toml, else the default for where they grew up hearing the lect)",
+    )
     p.add_argument("--report", required=True, help="markdown report to write")
     p.add_argument(
         "--register",
@@ -558,6 +576,7 @@ def register(subparsers) -> None:
     p.add_argument(
         "--speaker",
         action="append",
-        help="grade only this speaker's clips (repeatable), e.g. to score a fit on the speakers it was not fitted on",
+        help="grade only this speaker's clips (repeatable; corpus/speaker with --select), e.g. to score a fit on "
+        "the speakers it was not fitted on",
     )
     p.set_defaults(func=_run)

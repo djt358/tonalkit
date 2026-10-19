@@ -10,6 +10,7 @@ from pathlib import Path
 
 from ..contracts.registry import corpus_dir, corpus_file_path
 from ..contracts.relpath import is_relative_inside
+from ..registry.layout import corpus_ids
 from . import layout
 from .errors import IntakeError
 from .manifest_lines import without_rows
@@ -111,5 +112,5 @@ def trace_corpus(root: Path, corpus_id: str, code: str) -> CorpusTrace | None:
 
 def find_session(root: Path, code: str) -> SessionTrace:
     """Every place under the data root that holds something of session `code`."""
-    corpora = [t for cid in layout.corpus_ids(root) if (t := trace_corpus(root, cid, code)) is not None]
+    corpora = [t for cid in corpus_ids(root) if (t := trace_corpus(root, cid, code)) is not None]
     return SessionTrace(code=code, corpora=tuple(corpora), staging=tuple(layout.staging_dirs(root, code)))

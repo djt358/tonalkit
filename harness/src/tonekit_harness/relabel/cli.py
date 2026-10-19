@@ -7,9 +7,10 @@ import sys
 from pathlib import Path
 
 from .. import clearance
+from ..contracts.registry import RegistryError
 from ..contracts.relabel import RelabelError, load_export
+from ..data_option import add_data_option, root_from
 from ..intake.errors import IntakeError
-from ..intake.options import add_data_option, root_from
 from ..intake.packs import pack_path
 from ..provenance import ProvenanceError
 from ..repo import repo_root
@@ -31,7 +32,7 @@ def _run(args: argparse.Namespace) -> int:
             register=clearance.read_register(None),
             source=path.name,
         )
-    except (RelabelError, IntakeError, ProvenanceError, OSError) as e:
+    except (RelabelError, IntakeError, RegistryError, ProvenanceError, OSError) as e:
         print(f"error: {e}", file=sys.stderr)
         return 1
     print("\n".join(outcome_lines(outcome, path.name, export.who, len(export.decisions))))
